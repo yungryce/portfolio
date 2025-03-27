@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, forkJoin, map, switchMap, catchError, of } from 'rxjs';
-import { FEATURED_PROJECTS } from '../projects/projects-config';
+import { FEATURED_PROJECTS, TechStack } from '../projects/projects-config';
 
 export interface Repository {
   name: string;
@@ -19,6 +19,7 @@ export interface Repository {
   customDescription?: string;
   screenshotUrl?: string;
   customTags?: string[];
+  stack?: TechStack[];
 }
 
 @Injectable({
@@ -77,7 +78,8 @@ export class GithubService {
             customTitle: project.customTitle,
             customDescription: project.customDescription || repo.description,
             screenshotUrl: project.screenshotUrl,
-            customTags: project.tags
+            customTags: project.tags,
+            stack: project.stack // Include the stack information
           })),
           catchError(error => {
             console.error(`Error fetching repo ${project.repoName}:`, error);

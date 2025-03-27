@@ -141,3 +141,34 @@
   border-radius: 0.25rem;
   font-size: 0.75rem;
 }
+
+.tech-stack {
+  margin-bottom: 1rem;
+}
+
+.tech-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tech-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: white;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.tech-badge:hover {
+  transform: translateY(-2px);
+  opacity: 0.9;
+}
+
+.tech-badge i {
+  font-size: 0.875rem;
+}

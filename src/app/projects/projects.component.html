@@ -21,6 +21,18 @@
       <!-- Use custom description if available -->
       <p class="mb-4">{{ repo.customDescription || repo.description }}</p>
       
+      <!-- Tech Stack Section -->
+      <div *ngIf="repo.stack && repo.stack.length" class="tech-stack mb-4">
+        <h3 class="text-sm font-semibold uppercase mb-2">Tech Stack</h3>
+        <div class="tech-badges">
+          <span *ngFor="let tech of repo.stack" 
+                class="tech-badge" 
+                [ngStyle]="{'background-color': tech.color || '#333'}">
+            <i *ngIf="tech.icon" [class]="tech.icon"></i> {{ tech.name }}
+          </span>
+        </div>
+      </div>
+      
       <div class="language-tags mb-4">
         <span *ngIf="repo.language" class="language-tag">{{ repo.language }}</span>
         <!-- Use both GitHub topics and custom tags -->
