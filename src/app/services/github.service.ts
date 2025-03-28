@@ -1,7 +1,8 @@
-import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, forkJoin, map, switchMap, catchError, of } from 'rxjs';
 import { FEATURED_PROJECTS, TechStack } from '../projects/projects-config';
+import { ConfigService } from './config.service';
 
 export interface Repository {
   name: string;
@@ -28,12 +29,16 @@ export interface Repository {
 export class GithubService {
   private username = 'yungryce'; // Replace with your GitHub username
   private apiUrl = 'https://api.github.com';
+  private configService = inject(ConfigService);
 
   // List of featured repositories
   private featuredRepos: string[] = [
-    'k8s pipeline',
-    'Azure Function Apps',
-    'AirBnB Clone'
+    'azure_vmss_cluster',
+    'python_function_apps',
+    'AirBnB_clone_v4',
+    'collabHub',
+    'simple_shell',
+    'printf',
   ];
 
   constructor(private http: HttpClient) { }
@@ -114,13 +119,21 @@ export class GithubService {
    * Get README content for a specific repository
    */
   getReadme(repoName: string): Observable<string> {
+    // Get the token from the config service
+    const token = this.configService.githubToken;
+    
+    // Build the headers
+    const headers = new HttpHeaders({
+      'Accept': 'application/vnd.github.v3.raw',
+      ...(token ? { 'Authorization': `token ${token}` } : {})
+    });
+
     return this.http.get(
       `${this.apiUrl}/repos/${this.username}/${repoName}/readme`, 
-      { headers: { Accept: 'application/vnd.github.v3.raw' } }
+      { headers, responseType: 'text' }
     ).pipe(
-      map(response => response as string),
       catchError(error => {
-        console.log(`No README found for ${repoName}`);
+        console.error(`Error fetching README for ${repoName}:`, error);
         return of('No README available');
       })
     );
