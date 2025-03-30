@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, forkJoin, map, switchMap, catchError, of } from 'rxjs';
+import { Observable, forkJoin, map, switchMap, catchError, of, tap } from 'rxjs';
 import { FEATURED_PROJECTS, TechStack } from '../projects/projects-config';
 import { ConfigService } from './config.service';
 
@@ -47,54 +47,93 @@ export class GithubService {
    * Get repositories for the specified user
    */
   getRepositories(): Observable<Repository[]> {
-    return this.http.get<Repository[]>(`${this.apiUrl}/users/${this.username}/repos?sort=updated&per_page=10`)
-      .pipe(
-        // Filter out forked repositories if needed
-        map(repos => repos.filter(repo => !repo.fork)),
-        // Get README content for each repository
-        switchMap(repos => {
-          const repoObservables = repos.map(repo => 
-            this.getReadme(repo.name).pipe(
-              map(readme => ({
-                ...repo,
-                readme
-              }))
-            )
-          );
-          return forkJoin(repoObservables);
-        })
-      );
+    // Get the token and log it
+    const token = this.configService.githubToken;
+    console.log(`Token for repositories list request:`, token ? `${token.substring(0, 4)}...` : 'No token');
+    
+    // Build the headers
+    const headers = new HttpHeaders({
+      'Accept': 'application/vnd.github.v3',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    });
+    
+    console.log(`Request headers for repositories list:`, headers.keys());
+
+    return this.http.get<Repository[]>(
+      `${this.apiUrl}/users/${this.username}/repos?sort=updated&per_page=10`,
+      { headers }
+    ).pipe(
+      map(repos => repos.filter(repo => !repo.fork)),
+      switchMap(repos => {
+        const repoObservables = repos.map(repo => 
+          this.getReadme(repo.name).pipe(
+            map(readme => ({
+              ...repo,
+              readme
+            }))
+          )
+        );
+        return forkJoin(repoObservables);
+      })
+    );
   }
 
   /**
    * Get featured repositories from config
    */
   getFeaturedRepositories(): Observable<Repository[]> {
+    // Log the token availability at the beginning of the method
+    const token = this.configService.githubToken;
+    console.log('Token available in getFeaturedRepositories:', token ? `${token.substring(0, 4)}...` : 'No token');
+    
     // Get repository details for each featured repo
     const repoObservables = FEATURED_PROJECTS
       .filter(project => project.featured)
       .sort((a, b) => (a.order || 99) - (b.order || 99))
-      .map(project => 
-        this.getRepository(project.repoName).pipe(
+      .map(project => {
+        console.log(`Fetching featured repo: ${project.repoName}`);
+        return this.getRepository(project.repoName).pipe(
           // Add custom showcase information
-          map(repo => ({
-            ...repo,
-            featured: true,
-            customTitle: project.customTitle,
-            customDescription: project.customDescription || repo.description,
-            screenshotUrl: project.screenshotUrl,
-            customTags: project.tags,
-            stack: project.stack // Include the stack information
-          })),
+          map(repo => {
+            console.log(`Successfully fetched repo data for: ${project.repoName}`);
+            return {
+              ...repo,
+              featured: true,
+              customTitle: project.customTitle,
+              customDescription: project.customDescription || repo.description,
+              screenshotUrl: project.screenshotUrl,
+              customTags: project.tags,
+              stack: project.stack // Include the stack information
+            };
+          }),
           catchError(error => {
             console.error(`Error fetching repo ${project.repoName}:`, error);
+            console.log(`Error status code: ${error.status}`);
+            console.log(`Error message: ${error.message}`);
+            if (error.error && error.error.message) {
+              console.log(`GitHub API error message: ${error.error.message}`);
+            }
+            // Check rate limit via headers if available
+            if (error.headers) {
+              const rateLimit = error.headers.get('x-ratelimit-limit');
+              const rateRemaining = error.headers.get('x-ratelimit-remaining');
+              const rateReset = error.headers.get('x-ratelimit-reset');
+              
+              if (rateLimit) {
+                console.log(`Rate limit info - Limit: ${rateLimit}, Remaining: ${rateRemaining}, Reset: ${new Date(rateReset * 1000)}`);
+              }
+            }
             return of(null);
           })
-        )
-      );
+        );
+      });
     
     return forkJoin(repoObservables).pipe(
-      map(repos => repos.filter(Boolean) as Repository[])
+      map(repos => {
+        const filteredRepos = repos.filter(Boolean) as Repository[];
+        console.log(`Successfully fetched ${filteredRepos.length} featured repositories out of ${FEATURED_PROJECTS.length}`);
+        return filteredRepos;
+      })
     );
   }
 
@@ -102,8 +141,21 @@ export class GithubService {
    * Get a specific repository by name
    */
   getRepository(repoName: string): Observable<Repository> {
-    return this.http.get<Repository>(`${this.apiUrl}/repos/${this.username}/${repoName}`)
+    // Get the token and log it
+    const token = this.configService.githubToken;
+    console.log(`Token for repo ${repoName} request:`, token ? `${token.substring(0, 4)}...` : 'No token');
+    
+    // Build the headers
+    const headers = new HttpHeaders({
+      'Accept': 'application/vnd.github.v3',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    });
+    
+    console.log(`Request headers for ${repoName}:`, headers.keys());
+    
+    return this.http.get<Repository>(`${this.apiUrl}/repos/${this.username}/${repoName}`, { headers })
       .pipe(
+        tap(() => console.log(`Successfully fetched repo data for: ${repoName}`)),
         switchMap(repo => 
           this.getReadme(repo.name).pipe(
             map(readme => ({
@@ -111,7 +163,15 @@ export class GithubService {
               readme
             }))
           )
-        )
+        ),
+        catchError(error => {
+          console.error(`Error in getRepository for ${repoName}:`, error);
+          console.log(`Status code: ${error.status}, Message: ${error.message}`);
+          if (error.error && error.error.message) {
+            console.log(`GitHub API error message: ${error.error.message}`);
+          }
+          throw error; // Re-throw so the outer catchError can handle it
+        })
       );
   }
 
@@ -122,18 +182,29 @@ export class GithubService {
     // Get the token from the config service
     const token = this.configService.githubToken;
     
+    // Debug log to check if token exists
+    console.log(`Token for ${repoName} README request:`, token ? `${token.substring(0, 4)}...` : 'No token');
+    
     // Build the headers
     const headers = new HttpHeaders({
       'Accept': 'application/vnd.github.v3.raw',
-      ...(token ? { 'Authorization': `token ${token}` } : {})
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
     });
+
+    // Debug log to check headers
+    console.log(`Request headers for ${repoName} README:`, headers.keys());
 
     return this.http.get(
       `${this.apiUrl}/repos/${this.username}/${repoName}/readme`, 
       { headers, responseType: 'text' }
     ).pipe(
+      tap(() => console.log(`Successfully fetched README for: ${repoName}`)),
       catchError(error => {
         console.error(`Error fetching README for ${repoName}:`, error);
+        console.log(`Status code: ${error.status}, Message: ${error.message}`);
+        if (error.error && error.error.message) {
+          console.log(`GitHub API error message: ${error.error.message}`);
+        }
         return of('No README available');
       })
     );

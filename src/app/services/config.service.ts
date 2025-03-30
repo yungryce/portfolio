@@ -14,18 +14,32 @@ export class ConfigService {
 
   // Call this in your app initialization
   loadConfig(): Observable<boolean> {
-    // If environment already has a token (for non-production environments), use it
+    // First try to load from environment variables
     if (environment.githubToken) {
       this.config.githubToken = environment.githubToken;
-      console.log('Using token from environment:', this.config.githubToken ? 'Token exists (masked)' : 'No token');
-      return of(true);
+      const maskedToken = this.getMaskedToken();
+      console.log(`Using token from environment: ${maskedToken}`);
+      
+      // Still load from config.json as a fallback or for other configuration
+      return this.loadFromConfigJson().pipe(
+        map(() => true)
+      );
+    } else {
+      console.log('No token in environment, loading from config.json');
+      return this.loadFromConfigJson();
     }
-    
-    // Otherwise load from assets/config.json (created by build-config.js)
+  }
+
+  private loadFromConfigJson(): Observable<boolean> {
     return this.http.get<any>('./assets/config.json').pipe(
       tap(config => {
-        this.config = config;
-        console.log('Loaded token from config.json:', config.githubToken ? 'Token exists (masked)' : 'No token');
+        // If we already have a token from environment, don't override it
+        if (!this.config.githubToken && config.githubToken) {
+          this.config.githubToken = config.githubToken;
+        }
+        
+        const maskedToken = this.getMaskedToken();
+        console.log(`Config from config.json, token: ${maskedToken}`);
       }),
       map(() => true),
       catchError(err => {
@@ -37,5 +51,12 @@ export class ConfigService {
 
   get githubToken(): string {
     return this.config.githubToken || '';
+  }
+  
+  private getMaskedToken(): string {
+    const token = this.config.githubToken || '';
+    if (!token) return 'No token';
+    if (token.length <= 8) return '********';
+    return `${token.substring(0, 4)}...${token.substring(token.length - 4)}`;
   }
 }
