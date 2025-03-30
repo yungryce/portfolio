@@ -3,6 +3,7 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { MarkdownModule } from 'ngx-markdown';
 import { ConfigService } from './services/config.service';
+import { firstValueFrom } from 'rxjs';
 
 import { routes } from './app.routes';
 
@@ -16,7 +17,7 @@ export const appConfig: ApplicationConfig = {
     ),
     provideAppInitializer(() => {
       const configService = inject(ConfigService);
-      return configService.load();
+      return firstValueFrom(configService.loadConfig());
     })
   ]
 };
