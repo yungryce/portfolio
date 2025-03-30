@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of, throwError } from 'rxjs';
-import { catchError, map, tap } from 'rxjs/operators';
+import { Observable, of } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 
 @Injectable({
@@ -14,39 +14,18 @@ export class ConfigService {
 
   // Call this in your app initialization
   loadConfig(): Observable<boolean> {
-    // First try to load from environment variables
-    if (environment.githubToken) {
-      this.config.githubToken = environment.githubToken;
-      const maskedToken = this.getMaskedToken();
+    // Set token from environment variables
+    this.config.githubToken = environment.githubToken || '';
+    
+    const maskedToken = this.getMaskedToken();
+    if (this.config.githubToken) {
       console.log(`Using token from environment: ${maskedToken}`);
-      
-      // Still load from config.json as a fallback or for other configuration
-      return this.loadFromConfigJson().pipe(
-        map(() => true)
-      );
+      return of(true);
     } else {
-      console.log('No token in environment, loading from config.json');
-      return this.loadFromConfigJson();
+      console.warn('No GitHub token found in environment');
+      // Return success anyway as we might not need the token for some operations
+      return of(true);
     }
-  }
-
-  private loadFromConfigJson(): Observable<boolean> {
-    return this.http.get<any>('./assets/config.json').pipe(
-      tap(config => {
-        // If we already have a token from environment, don't override it
-        if (!this.config.githubToken && config.githubToken) {
-          this.config.githubToken = config.githubToken;
-        }
-        
-        const maskedToken = this.getMaskedToken();
-        console.log(`Config from config.json, token: ${maskedToken}`);
-      }),
-      map(() => true),
-      catchError(err => {
-        console.error('Could not load configuration', err);
-        return of(false);
-      })
-    );
   }
 
   get githubToken(): string {

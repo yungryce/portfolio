@@ -49,7 +49,6 @@ export class GithubService {
   getRepositories(): Observable<Repository[]> {
     // Get the token and log it
     const token = this.configService.githubToken;
-    console.log(`Token for repositories list request:`, token ? `${token.substring(0, 4)}...` : 'No token');
     
     // Build the headers
     const headers = new HttpHeaders({
@@ -57,7 +56,6 @@ export class GithubService {
       ...(token ? { 'Authorization': `Bearer ${token}` } : {})
     });
     
-    console.log(`Request headers for repositories list:`, headers.keys());
 
     return this.http.get<Repository[]>(
       `${this.apiUrl}/users/${this.username}/repos?sort=updated&per_page=10`,
@@ -84,18 +82,15 @@ export class GithubService {
   getFeaturedRepositories(): Observable<Repository[]> {
     // Log the token availability at the beginning of the method
     const token = this.configService.githubToken;
-    console.log('Token available in getFeaturedRepositories:', token ? `${token.substring(0, 4)}...` : 'No token');
     
     // Get repository details for each featured repo
     const repoObservables = FEATURED_PROJECTS
       .filter(project => project.featured)
       .sort((a, b) => (a.order || 99) - (b.order || 99))
       .map(project => {
-        console.log(`Fetching featured repo: ${project.repoName}`);
         return this.getRepository(project.repoName).pipe(
           // Add custom showcase information
           map(repo => {
-            console.log(`Successfully fetched repo data for: ${project.repoName}`);
             return {
               ...repo,
               featured: true,
@@ -131,7 +126,6 @@ export class GithubService {
     return forkJoin(repoObservables).pipe(
       map(repos => {
         const filteredRepos = repos.filter(Boolean) as Repository[];
-        console.log(`Successfully fetched ${filteredRepos.length} featured repositories out of ${FEATURED_PROJECTS.length}`);
         return filteredRepos;
       })
     );
@@ -143,7 +137,6 @@ export class GithubService {
   getRepository(repoName: string): Observable<Repository> {
     // Get the token and log it
     const token = this.configService.githubToken;
-    console.log(`Token for repo ${repoName} request:`, token ? `${token.substring(0, 4)}...` : 'No token');
     
     // Build the headers
     const headers = new HttpHeaders({
@@ -151,11 +144,9 @@ export class GithubService {
       ...(token ? { 'Authorization': `Bearer ${token}` } : {})
     });
     
-    console.log(`Request headers for ${repoName}:`, headers.keys());
     
     return this.http.get<Repository>(`${this.apiUrl}/repos/${this.username}/${repoName}`, { headers })
       .pipe(
-        tap(() => console.log(`Successfully fetched repo data for: ${repoName}`)),
         switchMap(repo => 
           this.getReadme(repo.name).pipe(
             map(readme => ({
@@ -183,7 +174,6 @@ export class GithubService {
     const token = this.configService.githubToken;
     
     // Debug log to check if token exists
-    console.log(`Token for ${repoName} README request:`, token ? `${token.substring(0, 4)}...` : 'No token');
     
     // Build the headers
     const headers = new HttpHeaders({
@@ -192,13 +182,11 @@ export class GithubService {
     });
 
     // Debug log to check headers
-    console.log(`Request headers for ${repoName} README:`, headers.keys());
 
     return this.http.get(
       `${this.apiUrl}/repos/${this.username}/${repoName}/readme`, 
       { headers, responseType: 'text' }
     ).pipe(
-      tap(() => console.log(`Successfully fetched README for: ${repoName}`)),
       catchError(error => {
         console.error(`Error fetching README for ${repoName}:`, error);
         console.log(`Status code: ${error.status}, Message: ${error.message}`);
