@@ -7,7 +7,7 @@
     "watch": "ng build --watch --configuration development",
     "build": "ng build && node build-config.js",
     "test": "ng test",
-    "build:prod": "node build-env.js && ng build --configuration production"
+    "build:prod": "node build-config.js && ng build --configuration production"
   },
   "private": true,
   "dependencies": {
