@@ -74,6 +74,20 @@
   color: var(--color-github-light);
 }
 
+.about-link {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+  background-color: #f3f4f6;
+  color: #111827;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.about-link:hover {
+  background-color: #e5e7eb;
+}
+
 .readme-preview {
   margin-top: 1.5rem;
   padding-top: 1.5rem;

@@ -1,13 +1,13 @@
 export interface ProjectConfig {
   repoName: string;
+  featured: boolean;
   customTitle?: string;
   customDescription?: string;
   screenshotUrl?: string;
   demoUrl?: string;
-  featured: boolean;
-  order?: number;
   tags?: string[];
   stack: TechStack[];
+  order?: number;
 }
 
 // Tech stack interface
@@ -23,7 +23,7 @@ export const FEATURED_PROJECTS: ProjectConfig[] = [
     customTitle: 'Kubernetes CI/CD Pipeline', // Optional override
     customDescription: 'A robust CI/CD pipeline for Kubernetes deployments with automated testing and monitoring.', // Optional override
     // demoUrl: 'https://example.com/demo', // Optional demo URL,
-    screenshotUrl: 'assets/images/projects/project1-screenshot.png',
+    screenshotUrl: 'https://i.imgur.com/Pu28iPG.png',
     featured: true,
     order: 1,
     tags: ['DevOps', 'Kubernetes', 'CI/CD'],

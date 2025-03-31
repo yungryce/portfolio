@@ -45,13 +45,9 @@
       </div>
       
       <div class="project-links mb-4">
-        <a [href]="repo.html_url" target="_blank" class="github-link">GitHub</a>
-        <a *ngIf="repo.homepage" [href]="repo.homepage" target="_blank" class="demo-link">Live Demo</a>
-      </div>
-      
-      <div class="readme-preview">
-        <h3 class="text-lg font-semibold mb-2">README</h3>
-        <markdown [data]="repo.readme"></markdown>
+        <a [href]="repo.html_url" target="_blank" class="github-link mr-2">GitHub</a>
+        <a *ngIf="repo.homepage" [href]="repo.homepage" target="_blank" class="demo-link mr-2">Live Demo</a>
+        <a [routerLink]="['/projects', repo.name, 'about']" class="about-link">View README</a>
       </div>
     </div>
   </div>
