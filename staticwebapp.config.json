@@ -16,4 +16,5 @@
   "environmentVariables": {
     "GITHUB_TOKEN": "{{ GITHUB_TOKEN }}"
   }
+
 }
