@@ -1,0 +1,30 @@
+/* filepath: /home/azureuser/node/portfolio/src/app/projects/project-about/project-about.component.scss */
+.github-link, .demo-link {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.github-link {
+  background-color: #24292e;
+  color: white;
+}
+
+.github-link:hover {
+  background-color: #1b1f23;
+}
+
+.demo-link {
+  background-color: #4f46e5;
+  color: white;
+}
+
+.demo-link:hover {
+  background-color: #4338ca;
+}
+
+.readme-content {
+  line-height: 1.6;
+}
