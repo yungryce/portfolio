@@ -31,7 +31,7 @@ if (githubToken) {
   // Log available environment variables for debugging (without showing the values)
   console.log('Environment variables found:', Object.keys(process.env).filter(key => !key.includes('SECRET') && !key.includes('TOKEN')));
 } else {
-  console.warn('No GitHub token found in environment variables');
+  console.warn('No GitHub token found in prod environment variables');
   console.log('Available env vars:', Object.keys(process.env).filter(key => !key.includes('SECRET') && !key.includes('TOKEN')));
   
   // Try to directly read from .env file as a backup method
