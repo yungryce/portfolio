@@ -44,3 +44,5 @@ Thumbs.db
 
 # Secrets and sensitive data
 .env
+/src/environments/environment.development.ts
+/private

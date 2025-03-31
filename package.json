@@ -3,14 +3,11 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "predev": "node update-env.js --inject",
-    "dev": "ng serve",
-    "postdev": "node update-env.js --cleanup",
+    "start": "ng serve --configuration development",
     "watch": "ng build --watch --configuration development",
     "build": "ng build && node build-config.js",
-    "postbuild": "node update-env.js --cleanup",
     "test": "ng test",
-    "build:prod": "NODE_ENV=production ng build --configuration production && node build-config.js"
+    "build:prod": "node build-env.js && ng build --configuration production"
   },
   "private": true,
   "dependencies": {
