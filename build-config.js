@@ -61,6 +61,23 @@ fs.writeFileSync(configPath, JSON.stringify(config));
 
 console.log(`Config file generated at: ${configPath}`);
 
+// Update environment.ts with the token
+const envFilePath = path.join(__dirname, 'src', 'environments', 'environment.ts');
+
+// Read the current file
+let envContent = fs.readFileSync(envFilePath, 'utf8');
+
+// Replace the token placeholder
+envContent = envContent.replace(
+  /githubToken:\s*['"](.*?)['"]/,
+  `githubToken: '${githubToken}'`
+);
+
+// Write the updated content back
+fs.writeFileSync(envFilePath, envContent);
+
+console.log(`Updated environment file with token: ${githubToken ? 'Token found' : 'No token found'}`);
+
 
 
 
