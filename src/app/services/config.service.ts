@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of, throwError } from 'rxjs';
-import { catchError, map, tap } from 'rxjs/operators';
+import { Observable, of } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 
 @Injectable({
@@ -14,28 +14,28 @@ export class ConfigService {
 
   // Call this in your app initialization
   loadConfig(): Observable<boolean> {
-    // If environment already has a token (for non-production environments), use it
-    if (environment.githubToken) {
-      this.config.githubToken = environment.githubToken;
-      console.log('Using token from environment:', this.config.githubToken ? 'Token exists (masked)' : 'No token');
+    // Set token from environment variables
+    this.config.githubToken = environment.githubToken || '';
+    
+    const maskedToken = this.getMaskedToken();
+    if (this.config.githubToken) {
+      console.log(`Using token from environment: ${maskedToken}`);
+      return of(true);
+    } else {
+      console.warn('No GitHub token found in environment');
+      // Return success anyway as we might not need the token for some operations
       return of(true);
     }
-    
-    // Otherwise load from assets/config.json (created by build-config.js)
-    return this.http.get<any>('./assets/config.json').pipe(
-      tap(config => {
-        this.config = config;
-        console.log('Loaded token from config.json:', config.githubToken ? 'Token exists (masked)' : 'No token');
-      }),
-      map(() => true),
-      catchError(err => {
-        console.error('Could not load configuration', err);
-        return of(false);
-      })
-    );
   }
 
   get githubToken(): string {
     return this.config.githubToken || '';
+  }
+  
+  private getMaskedToken(): string {
+    const token = this.config.githubToken || '';
+    if (!token) return 'No token';
+    if (token.length <= 8) return '********';
+    return `${token.substring(0, 4)}...${token.substring(token.length - 4)}`;
   }
 }
