@@ -5,9 +5,9 @@
     "ng": "ng",
     "start": "ng serve --configuration development",
     "watch": "ng build --watch --configuration development",
-    "build": "ng build && node build-config.js",
+    "build": "node build-config.js && ng build",
     "test": "ng test",
-    "build:prod": "node build-config.js && ng build --configuration production"
+    "build:prod": "node build-config.js && ng build --configuration production && node post-build.js"
   },
   "private": true,
   "dependencies": {
