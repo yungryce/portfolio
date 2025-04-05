@@ -21,6 +21,7 @@
     "github-api": "^3.4.0",
     "marked": "^15.0.7",
     "ngx-markdown": "^19.1.1",
+    "@tailwindcss/postcss": "^4.0.17",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "zone.js": "~0.15.0"
@@ -31,9 +32,13 @@
     "@angular/compiler-cli": "^19.2.0",
     "@tailwindcss/postcss": "^4.0.17",
     "@types/jasmine": "~5.1.0",
+<<<<<<< HEAD
     "@types/node": "^22.13.14",
     "autoprefixer": "^10.4.21",
     "dotenv": "^16.4.7",
+=======
+    "autoprefixer": "^10.4.21",
+>>>>>>> 5934f36 (laaand)
     "jasmine-core": "~5.6.0",
     "karma": "~6.4.0",
     "karma-chrome-launcher": "~3.2.0",
@@ -53,7 +58,10 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+<<<<<<< HEAD
   "type": "commonjs",
+=======
+>>>>>>> 5934f36 (laaand)
   "bugs": {
     "url": "https://github.com/yungryce/portfolio/issues"
   },
