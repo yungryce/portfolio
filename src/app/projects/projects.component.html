@@ -1,0 +1,54 @@
+<div class="projects-container">
+  <h1 class="text-3xl font-bold mb-8">Featured Projects</h1>
+  
+  <div *ngIf="loading" class="loading-indicator">
+    <p>Loading projects...</p>
+  </div>
+  
+  <div *ngIf="error" class="error-message">
+    <p>Failed to load projects. Please try again later.</p>
+  </div>
+  
+  <div *ngIf="!loading && !error" class="projects-grid">
+    <div *ngFor="let repo of repositories" class="project-card">
+      <!-- Use custom title if available -->
+      <h2 class="text-xl font-bold mb-2">{{ repo.customTitle || repo.name }}</h2>
+      
+      <!-- Screenshot if available -->
+      <img *ngIf="repo.screenshotUrl" [src]="repo.screenshotUrl" 
+           [alt]="repo.customTitle || repo.name" class="project-screenshot mb-4">
+      
+      <!-- Use custom description if available -->
+      <p class="mb-4">{{ repo.customDescription || repo.description }}</p>
+      
+      <!-- Tech Stack Section -->
+      <div *ngIf="repo.stack && repo.stack.length" class="tech-stack mb-4">
+        <h3 class="text-sm font-semibold uppercase mb-2">Tech Stack</h3>
+        <div class="tech-badges">
+          <span *ngFor="let tech of repo.stack" 
+                class="tech-badge" 
+                [ngStyle]="{'background-color': tech.color || '#333'}">
+            <i *ngIf="tech.icon" [class]="tech.icon"></i> {{ tech.name }}
+          </span>
+        </div>
+      </div>
+      
+      <div class="language-tags mb-4">
+        <span *ngIf="repo.language" class="language-tag">{{ repo.language }}</span>
+        <!-- Use both GitHub topics and custom tags -->
+        <span *ngFor="let topic of repo.topics" class="topic-tag">{{ topic }}</span>
+        <span *ngFor="let tag of repo.customTags" class="custom-tag">{{ tag }}</span>
+      </div>
+      
+      <div class="project-stats mb-4">
+        <span class="stars">⭐ {{ repo.stargazers_count }}</span>
+      </div>
+      
+      <div class="project-links mb-4">
+        <a [href]="repo.html_url" target="_blank" class="github-link mr-2">GitHub</a>
+        <a *ngIf="repo.homepage" [href]="repo.homepage" target="_blank" class="demo-link mr-2">Live Demo</a>
+        <a [routerLink]="['/projects', repo.name, 'about']" class="about-link">View README</a>
+      </div>
+    </div>
+  </div>
+</div>

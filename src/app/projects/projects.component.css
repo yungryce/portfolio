@@ -1,0 +1,188 @@
+.projects-container {
+  padding: 1.5rem 0;
+}
+
+.loading-indicator, 
+.error-message {
+  text-align: center;
+  padding: 2rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 0.5rem;
+}
+
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 2rem;
+}
+
+.project-card {
+  background-color: rgba(13, 17, 23, 0.8);
+  border: 1px solid var(--color-github-border);
+  border-radius: 0.5rem;
+  padding: 1.5rem;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.project-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+.language-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.language-tag {
+  background-color: var(--color-github-radical);
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.topic-tag {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--color-github-gray);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.project-links {
+  display: flex;
+  gap: 1rem;
+}
+
+.github-link, .demo-link {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+  text-align: center;
+  transition: background-color 0.3s ease;
+}
+
+.github-link {
+  background-color: var(--color-github-radical);
+  color: white;
+}
+
+.demo-link {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--color-github-light);
+}
+
+.about-link {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+  background-color: #f3f4f6;
+  color: #111827;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.about-link:hover {
+  background-color: #e5e7eb;
+}
+
+.readme-preview {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--color-github-border);
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+/* Customize markdown styling */
+:host ::ng-deep markdown {
+  color: var(--color-github-gray);
+}
+
+:host ::ng-deep markdown h1,
+:host ::ng-deep markdown h2,
+:host ::ng-deep markdown h3,
+:host ::ng-deep markdown h4,
+:host ::ng-deep markdown h5,
+:host ::ng-deep markdown h6 {
+  color: var(--color-github-light);
+  margin: 1rem 0 0.5rem;
+}
+
+:host ::ng-deep markdown code {
+  background-color: rgba(255, 255, 255, 0.1);
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.25rem;
+}
+
+:host ::ng-deep markdown pre {
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+}
+
+:host ::ng-deep markdown a {
+  color: var(--color-github-radical);
+  text-decoration: none;
+}
+
+:host ::ng-deep markdown a:hover {
+  text-decoration: underline;
+}
+
+:host ::ng-deep markdown img {
+  max-width: 100%;
+  border-radius: 0.25rem;
+}
+
+.project-screenshot {
+  width: 100%;
+  border-radius: 0.5rem;
+  object-fit: cover;
+  height: 180px;
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.custom-tag {
+  background-color: var(--color-github-radical);
+  opacity: 0.8;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.tech-stack {
+  margin-bottom: 1rem;
+}
+
+.tech-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tech-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: white;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.tech-badge:hover {
+  transform: translateY(-2px);
+  opacity: 0.9;
+}
+
+.tech-badge i {
+  font-size: 0.875rem;
+}

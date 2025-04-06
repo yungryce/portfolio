@@ -1,0 +1,17 @@
+/* Styles for the home component */
+.profile-header {
+  margin-bottom: 2rem;
+}
+
+.profile-intro p {
+  margin-bottom: 1rem;
+}
+
+.profile-image {
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+section {
+  margin-top: 2rem;
+}

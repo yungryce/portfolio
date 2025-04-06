@@ -1,0 +1,194 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Your theme extensions */
+  --color-github-radical: #ff3366;
+  --color-github-dark: #0d1117;
+  --color-github-light: #f6f8fa;
+  --color-github-gray: #c9d1d9;
+  --color-github-border: #30363d;
+  
+  /* Optional: Extend default theme */
+  --font-family-sans: "Inter", sans-serif;
+  --font-size-base: 1rem;
+}
+
+@layer base {
+  html {
+    background-color: var(--color-github-dark);
+    color: var(--color-github-gray);
+  }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--color-github-light);
+    margin-bottom: 0.5rem;
+  }
+
+  h3 {
+    font-size: 1.5rem;
+    font-weight: 600;
+  }
+
+  hr {
+    border-color: var(--color-github-border);
+    margin: 1.5rem 0;
+  }
+
+  p {
+    margin-bottom: 1rem;
+  }
+  
+  em {
+    color: var(--color-github-radical);
+    font-style: italic;
+  }
+}
+
+@layer components {
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 1.5rem;
+  }
+
+  .profile-header {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  @media (min-width: 768px) {
+    .profile-header {
+      flex-direction: row;
+      align-items: flex-start;
+    }
+  }
+
+  .profile-image-container {
+    flex-shrink: 0;
+  }
+
+  .profile-image {
+    border-radius: 0.5rem;
+    max-width: 400px;
+    height: auto;
+  }
+
+  .profile-content {
+    flex-grow: 1;
+  }
+
+  .profile-intro {
+    margin-bottom: 1.5rem;
+  }
+
+  a {
+    color: var(--color-github-radical);
+    text-decoration: none;
+    transition: color 0.3s ease;
+  }
+
+  a:hover {
+    text-decoration: underline;
+    opacity: 0.9;
+  }
+
+  /* Badge styling */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25;
+    margin-right: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  /* GitHub stats cards */
+  .stats-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin: 1.5rem 0;
+  }
+
+  .stats-card {
+    border-radius: 0.5rem;
+    overflow: hidden;
+    flex-grow: 1;
+    min-width: 250px;
+    transition: transform 0.3s ease;
+  }
+  
+  .stats-card:hover {
+    transform: translateY(-5px);
+  }
+
+  /* Tables for skills */
+  .skills-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 1.5rem 0;
+  }
+
+  .skills-table th {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+    color: var(--color-github-light);
+    background-color: rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--color-github-border);
+  }
+
+  .skills-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--color-github-border);
+    vertical-align: middle;
+  }
+  
+  .skills-table td a {
+    display: inline-block;
+    margin-right: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  /* Trophy display */
+  .trophy-container {
+    margin: 1.5rem 0;
+    overflow-x: auto;
+    border-radius: 0.5rem;
+    background-color: rgba(255, 255, 255, 0.02);
+    padding: 1rem;
+  }
+}
+
+@layer utilities {
+  .bg-github-radical {
+    background-color: var(--color-github-radical);
+  }
+
+  .text-github-radical {
+    color: var(--color-github-radical);
+  }
+
+  .text-github-light {
+    color: var(--color-github-light);
+  }
+
+  .text-github-dark {
+    color: var(--color-github-dark);
+  }
+  
+  .border-github {
+    border: 1px solid var(--color-github-border);
+  }
+}

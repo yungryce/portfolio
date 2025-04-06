@@ -1,0 +1,55 @@
+<div class="cli-tool-container">
+  <h1>CLI Command Assistant</h1>
+  
+  <div class="description">
+    <p>Describe what you want to do, and the AI will suggest relevant CLI commands.</p>
+  </div>
+  
+  <div class="input-container">
+    <textarea 
+      [(ngModel)]="commandDescription" 
+      placeholder="Example: 'Find large files on my system' or 'List all running Docker containers'"
+      rows="3"></textarea>
+    
+    <div class="buttons">
+      <button 
+        [disabled]="!commandDescription.trim() || isLoading" 
+        (click)="getCommandSuggestions()"
+        class="suggest-button">
+        {{ isLoading ? 'Finding commands...' : 'Suggest Commands' }}
+      </button>
+      
+      <button 
+        *ngIf="suggestedCommands.length > 0 && cacheHit"
+        (click)="refreshResults()"
+        class="refresh-button">
+        Refresh Results
+      </button>
+    </div>
+  </div>
+  
+  <div *ngIf="errorMessage" class="error-message">
+    {{ errorMessage }}
+  </div>
+  
+  <div *ngIf="suggestedCommands.length > 0" class="suggested-commands">
+    <h2>
+      Suggested Commands
+      <span *ngIf="cacheHit" class="cache-indicator">(from cache)</span>
+    </h2>
+    
+    <div *ngFor="let command of suggestedCommands; let i = index" 
+         class="command-card" 
+         [ngClass]="{'comment-card': isComment(command)}">
+      <div class="command-text">
+        <code [ngClass]="{'comment-text': isComment(command)}">{{ command }}</code>
+      </div>
+      <button 
+        *ngIf="!isComment(command)"
+        class="copy-button" 
+        (click)="copyToClipboard(command, i)">
+        {{ isCopied[i] ? 'Copied!' : 'Copy' }}
+      </button>
+    </div>
+  </div>
+</div>

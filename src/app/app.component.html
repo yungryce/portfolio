@@ -1,0 +1,16 @@
+<header class="navbar">
+  <div class="container flex justify-between items-center py-4">
+    <a [routerLink]="['']" class="text-xl font-bold">{{ title }}</a>
+    <nav>
+      <ul class="flex gap-6">
+        <li><a [routerLink]="['']" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">Home</a></li>
+        <li><a [routerLink]="['/projects']" routerLinkActive="active">Projects</a></li>
+        <li><a [routerLink]="['/cli-tool']" routerLinkActive="active">CLI Tool</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<div class="container">
+  <router-outlet></router-outlet>
+</div>

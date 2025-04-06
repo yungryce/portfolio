@@ -1,0 +1,22 @@
+.navbar {
+  border-bottom: 1px solid var(--color-github-border);
+  background-color: var(--color-github-dark);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.navbar a {
+  color: var(--color-github-gray);
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.navbar a:hover,
+.navbar a.active {
+  color: var(--color-github-light);
+}
+
+.navbar a.active {
+  font-weight: 500;
+}
