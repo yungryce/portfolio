@@ -1,59 +1,75 @@
-# Portfolio
+# Portfolio Frontend
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 19.2.4.
+A modern Angular-based portfolio site showcasing GitHub projects with advanced features including AI-powered portfolio assistant.
 
-## Development server
+## 🚀 Technology Stack
 
-To start a local development server, run:
+- **Framework**: Angular 19
+- **Styling**: Tailwind CSS 4.0
+- **Markdown**: ngx-markdown for rendering project documentation
+- **HTTP Client**: Angular's HttpClient for API communication
+- **Routing**: Angular Router for SPA navigation
+- **State Management**: RxJS Observables
+
+## 📋 Features
+
+- **Dynamic GitHub Integration**: Fetches and displays repository data via GitHub API
+- **Portfolio Assistant**: AI-powered assistant to answer questions about portfolio projects
+- **Responsive Design**: Mobile-friendly interface with modern UI components
+- **Project Showcases**: Detailed views of featured projects with README rendering
+- **Caching**: Optimized data fetching with client-side caching
+- **Tech Stack Display**: Visual representation of technologies and skills
+
+## 🏗️ Project Structure
+
+- `/src/app/home` - Landing page with personal information and skills overview
+- `/src/app/projects` - Project listing and detail views
+- `/src/app/portfolio-assistant` - AI assistant interface for portfolio queries
+- `/src/app/services` - Shared services for API communication and caching
+
+## 🛠️ Key Components
+
+### Services
+
+- **GitHubService**: Handles communication with GitHub API endpoints
+  - Fetches repositories, READMEs, and repository details
+  - Transforms raw GitHub data with custom frontend metadata
+  - Provides caching for optimized performance
+
+- **PortfolioService**: Manages AI assistant queries
+  - Communicates with backend AI processing API
+  - Handles response formatting and error states
+
+- **CacheService**: Provides caching functionality
+  - In-memory storage for API responses
+  - Reduces API calls and improves performance
+
+- **ConfigService**: Manages environment configuration
+  - Provides API URLs and environment-specific settings
+  - Simplifies environment switching
+
+### Components
+
+- **HomeComponent**: Main landing page showing skills and GitHub stats
+- **ProjectsComponent**: Lists featured projects with tech stack visualization
+- **ProjectAboutComponent**: Detailed project view with README rendering
+- **PortfolioAssistantComponent**: Interface for querying the AI about projects
+
+## 🔄 Data Flow
+
+1. Frontend components request data through services
+2. Services check cache before making API calls
+3. API responses are cached and transformed for UI rendering
+4. Components receive and render the transformed data
+
+## 📦 Build Process
+
+The project uses Angular CLI for building and serving:
 
 ```bash
-ng serve
+# Development server
+npm run start
+
+# Production build
+npm run build:prod
 ```
-
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
-
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
-
-```bash
-ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
-
-```bash
-ng generate --help
-```
-
-## Building
-
-To build the project run:
-
-```bash
-ng build
-```
-
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
-
-## Running unit tests
-
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
-
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
