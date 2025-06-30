@@ -1,31 +1,193 @@
 <div class="container mx-auto p-4">
-  <div *ngIf="repository$ | async as repo" class="max-w-4xl mx-auto">
+  
+  <!-- Loading State -->
+  <div *ngIf="loading" class="loading-container">
+    <div class="loading-spinner"></div>
+    <p>Loading project details...</p>
+  </div>
+
+  <!-- Error State -->
+  <div *ngIf="error" class="error-container">
+    <div class="error-icon">⚠️</div>
+    <h2>Failed to Load Project</h2>
+    <p>{{ errorMessage }}</p>
+    <div class="error-actions">
+      <button (click)="retryLoad()" class="retry-button">Try Again</button>
+      <button (click)="goBack()" class="back-button">Back to Projects</button>
+    </div>
+  </div>
+
+  <!-- Repository Content -->
+  <div *ngIf="!loading && !error && (repository$ | async) as repo" class="max-w-6xl mx-auto">
+    
+    <!-- Navigation -->
     <div class="mb-6">
-      <a routerLink="/projects" class="text-blue-500 hover:underline">
+      <button (click)="goBack()" class="back-link">
         ← Back to Projects
-      </a>
+      </button>
     </div>
     
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-      <h1 class="text-2xl font-bold mb-4">{{ repo.customTitle || repo.name }}</h1>
-      
-      <div class="flex items-center mb-4">
-        <div class="project-links">
-          <a [href]="repo.html_url" target="_blank" class="github-link mr-2">
-            GitHub
-          </a>
-          <a *ngIf="repo.homepage" [href]="repo.homepage" target="_blank" class="demo-link">
-            Live Demo
-          </a>
-        </div>
-        <div class="ml-auto">
-          <span class="stars">⭐ {{ repo.stargazers_count }}</span>
+    <!-- Project Header -->
+    <div class="project-header">
+      <div class="header-content">
+        <h1 class="project-title">{{ getProjectName(repo) }}</h1>
+        <p class="project-description">{{ getProjectDescription(repo) }}</p>
+        
+        <div class="project-meta">
+          <span class="project-type" [style.background-color]="getCompetencyColor(getCompetencyLevel(repo))">
+            {{ getProjectType(repo) }}
+          </span>
+          <span class="project-scope">{{ getProjectScope(repo) }}</span>
+          <span class="competency-level">{{ getCompetencyLevel(repo) }}</span>
         </div>
       </div>
-      
-      <div class="readme-content">
-        <markdown [data]="repo.readme"></markdown>
+
+      <!-- Project Links -->
+      <div class="project-links">
+        <a [href]="repo.html_url" target="_blank" class="github-link">
+          <i class="fab fa-github"></i> View Code
+        </a>
+        <a *ngIf="repo.homepage" [href]="repo.homepage" target="_blank" class="demo-link">
+          <i class="fas fa-external-link-alt"></i> Live Demo
+        </a>
+        <div class="stars">
+          <i class="fas fa-star"></i> {{ repo.stargazers_count }}
+        </div>
       </div>
     </div>
+
+    <!-- Project Metrics -->
+    <div *ngIf="hasRepoContext(repo)" class="project-metrics">
+      <div class="metric-card">
+        <div class="metric-label">Difficulty</div>
+        <div class="metric-value" [style.color]="getDifficultyColor(getDifficultyRating(repo))">
+          {{ getDifficultyRating(repo) }}/10
+        </div>
+      </div>
+      <div class="metric-card" *ngIf="getEstimatedHours(repo) > 0">
+        <div class="metric-label">Est. Hours</div>
+        <div class="metric-value">{{ getEstimatedHours(repo) }}h</div>
+      </div>
+      <div class="metric-card" *ngIf="repo.language">
+        <div class="metric-label">Language</div>
+        <div class="metric-value">{{ repo.language }}</div>
+      </div>
+    </div>
+
+    <!-- Tech Stack Section -->
+    <div *ngIf="hasRepoContext(repo)" class="tech-section">
+      <h2>Technical Stack</h2>
+      
+      <div class="tech-categories">
+        <!-- Primary Technologies -->
+        <div *ngIf="getPrimaryTechStack(repo).length > 0" class="tech-category">
+          <h3>Primary Technologies</h3>
+          <div class="tech-badges">
+            <span *ngFor="let tech of getPrimaryTechStack(repo)" class="tech-badge primary">
+              {{ tech }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Secondary Technologies -->
+        <div *ngIf="getSecondaryTechStack(repo).length > 0" class="tech-category">
+          <h3>Tools & Libraries</h3>
+          <div class="tech-badges">
+            <span *ngFor="let tech of getSecondaryTechStack(repo)" class="tech-badge secondary">
+              {{ tech }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Key Libraries -->
+        <div *ngIf="getKeyLibraries(repo).length > 0" class="tech-category">
+          <h3>Key Libraries</h3>
+          <div class="tech-badges">
+            <span *ngFor="let lib of getKeyLibraries(repo)" class="tech-badge library">
+              {{ lib }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skills Section -->
+    <div *ngIf="hasRepoContext(repo) && (getTechnicalSkills(repo).length > 0 || getDomainSkills(repo).length > 0)" class="skills-section">
+      <h2>Skills Demonstrated</h2>
+      
+      <div class="skills-categories">
+        <div *ngIf="getTechnicalSkills(repo).length > 0" class="skill-category">
+          <h3>Technical Skills</h3>
+          <ul class="skill-list">
+            <li *ngFor="let skill of getTechnicalSkills(repo)">{{ skill }}</li>
+          </ul>
+        </div>
+
+        <div *ngIf="getDomainSkills(repo).length > 0" class="skill-category">
+          <h3>Domain Knowledge</h3>
+          <ul class="skill-list">
+            <li *ngFor="let skill of getDomainSkills(repo)">{{ skill }}</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content Tabs -->
+    <div class="content-tabs">
+      <div class="tabs-nav">
+        <button class="tab-button active" data-tab="readme">README</button>
+        <button *ngIf="hasArchitecture(repo)" class="tab-button" data-tab="architecture">Architecture</button>
+        <button *ngIf="hasSkillsIndex(repo)" class="tab-button" data-tab="skills">Skills Index</button>
+        <button *ngIf="hasComponents(repo)" class="tab-button" data-tab="components">Components</button>
+      </div>
+
+      <!-- README Content -->
+      <div class="tab-content active" id="readme">
+        <div *ngIf="hasReadme(repo)" class="readme-content">
+          <markdown [data]="repo.readme"></markdown>
+        </div>
+        <div *ngIf="!hasReadme(repo)" class="no-content">
+          <p>No README available for this repository.</p>
+        </div>
+      </div>
+
+      <!-- Architecture Content -->
+      <div *ngIf="hasArchitecture(repo)" class="tab-content" id="architecture">
+        <div class="architecture-content">
+          <markdown [data]="repo.architecture"></markdown>
+        </div>
+      </div>
+
+      <!-- Skills Index Content -->
+      <div *ngIf="hasSkillsIndex(repo)" class="tab-content" id="skills">
+        <div class="skills-content">
+          <markdown [data]="repo.skillsIndex"></markdown>
+        </div>
+      </div>
+
+      <!-- Components -->
+      <div *ngIf="hasComponents(repo)" class="tab-content" id="components">
+        <div class="components-section">
+          <div *ngFor="let component of getComponents(repo)" class="component-card">
+            <h4>{{ component.name }}</h4>
+            <p *ngIf="component.description">{{ component.description }}</p>
+            <div *ngIf="component.technologies" class="component-tech">
+              <span *ngFor="let tech of component.technologies" class="tech-badge mini">
+                {{ tech }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prerequisites -->
+    <div *ngIf="getPrerequisites(repo).length > 0" class="prerequisites-section">
+      <h2>Prerequisites</h2>
+      <ul class="prerequisites-list">
+        <li *ngFor="let prereq of getPrerequisites(repo)">{{ prereq }}</li>
+      </ul>
+    </div>
+
   </div>
 </div>

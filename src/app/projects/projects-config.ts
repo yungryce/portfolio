@@ -36,21 +36,6 @@ export const FEATURED_PROJECTS: ProjectConfig[] = [
     ]
   },
   {
-    repoName: 'python_function_apps',
-    customTitle: 'Azure Serverless Solutions',
-    customDescription: 'Collection of serverless applications using Azure Functions for efficient, scalable cloud services.',
-    // demoUrl: 'https://example.com/demo', // Optional demo URL,
-    screenshotUrl: 'https://i.imgur.com/ruhHRt9.png',
-    featured: true,
-    order: 2,
-    tags: ['Cloud', 'Serverless', 'Azure'],
-    stack: [
-      { name: 'Azure', icon: 'fab fa-microsoft', color: '#0078D4' },
-      { name: 'Python', icon: 'fab fa-python', color: '#3776AB' },
-      { name: 'Function App', icon: 'fas fa-cloud', color: '#FD5750' }
-    ]
-  },
-  {
     repoName: 'AirBnB_clone_v4',
     customTitle: 'AirBnB Clone',
     customDescription: 'A full-stack AirBnB clone with booking, user authentication, and property management features.',
