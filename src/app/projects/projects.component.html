@@ -57,10 +57,10 @@
         </div>
 
         <!-- Secondary Technologies (if available) -->
-        <div *ngIf="repo.repoContext?.tech_stack?.secondary?.length" class="secondary-stack mb-3">
+        <div *ngIf="hasSecondaryTechStack(repo)" class="secondary-stack mb-3">
           <h3 class="text-sm font-semibold uppercase mb-2 text-gray-300">Tools & Libraries</h3>
           <div class="tech-badges">
-            <span *ngFor="let tech of repo.repoContext.tech_stack.secondary" 
+            <span *ngFor="let tech of getSecondaryTechStack(repo)" 
                   class="tech-badge secondary">
               {{ tech }}
             </span>

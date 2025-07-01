@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of, catchError, map, tap } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { environment } from '../../environments/environment';
 
 @Injectable({
@@ -13,9 +13,14 @@ export class ConfigService {
     return environment.apiUrl;
   }
 
-  // Simple method to load any config needed
-  loadConfig(): Observable<boolean> {
+  // Load actual configuration if needed
+  loadConfig(): Observable<any> {
     console.log('Loading configuration...');
-    return of(true);
+    // Could load from API or external config file
+    return of({
+      apiUrl: this.apiUrl,
+      version: '1.0.0',
+      features: ['prefetch', 'caching']
+    });
   }
 }

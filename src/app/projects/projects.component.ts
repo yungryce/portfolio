@@ -4,7 +4,7 @@ import { RouterModule } from '@angular/router';
 import { MarkdownModule } from 'ngx-markdown';
 import { GithubService, Repository } from '../services/github.service';
 import { CacheService } from '../services/cache.service';
-import { Observable, forkJoin, map, of } from 'rxjs';
+import { FEATURED_REPOSITORIES, ProjectConfigHelper, TechStack } from './projects-config';
 
 @Component({
   selector: 'app-projects',
@@ -17,15 +17,10 @@ export class ProjectsComponent implements OnInit {
   repositories: Repository[] = [];
   loading = true;
   error = false;
+  errorType: 'network' | 'parsing' | 'general' | null = null;
   
-  // Manually specify which repositories to feature
-  private readonly FEATURED_REPO_NAMES = [
-    'azure_vmss_cluster',
-    'AirBnB_clone_v4',
-    'collabHub',
-    'simple_shell',
-    'printf'
-  ];
+  // Use simplified repository list
+  private readonly featuredRepoNames = FEATURED_REPOSITORIES;
   
   constructor(
     private githubService: GithubService,
@@ -33,10 +28,9 @@ export class ProjectsComponent implements OnInit {
   ) {}
   
   ngOnInit(): void {
-    // Fetch specific repositories with their contexts
     console.debug('Initializing ProjectsComponent, loading featured repositories...');
     this.loadFeaturedRepositories();
-    console.debug('Featured repositories loaded:', this.FEATURED_REPO_NAMES);
+    console.debug('Featured repositories loaded:', this.featuredRepoNames);
   }
 
   private loadFeaturedRepositories(): void {
@@ -63,7 +57,7 @@ export class ProjectsComponent implements OnInit {
     const cachedRepos: Repository[] = [];
     
     // Check if we have cached repository metadata and files
-    for (const repoName of this.FEATURED_REPO_NAMES) {
+    for (const repoName of this.featuredRepoNames) {
       const repoMetadata = this.getCachedRepoMetadata(repoName);
       const cachedFiles = this.getCachedRepoFiles(repoName);
       
@@ -118,16 +112,24 @@ export class ProjectsComponent implements OnInit {
 
   private sortRepositories(repos: Repository[]): Repository[] {
     return repos.sort((a, b) => {
-      // Sort by difficulty or estimated hours from context
-      const aDifficulty = a.repoContext?.metadata?.difficulty_rating || 0;
-      const bDifficulty = b.repoContext?.metadata?.difficulty_rating || 0;
+      // Sort by array order (index in FEATURED_REPOSITORIES)
+      const aIndex = this.featuredRepoNames.indexOf(a.name);
+      const bIndex = this.featuredRepoNames.indexOf(b.name);
+      
+      if (aIndex !== -1 && bIndex !== -1) {
+        return aIndex - bIndex;
+      }
+      
+      // Fallback to difficulty rating if not in featured list
+      const aDifficulty = this.getDifficultyRating(a);
+      const bDifficulty = this.getDifficultyRating(b);
       return bDifficulty - aDifficulty;
     });
   }
 
   private refreshRepositoriesInBackground(): void {
     // Silently refresh data in background without showing loading state
-    this.githubService.getFeaturedRepositoriesWithContext(this.FEATURED_REPO_NAMES)
+    this.githubService.getFeaturedRepositoriesWithContext(this.featuredRepoNames)
       .subscribe({
         next: (reposWithContext) => {
           // Update repositories if we got fresh data
@@ -148,15 +150,17 @@ export class ProjectsComponent implements OnInit {
 
   private fetchFreshRepositories(): void {
     // Original fetch logic when no cache is available
-    this.githubService.getFeaturedRepositoriesWithContext(this.FEATURED_REPO_NAMES)
+    this.githubService.getFeaturedRepositoriesWithContext(this.featuredRepoNames)
       .subscribe({
         next: (reposWithContext) => {
           this.repositories = this.sortRepositories(reposWithContext);
           this.loading = false;
+          this.errorType = null;
         },
         error: (err) => {
           console.error('Error fetching repository contexts:', err);
           this.error = true;
+          this.errorType = err.status === 0 ? 'network' : 'general';
           this.loading = false;
         }
       });
@@ -181,8 +185,64 @@ export class ProjectsComponent implements OnInit {
     return repo.repoContext?.tech_stack?.primary || [repo.language].filter(Boolean);
   }
 
+  getSecondaryTechStack(repo: Repository): string[] {
+    return repo.repoContext?.tech_stack?.secondary || [];
+  }
+
+  hasSecondaryTechStack(repo: Repository): boolean {
+    return this.getSecondaryTechStack(repo).length > 0;
+  }
+
+  getProjectTitle(repo: Repository): string {
+    return ProjectConfigHelper.getProjectTitle(repo.repoContext, repo.name);
+  }
+
+  getProjectDescription(repo: Repository): string {
+    return ProjectConfigHelper.getProjectDescription(repo.repoContext, repo.name);
+  }
+
+  getScreenshotUrl(repo: Repository): string | undefined {
+    return ProjectConfigHelper.getScreenshotUrl(repo.repoContext, repo.name);
+  }
+
+  getProjectTags(repo: Repository): string[] {
+    return ProjectConfigHelper.getProjectTags(repo.repoContext, repo.name);
+  }
+
+  getTechStack(repo: Repository): TechStack[] {
+    return ProjectConfigHelper.getTechStack(repo.repoContext);
+  }
+
+  getDifficultyRating(repo: Repository): number {
+    const metrics = ProjectConfigHelper.getProjectMetrics(repo.repoContext);
+    // Convert difficulty string to number for sorting
+    const difficultyMap: { [key: string]: number } = {
+      'beginner': 2,
+      'intermediate': 5,
+      'advanced': 8,
+      'expert': 10
+    };
+    return difficultyMap[metrics.difficulty] || 5;
+  }
+
   getEstimatedHours(repo: Repository): number {
-    return repo.repoContext?.estimated_hours || 0;
+    return ProjectConfigHelper.getProjectMetrics(repo.repoContext).estimatedHours;
+  }
+
+  getCompetencyLevel(repo: Repository): string {
+    return ProjectConfigHelper.getProjectMetrics(repo.repoContext).competencyLevel;
+  }
+
+  getProjectType(repo: Repository): string {
+    return ProjectConfigHelper.getProjectMetrics(repo.repoContext).projectType;
+  }
+
+  getProjectScope(repo: Repository): string {
+    return ProjectConfigHelper.getProjectMetrics(repo.repoContext).projectScope;
+  }
+
+  getProjectVersion(repo: Repository): string {
+    return ProjectConfigHelper.getProjectMetrics(repo.repoContext).version;
   }
 
   getTotalDevelopmentHours(): number {
@@ -203,26 +263,6 @@ export class ProjectsComponent implements OnInit {
     return this.repositories.filter(repo => 
       repo.repoContext?.project_status === 'active'
     ).length;
-  }
-
-  getCompetencyLevel(repo: Repository): string {
-    return repo.repoContext?.skill_manifest?.competency_level || 'intermediate';
-  }
-
-  getDifficultyRating(repo: Repository): number {
-    return repo.repoContext?.metadata?.difficulty_rating || 5;
-  }
-
-  getProjectType(repo: Repository): string {
-    return repo.repoContext?.project_identity?.type || 'project';
-  }
-
-  getProjectScope(repo: Repository): string {
-    return repo.repoContext?.project_identity?.scope || 'general';
-  }
-
-  getProjectDescription(repo: Repository): string {
-    return repo.repoContext?.project_identity?.description || repo.description;
   }
 
   getDifficultyColor(rating: number): string {

@@ -28,13 +28,11 @@ export class GithubFilesService {
    */
   private getFileContent(repoName: string, filePath: string, cacheKey: string): Observable<string> {
     const cached = this.cacheService.get<string>(cacheKey);
-    console.debug(`++++Checking cache for cachekey ${cacheKey}...`);
     
     if (cached) {
-      console.debug(`Cache hit for ${cacheKey}`);
       return of(cached);
     }
-    console.debug(`****Cache miss for ${cacheKey} - fetching from API`);
+    
     return this.http.get(
       `${this.configService.apiUrl}/github/repos/${this.username}/${repoName}/contents/${filePath}`,
       { responseType: 'text' }
