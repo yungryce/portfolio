@@ -66,6 +66,6 @@ api/.funcpack/
 *.log
 *.env
 
-
+# Others
 /private
 /schema
