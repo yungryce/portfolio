@@ -37,7 +37,7 @@ export class GithubFilesService {
       `${this.configService.apiUrl}/github/repos/${this.username}/${repoName}/contents/${filePath}`,
       { responseType: 'text' }
     ).pipe(
-      tap(content => this.cacheService.set(cacheKey, content, 1000 * 60 * 60)),
+      tap(content => this.cacheService.set(cacheKey, content, 1000 * 60 * 60 * 1)),
       catchError(error => {
         console.warn(`File ${filePath} not found for ${repoName}:`, error);
         // Return a safe default instead of throwing
@@ -222,7 +222,6 @@ export class GithubFilesService {
    */
   prefetchCommonFiles(repoNames: string[]): void {
     const prefetchRequests = repoNames.flatMap(repo => [
-      { repoName: repo, fileType: 'readme' as const },
       { repoName: repo, fileType: 'context' as const }
     ]);
 

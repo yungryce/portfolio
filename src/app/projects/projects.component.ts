@@ -5,6 +5,7 @@ import { MarkdownModule } from 'ngx-markdown';
 import { GithubService, Repository } from '../services/github.service';
 import { CacheService } from '../services/cache.service';
 import { FEATURED_REPOSITORIES, ProjectConfigHelper, TechStack } from './projects-config';
+import { memoize } from 'lodash-es'; // or implement your own memoization
 
 @Component({
   selector: 'app-projects',
@@ -28,9 +29,7 @@ export class ProjectsComponent implements OnInit {
   ) {}
   
   ngOnInit(): void {
-    console.debug('Initializing ProjectsComponent, loading featured repositories...');
     this.loadFeaturedRepositories();
-    console.debug('Featured repositories loaded:', this.featuredRepoNames);
   }
 
   private loadFeaturedRepositories(): void {
@@ -38,7 +37,6 @@ export class ProjectsComponent implements OnInit {
     
     // First, try to get cached repository data and files
     const cachedRepos = this.getCachedFeaturedRepositories();
-    console.debug('Cached repositories:', cachedRepos);
     
     if (cachedRepos.length > 0) {
       // We have some cached data, show it immediately
@@ -88,11 +86,9 @@ export class ProjectsComponent implements OnInit {
 
   private getCachedRepoFiles(repoName: string): { readme?: string, context?: any } {
     // Use the SAME cache keys as GithubFilesService now uses
-    const readmeCacheKey = `${repoName}-readme-content`;
     const contextCacheKey = `${repoName}-context-content`;
     
     return {
-      readme: this.getSafeCache<string>(readmeCacheKey),
       context: this.getCachedContextAsObject(contextCacheKey)
     };
   }
@@ -149,7 +145,6 @@ export class ProjectsComponent implements OnInit {
   }
 
   private fetchFreshRepositories(): void {
-    // Original fetch logic when no cache is available
     this.githubService.getFeaturedRepositoriesWithContext(this.featuredRepoNames)
       .subscribe({
         next: (reposWithContext) => {
@@ -213,16 +208,23 @@ export class ProjectsComponent implements OnInit {
     return ProjectConfigHelper.getTechStack(repo.repoContext);
   }
 
+  // Memoize expensive calculations
+  private readonly memoizedGetDifficultyRating = memoize(
+    (repoContext: any) => {
+      const metrics = ProjectConfigHelper.getProjectMetrics(repoContext);
+      const difficultyMap: { [key: string]: number } = {
+        'beginner': 2,
+        'intermediate': 5,
+        'advanced': 8,
+        'expert': 10
+      };
+      return difficultyMap[metrics.difficulty] || 5;
+    },
+    (repoContext) => repoContext?.assessment?.difficulty || 'default'
+  );
+
   getDifficultyRating(repo: Repository): number {
-    const metrics = ProjectConfigHelper.getProjectMetrics(repo.repoContext);
-    // Convert difficulty string to number for sorting
-    const difficultyMap: { [key: string]: number } = {
-      'beginner': 2,
-      'intermediate': 5,
-      'advanced': 8,
-      'expert': 10
-    };
-    return difficultyMap[metrics.difficulty] || 5;
+    return this.memoizedGetDifficultyRating(repo.repoContext);
   }
 
   getEstimatedHours(repo: Repository): number {

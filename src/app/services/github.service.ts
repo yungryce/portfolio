@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, forkJoin, map, switchMap, catchError, of, tap } from 'rxjs';
-import { FEATURED_PROJECTS, TechStack } from '../projects/projects-config';
+// import { FEATURED_REPOSITORIES, TechStack } from '../projects/projects-config';
 import { ConfigService } from './config.service';
 import { CacheService } from './cache.service';
 import { GithubFilesService } from './github-files.service';
@@ -109,7 +109,7 @@ export class GithubService {
         );
         return forkJoin(repoObservables);
       }),
-      tap(repos => this.cacheService.set(cacheKey, repos, 1000 * 60 * 10)) // 10 minutes
+      tap(repos => this.cacheService.set(cacheKey, repos, 1000 * 60 * 15)) // 15 minutes
     );
   }
 
@@ -128,7 +128,7 @@ export class GithubService {
     return this.http.get<Repository>(
       `${this.configService.apiUrl}/github/repos/${this.username}/${repoName}`
     ).pipe(
-      tap(repo => this.cacheService.set(cacheKey, repo, 1000 * 60 * 30)),
+      tap(repo => this.cacheService.set(cacheKey, repo, 1000 * 60 * 15)),
       catchError(error => {
         console.error(`Error fetching repository ${repoName}:`, error);
         throw error;
@@ -156,7 +156,7 @@ export class GithubService {
           }))
         )
       ),
-      tap(repo => this.cacheService.set(cacheKey, repo, 1000 * 60 * 20))
+      tap(repo => this.cacheService.set(cacheKey, repo, 1000 * 60 * 15))
     );
   }
 
@@ -238,7 +238,7 @@ export class GithubService {
           }))
         )
       ),
-      tap(repo => this.cacheService.set(cacheKey, repo, 1000 * 60 * 30))
+      tap(repo => this.cacheService.set(cacheKey, repo, 1000 * 60 * 15))
     );
   }
 
@@ -299,7 +299,7 @@ export class GithubService {
             repoContext: pair.context
           }));
       }),
-      tap(repos => this.cacheService.set(cacheKey, repos, 1000 * 60 * 5)) // 5 minutes for search results
+      tap(repos => this.cacheService.set(cacheKey, repos, 1000 * 60 * 15)) // 5 minutes for search results
     );
   }
 
@@ -347,7 +347,7 @@ export class GithubService {
 
     return forkJoin(requests).pipe(
       map(repos => repos.filter(repo => repo !== null) as Repository[]),
-      tap(repos => this.cacheService.set(cacheKey, repos, 1000 * 60 * 30)),
+      tap(repos => this.cacheService.set(cacheKey, repos, 1000 * 60 * 15)),
       catchError(error => {
         console.error('Error fetching featured repositories with context:', error);
         return of([]);

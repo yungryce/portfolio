@@ -18,10 +18,13 @@ export interface TechStack {
 // Simple list of featured repositories - order matters for display
 export const FEATURED_REPOSITORIES: string[] = [
   'azure_vmss_cluster',
+  'authentication-FA',
   'AirBnB_clone_v4',
   'collabHub',
   'simple_shell',
-  'printf'
+  'alx-low_level_programming',
+  'alx-higher_level_programming',
+  'alx-system_engineering-devops',
 ];
 
 // Optional: Project-specific overrides (only if needed)

@@ -293,6 +293,33 @@
   letter-spacing: 0.05em;
 }
 
+.skeleton {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.skeleton-header {
+  height: 1.5rem;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 0.25rem;
+  margin-bottom: 1rem;
+}
+
+.skeleton-content {
+  height: 4rem;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 0.25rem;
+  margin-bottom: 1rem;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .projects-grid {

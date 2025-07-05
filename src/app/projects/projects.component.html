@@ -6,9 +6,12 @@
     </p>
   </div>
   
-  <div *ngIf="loading" class="loading-indicator">
-    <div class="loading-spinner"></div>
-    <p>Loading projects with repository contexts...</p>
+  <div *ngIf="loading" class="projects-grid">
+    <div *ngFor="let item of [1,2,3,4,5]" class="project-card skeleton">
+      <div class="skeleton-header"></div>
+      <div class="skeleton-content"></div>
+      <div class="skeleton-tech-stack"></div>
+    </div>
   </div>
   
   <div *ngIf="error" class="error-message">
@@ -16,16 +19,17 @@
   </div>
   
   <div *ngIf="!loading && !error" class="projects-grid">
-    <div *ngFor="let repo of repositories" class="project-card">
+    <div *ngFor="let repo of repositories" class="project-card" role="article" [attr.aria-labelledby]="'project-title-' + repo.name">
       
       <!-- Project Header -->
       <div class="project-header mb-4">
         <div class="flex justify-between items-start mb-2">
-          <h2 class="text-xl font-bold">
+          <h2 class="text-xl font-bold" [id]="'project-title-' + repo.name">
             {{ repo.repoContext?.project_identity?.name || repo.name }}
           </h2>
           <div class="project-type-badge" 
-               [style.background-color]="getCompetencyColor(getCompetencyLevel(repo))">
+               [style.background-color]="getCompetencyColor(getCompetencyLevel(repo))"
+               [attr.aria-label]="'Project type: ' + getProjectType(repo)">
             {{ getProjectType(repo) }}
           </div>
         </div>

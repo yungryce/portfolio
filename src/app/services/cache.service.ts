@@ -24,9 +24,9 @@ export class CacheService {
    * Set cache item with optional TTL
    * @param key Cache key
    * @param value Value to cache
-   * @param ttlMs Time to live in milliseconds (default: 12 hours)
+   * @param ttlMs Time to live in milliseconds (default: 15 minutes)
    */
-  set<T>(key: string, value: T, ttlMs: number = 12 * 60 * 60 * 1000): void {
+  set<T>(key: string, value: T, ttlMs: number = 15 * 60 * 1000): void {
     const now = Date.now();
     const item: CacheItem<T> = {
       value,

@@ -18,60 +18,100 @@
   </div>
 
   <!-- Repository Content -->
-  <div *ngIf="!loading && !error && (repository$ | async) as repo" class="max-w-6xl mx-auto">
+  <div *ngIf="!loading && !error && (repository$ | async) as repo" class="max-w-7xl mx-auto">
     
     <!-- Navigation -->
     <div class="mb-6">
       <button (click)="goBack()" class="back-link">
-        ← Back to Projects
+        <i class="fas fa-arrow-left mr-2"></i>Back to Projects
       </button>
     </div>
     
     <!-- Project Header -->
     <div class="project-header">
       <div class="header-content">
-        <h1 class="project-title">{{ getProjectName(repo) }}</h1>
-        <p class="project-description">{{ getProjectDescription(repo) }}</p>
+        <div class="flex items-start justify-between mb-4">
+          <div class="flex-1">
+            <h1 class="project-title">{{ getProjectTitle(repo) }}</h1>
+            <p class="project-description">{{ getProjectDescription(repo) }}</p>
+          </div>
+          
+          <!-- Screenshot -->
+          <div *ngIf="getScreenshotUrl(repo)" class="screenshot-container ml-6">
+            <img [src]="getScreenshotUrl(repo)" 
+                 [alt]="getProjectTitle(repo) + ' screenshot'"
+                 class="screenshot-image">
+          </div>
+        </div>
         
+        <!-- Project Meta -->
         <div class="project-meta">
-          <span class="project-type" [style.background-color]="getCompetencyColor(getCompetencyLevel(repo))">
+          <span class="project-badge" 
+                [style.background-color]="getCompetencyColor(getCompetencyLevel(repo))">
             {{ getProjectType(repo) }}
           </span>
-          <span class="project-scope">{{ getProjectScope(repo) }}</span>
-          <span class="competency-level">{{ getCompetencyLevel(repo) }}</span>
+          <span class="project-badge scope">{{ getProjectScope(repo) }}</span>
+          <span class="project-badge version">v{{ getProjectVersion(repo) }}</span>
+          <span class="project-badge stage">{{ getCurriculumStage(repo) }}</span>
         </div>
       </div>
 
       <!-- Project Links -->
       <div class="project-links">
-        <a [href]="repo.html_url" target="_blank" class="github-link">
+        <button (click)="openGithubRepo(repo)" class="github-link">
           <i class="fab fa-github"></i> View Code
-        </a>
-        <a *ngIf="repo.homepage" [href]="repo.homepage" target="_blank" class="demo-link">
+        </button>
+        <button *ngIf="repo.homepage" (click)="openHomepage(repo)" class="demo-link">
           <i class="fas fa-external-link-alt"></i> Live Demo
-        </a>
+        </button>
         <div class="stars">
           <i class="fas fa-star"></i> {{ repo.stargazers_count }}
         </div>
       </div>
     </div>
 
-    <!-- Project Metrics -->
-    <div *ngIf="hasRepoContext(repo)" class="project-metrics">
-      <div class="metric-card">
-        <div class="metric-label">Difficulty</div>
-        <div class="metric-value" [style.color]="getDifficultyColor(getDifficultyRating(repo))">
-          {{ getDifficultyRating(repo) }}/10
+    <!-- Project Overview Grid -->
+    <div *ngIf="hasRepoContext(repo)" class="overview-grid">
+      
+      <!-- Quick Stats -->
+      <div class="stats-card">
+        <h3>Project Metrics</h3>
+        <div class="metrics-grid">
+          <div class="metric-item">
+            <div class="metric-label">Difficulty</div>
+            <div class="metric-value" 
+                 [style.color]="getDifficultyColor(getDifficultyRating(repo))">
+              {{ getDifficultyRating(repo) }}
+            </div>
+          </div>
+          <div class="metric-item" *ngIf="getEstimatedHours(repo) > 0">
+            <div class="metric-label">Est. Hours</div>
+            <div class="metric-value">{{ getEstimatedHours(repo) }}h</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">Competency</div>
+            <div class="metric-value" 
+                 [style.color]="getCompetencyColor(getCompetencyLevel(repo))">
+              {{ getCompetencyLevel(repo) }}
+            </div>
+          </div>
+          <div class="metric-item" *ngIf="repo.language">
+            <div class="metric-label">Language</div>
+            <div class="metric-value">{{ repo.language }}</div>
+          </div>
         </div>
       </div>
-      <div class="metric-card" *ngIf="getEstimatedHours(repo) > 0">
-        <div class="metric-label">Est. Hours</div>
-        <div class="metric-value">{{ getEstimatedHours(repo) }}h</div>
+
+      <!-- Project Tags -->
+      <div class="tags-card" *ngIf="getProjectTags(repo).length > 0">
+        <h3>Topics</h3>
+        <div class="tags-container">
+          <span *ngFor="let tag of getProjectTags(repo)" class="tag">
+            {{ tag }}
+          </span>
+        </div>
       </div>
-      <div class="metric-card" *ngIf="repo.language">
-        <div class="metric-label">Language</div>
-        <div class="metric-value">{{ repo.language }}</div>
-      </div>
+
     </div>
 
     <!-- Tech Stack Section -->
@@ -81,7 +121,7 @@
       <div class="tech-categories">
         <!-- Primary Technologies -->
         <div *ngIf="getPrimaryTechStack(repo).length > 0" class="tech-category">
-          <h3>Primary Technologies</h3>
+          <h3><i class="fas fa-star"></i> Primary Technologies</h3>
           <div class="tech-badges">
             <span *ngFor="let tech of getPrimaryTechStack(repo)" class="tech-badge primary">
               {{ tech }}
@@ -91,7 +131,7 @@
 
         <!-- Secondary Technologies -->
         <div *ngIf="getSecondaryTechStack(repo).length > 0" class="tech-category">
-          <h3>Tools & Libraries</h3>
+          <h3><i class="fas fa-tools"></i> Tools & Libraries</h3>
           <div class="tech-badges">
             <span *ngFor="let tech of getSecondaryTechStack(repo)" class="tech-badge secondary">
               {{ tech }}
@@ -101,10 +141,20 @@
 
         <!-- Key Libraries -->
         <div *ngIf="getKeyLibraries(repo).length > 0" class="tech-category">
-          <h3>Key Libraries</h3>
+          <h3><i class="fas fa-puzzle-piece"></i> Key Libraries</h3>
           <div class="tech-badges">
             <span *ngFor="let lib of getKeyLibraries(repo)" class="tech-badge library">
               {{ lib }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Development Tools -->
+        <div *ngIf="getDevelopmentTools(repo).length > 0" class="tech-category">
+          <h3><i class="fas fa-wrench"></i> Development Tools</h3>
+          <div class="tech-badges">
+            <span *ngFor="let tool of getDevelopmentTools(repo)" class="tech-badge tool">
+              {{ tool }}
             </span>
           </div>
         </div>
@@ -112,19 +162,19 @@
     </div>
 
     <!-- Skills Section -->
-    <div *ngIf="hasRepoContext(repo) && (getTechnicalSkills(repo).length > 0 || getDomainSkills(repo).length > 0)" class="skills-section">
+    <div *ngIf="hasRepoContext(repo)" class="skills-section">
       <h2>Skills Demonstrated</h2>
       
-      <div class="skills-categories">
+      <div class="skills-grid">
         <div *ngIf="getTechnicalSkills(repo).length > 0" class="skill-category">
-          <h3>Technical Skills</h3>
+          <h3><i class="fas fa-code"></i> Technical Skills</h3>
           <ul class="skill-list">
             <li *ngFor="let skill of getTechnicalSkills(repo)">{{ skill }}</li>
           </ul>
         </div>
 
         <div *ngIf="getDomainSkills(repo).length > 0" class="skill-category">
-          <h3>Domain Knowledge</h3>
+          <h3><i class="fas fa-brain"></i> Domain Knowledge</h3>
           <ul class="skill-list">
             <li *ngFor="let skill of getDomainSkills(repo)">{{ skill }}</li>
           </ul>
@@ -132,17 +182,72 @@
       </div>
     </div>
 
+    <!-- Architecture & Components -->
+    <div *ngIf="hasComponents(repo)" class="architecture-section">
+      <h2>Project Architecture</h2>
+      
+      <div class="components-grid">
+        <div *ngFor="let directory of getMainDirectories(repo)" class="component-card">
+          <div class="component-header">
+            <h4><i class="fas fa-folder"></i> {{ directory.path }}</h4>
+            <span class="complexity-badge" 
+                  [class]="'complexity-' + directory.complexity">
+              {{ directory.complexity }}
+            </span>
+          </div>
+          <p class="component-purpose">{{ directory.purpose }}</p>
+          
+          <div *ngIf="directory.responsibilities" class="responsibilities">
+            <h5>Key Responsibilities:</h5>
+            <ul>
+              <li *ngFor="let responsibility of directory.responsibilities">
+                {{ responsibility }}
+              </li>
+            </ul>
+          </div>
+          
+          <div *ngIf="directory.key_files" class="key-files">
+            <h5>Key Files:</h5>
+            <div class="file-tags">
+              <span *ngFor="let file of directory.key_files" class="file-tag">
+                {{ file }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Content Tabs -->
     <div class="content-tabs">
       <div class="tabs-nav">
-        <button class="tab-button active" data-tab="readme">README</button>
-        <button *ngIf="hasArchitecture(repo)" class="tab-button" data-tab="architecture">Architecture</button>
-        <button *ngIf="hasSkillsIndex(repo)" class="tab-button" data-tab="skills">Skills Index</button>
-        <button *ngIf="hasComponents(repo)" class="tab-button" data-tab="components">Components</button>
+        <button class="tab-button" 
+                [class.active]="activeTab === 'readme'"
+                (click)="setActiveTab('readme')">
+          <i class="fas fa-book"></i> README
+        </button>
+        <button *ngIf="hasArchitecture(repo)" 
+                class="tab-button" 
+                [class.active]="activeTab === 'architecture'"
+                (click)="setActiveTab('architecture')">
+          <i class="fas fa-sitemap"></i> Architecture
+        </button>
+        <button *ngIf="hasSkillsIndex(repo)" 
+                class="tab-button" 
+                [class.active]="activeTab === 'skills'"
+                (click)="setActiveTab('skills')">
+          <i class="fas fa-graduation-cap"></i> Skills Index
+        </button>
+        <button *ngIf="hasDeploymentWorkflow(repo)" 
+                class="tab-button" 
+                [class.active]="activeTab === 'deployment'"
+                (click)="setActiveTab('deployment')">
+          <i class="fas fa-rocket"></i> Deployment
+        </button>
       </div>
 
       <!-- README Content -->
-      <div class="tab-content active" id="readme">
+      <div class="tab-content" [class.active]="activeTab === 'readme'">
         <div *ngIf="hasReadme(repo)" class="readme-content">
           <markdown [data]="repo.readme"></markdown>
         </div>
@@ -152,41 +257,100 @@
       </div>
 
       <!-- Architecture Content -->
-      <div *ngIf="hasArchitecture(repo)" class="tab-content" id="architecture">
+      <div *ngIf="hasArchitecture(repo)" 
+           class="tab-content" 
+           [class.active]="activeTab === 'architecture'">
         <div class="architecture-content">
           <markdown [data]="repo.architecture"></markdown>
         </div>
       </div>
 
       <!-- Skills Index Content -->
-      <div *ngIf="hasSkillsIndex(repo)" class="tab-content" id="skills">
+      <div *ngIf="hasSkillsIndex(repo)" 
+           class="tab-content" 
+           [class.active]="activeTab === 'skills'">
         <div class="skills-content">
           <markdown [data]="repo.skillsIndex"></markdown>
         </div>
       </div>
 
-      <!-- Components -->
-      <div *ngIf="hasComponents(repo)" class="tab-content" id="components">
-        <div class="components-section">
-          <div *ngFor="let component of getComponents(repo)" class="component-card">
-            <h4>{{ component.name }}</h4>
-            <p *ngIf="component.description">{{ component.description }}</p>
-            <div *ngIf="component.technologies" class="component-tech">
-              <span *ngFor="let tech of component.technologies" class="tech-badge mini">
-                {{ tech }}
-              </span>
+      <!-- Deployment Workflow Content -->
+      <div *ngIf="hasDeploymentWorkflow(repo)" 
+           class="tab-content" 
+           [class.active]="activeTab === 'deployment'">
+        <div class="deployment-content">
+          <h3>Deployment Workflow</h3>
+          <div class="workflow-steps">
+            <div *ngFor="let step of getDeploymentWorkflow(repo); let i = index" class="workflow-step">
+              <div class="step-number">{{ i + 1 }}</div>
+              <div class="step-content">
+                <h4>{{ step.name || step }}</h4>
+                <p *ngIf="step.description">{{ step.description }}</p>
+                <div *ngIf="step.commands" class="step-commands">
+                  <code *ngFor="let command of step.commands">{{ command }}</code>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Prerequisites -->
-    <div *ngIf="getPrerequisites(repo).length > 0" class="prerequisites-section">
-      <h2>Prerequisites</h2>
-      <ul class="prerequisites-list">
-        <li *ngFor="let prereq of getPrerequisites(repo)">{{ prereq }}</li>
-      </ul>
+    <!-- Assessment & Outcomes -->
+    <div *ngIf="hasRepoContext(repo)" class="assessment-section">
+      <div class="assessment-grid">
+        
+        <!-- Complexity Factors -->
+        <div *ngIf="getComplexityFactors(repo).length > 0" class="assessment-card">
+          <h3><i class="fas fa-puzzle-piece"></i> Complexity Factors</h3>
+          <ul class="assessment-list">
+            <li *ngFor="let factor of getComplexityFactors(repo)">{{ factor }}</li>
+          </ul>
+        </div>
+
+        <!-- Evaluation Criteria -->
+        <div *ngIf="getEvaluationCriteria(repo).length > 0" class="assessment-card">
+          <h3><i class="fas fa-check-circle"></i> Evaluation Criteria</h3>
+          <ul class="assessment-list">
+            <li *ngFor="let criteria of getEvaluationCriteria(repo)">{{ criteria }}</li>
+          </ul>
+        </div>
+
+        <!-- Prerequisites -->
+        <div *ngIf="getPrerequisites(repo).length > 0" class="assessment-card">
+          <h3><i class="fas fa-graduation-cap"></i> Prerequisites</h3>
+          <ul class="assessment-list">
+            <li *ngFor="let prereq of getPrerequisites(repo)">{{ prereq }}</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Associated Projects -->
+    <div *ngIf="hasAssociatedProjects(repo)" class="related-projects">
+      <h2>Related Projects</h2>
+      <div class="related-grid">
+        <div *ngFor="let project of getAssociatedProjects(repo)" class="related-card">
+          <h4>{{ project.name }}</h4>
+          <p *ngIf="project.description">{{ project.description }}</p>
+          <span *ngIf="project.relationship" class="relationship-badge">
+            {{ project.relationship }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer Actions -->
+    <div class="footer-actions">
+      <button (click)="openGithubRepo(repo)" class="primary-action">
+        <i class="fab fa-github"></i> View Source Code
+      </button>
+      <button *ngIf="repo.homepage" (click)="openHomepage(repo)" class="secondary-action">
+        <i class="fas fa-external-link-alt"></i> Visit Project
+      </button>
+      <button (click)="goBack()" class="tertiary-action">
+        <i class="fas fa-arrow-left"></i> Back to Projects
+      </button>
     </div>
 
   </div>
