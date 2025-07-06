@@ -79,9 +79,23 @@
         <div class="metrics-grid">
           <div class="metric-item">
             <div class="metric-label">Difficulty</div>
-            <div class="metric-value" 
-                 [style.color]="getDifficultyColor(getDifficultyRating(repo))">
-              {{ getDifficultyRating(repo) }}
+            <div class="metric-value">
+              <ng-container *ngIf="!isDifficultyLoading(repo.name); else difficultyLoading">
+                <span class="difficulty-rating" 
+                      [style.color]="getDifficultyColor(repo.name)"
+                      [title]="getDifficultyTooltip(repo.name)">
+                  {{ getDifficultyRating(repo) }}
+                </span>
+                <span *ngIf="getDifficultyScore(repo.name) > 0" class="difficulty-score">
+                  ({{ getDifficultyScore(repo.name) }}/100)
+                </span>
+              </ng-container>
+              <ng-template #difficultyLoading>
+                <div class="loading-indicator">
+                  <span class="loading-spinner"></span>
+                  <span class="loading-text">Analyzing...</span>
+                </div>
+              </ng-template>
             </div>
           </div>
           <div class="metric-item" *ngIf="getEstimatedHours(repo) > 0">
@@ -351,6 +365,115 @@
       <button (click)="goBack()" class="tertiary-action">
         <i class="fas fa-arrow-left"></i> Back to Projects
       </button>
+    </div>
+
+    <!-- Detailed Difficulty Analysis -->
+    <div *ngIf="getDifficultyAnalysis(repo.name) as analysis" class="difficulty-analysis-section">
+      <h2>Difficulty Analysis</h2>
+      
+      <div class="analysis-grid">
+        <!-- Overall Score -->
+        <div class="analysis-card">
+          <h3>Overall Assessment</h3>
+          <div class="difficulty-score-display">
+            <div class="score-circle" [style.color]="getDifficultyColor(repo.name)">
+              <span class="score-value">{{ analysis.score }}</span>
+              <span class="score-max">/100</span>
+            </div>
+            <div class="score-details">
+              <div class="difficulty-level" [style.color]="getDifficultyColor(repo.name)">
+                {{ analysis.difficulty | titlecase }}
+              </div>
+              <div class="confidence-level">
+                {{ (analysis.confidence * 100) | number:'1.0-0' }}% Confidence
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Breakdown -->
+        <div class="analysis-card">
+          <h3>Complexity Breakdown</h3>
+          <div class="breakdown-bars">
+            <div class="breakdown-item">
+              <span class="breakdown-label">Technology Stack</span>
+              <div class="breakdown-bar">
+                <div class="breakdown-fill" 
+                     [style.width.%]="(analysis.breakdown.technology_complexity / 30) * 100"
+                     [style.background-color]="getDifficultyColor(repo.name)">
+                </div>
+              </div>
+              <span class="breakdown-score">{{ analysis.breakdown.technology_complexity }}/30</span>
+            </div>
+            
+            <div class="breakdown-item">
+              <span class="breakdown-label">Architecture</span>
+              <div class="breakdown-bar">
+                <div class="breakdown-fill" 
+                     [style.width.%]="(analysis.breakdown.architecture_complexity / 25) * 100"
+                     [style.background-color]="getDifficultyColor(repo.name)">
+                </div>
+              </div>
+              <span class="breakdown-score">{{ analysis.breakdown.architecture_complexity }}/25</span>
+            </div>
+            
+            <div class="breakdown-item">
+              <span class="breakdown-label">Skills Required</span>
+              <div class="breakdown-bar">
+                <div class="breakdown-fill" 
+                     [style.width.%]="(analysis.breakdown.skill_requirements / 20) * 100"
+                     [style.background-color]="getDifficultyColor(repo.name)">
+                </div>
+              </div>
+              <span class="breakdown-score">{{ analysis.breakdown.skill_requirements }}/20</span>
+            </div>
+            
+            <div class="breakdown-item">
+              <span class="breakdown-label">Project Scope</span>
+              <div class="breakdown-bar">
+                <div class="breakdown-fill" 
+                     [style.width.%]="(analysis.breakdown.project_scope / 15) * 100"
+                     [style.background-color]="getDifficultyColor(repo.name)">
+                </div>
+              </div>
+              <span class="breakdown-score">{{ analysis.breakdown.project_scope }}/15</span>
+            </div>
+            
+            <div class="breakdown-item">
+              <span class="breakdown-label">Repository Size</span>
+              <div class="breakdown-bar">
+                <div class="breakdown-fill" 
+                     [style.width.%]="(analysis.breakdown.repository_metrics / 10) * 100"
+                     [style.background-color]="getDifficultyColor(repo.name)">
+                </div>
+              </div>
+              <span class="breakdown-score">{{ analysis.breakdown.repository_metrics }}/10</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Reasoning -->
+        <div class="analysis-card">
+          <h3>Analysis Factors</h3>
+          <ul class="reasoning-list">
+            <li *ngFor="let reason of analysis.reasoning" class="reasoning-item">
+              <i class="fas fa-check-circle"></i>
+              {{ reason }}
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading state for difficulty analysis -->
+    <div *ngIf="isDifficultyLoading(repo.name)" class="difficulty-analysis-loading">
+      <h2>Difficulty Analysis</h2>
+      <div class="analysis-loading-card">
+        <div class="loading-indicator">
+          <span class="loading-spinner"></span>
+          <span class="loading-text">Analyzing project complexity...</span>
+        </div>
+      </div>
     </div>
 
   </div>

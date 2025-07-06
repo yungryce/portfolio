@@ -80,10 +80,22 @@
           <div class="metric-item">
             <div class="metric-label">Difficulty</div>
             <div class="metric-value">
-              <span class="difficulty-rating" 
-                    [style.color]="getDifficultyColor(getDifficultyRating(repo))">
-                {{ getDifficultyRating(repo) }}/10
-              </span>
+              <ng-container *ngIf="!isDifficultyLoading(repo.name); else difficultyLoading">
+                <span class="difficulty-rating" 
+                      [style.color]="getDifficultyColor(repo.name)"
+                      [title]="getDifficultyTooltip(repo.name)">
+                  {{ getDifficultyRating(repo) }}
+                </span>
+                <span *ngIf="getDifficultyScore(repo.name) > 0" class="difficulty-score">
+                  ({{ getDifficultyScore(repo.name) }}/100)
+                </span>
+              </ng-container>
+              <ng-template #difficultyLoading>
+                <div class="loading-indicator">
+                  <span class="loading-spinner"></span>
+                  <span class="loading-text">Analyzing...</span>
+                </div>
+              </ng-template>
             </div>
           </div>
 
@@ -125,6 +137,18 @@
         <a [routerLink]="['/projects', repo.name, 'about']" class="action-link about-link">
           <i class="fas fa-book-open"></i> Learn More
         </a>
+      </div>
+
+      <!-- Add detailed difficulty breakdown if available -->
+      <div *ngIf="getDifficultyAnalysis(repo.name) as analysis" class="difficulty-breakdown">
+        <div class="breakdown-item" *ngFor="let reason of analysis.reasoning">
+          <small class="text-muted">{{ reason }}</small>
+        </div>
+        <div class="confidence-indicator">
+          <small class="text-muted">
+            Confidence: {{ (analysis.confidence * 100) | number:'1.0-0' }}%
+          </small>
+        </div>
       </div>
 
     </div>

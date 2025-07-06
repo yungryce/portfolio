@@ -1,11 +1,12 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { Observable, switchMap, catchError, of, tap } from 'rxjs';
+import { Observable, switchMap, catchError, of, tap, Subject, takeUntil, map } from 'rxjs';
 import { GithubService, Repository } from '../../services/github.service';
 import { ProjectConfigHelper, TechStack } from '../projects-config';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { MarkdownModule } from 'ngx-markdown';
+import { DifficultyService, DifficultyAnalysis, DifficultyState } from '../../services/difficulty.service';
 
 @Component({
   selector: 'app-project-about',
@@ -14,8 +15,9 @@ import { MarkdownModule } from 'ngx-markdown';
   templateUrl: './project-about.component.html',
   styleUrls: ['./project-about.component.css']
 })
-export class ProjectAboutComponent implements OnInit {
-  repository$!: Observable<Repository>;
+export class ProjectAboutComponent implements OnInit, OnDestroy {
+  // Fix: Type the Observable to handle null values properly
+  repository$!: Observable<Repository | null>;
   loading = true;
   error = false;
   errorMessage = '';
@@ -23,59 +25,75 @@ export class ProjectAboutComponent implements OnInit {
   // Tab state management
   activeTab = 'readme';
   
+  // Difficulty state
+  difficultyState: DifficultyState = {};
+  private destroy$ = new Subject<void>();
+  
   constructor(
     private route: ActivatedRoute,
     private router: Router,
-    private githubService: GithubService
+    private githubService: GithubService,
+    private difficultyService: DifficultyService
   ) { }
 
   ngOnInit(): void {
     console.log('ProjectAboutComponent: ngOnInit called');
+    this.setupDifficultyStateSubscription();
     this.loadRepositoryData();
   }
 
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  private setupDifficultyStateSubscription(): void {
+    this.difficultyService.difficultyState$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(state => {
+        this.difficultyState = state;
+      });
+  }
+
   private loadRepositoryData(): void {
-    console.log('ProjectAboutComponent: loadRepositoryData started');
-    this.loading = true;
-    this.error = false;
-    this.errorMessage = '';
-
-    this.repository$ = this.route.params.pipe(
-      tap(params => {
-        console.log('ProjectAboutComponent: Route params received:', params);
-        this.loading = true;
-        this.error = false;
-      }),
+    console.log('ProjectAboutComponent: Starting to load repository data');
+    
+    this.repository$ = this.route.paramMap.pipe(
       switchMap(params => {
-        const repoName = params['repoName'];
-        console.log('ProjectAboutComponent: Extracted repoName:', repoName);
-        
+        const repoName = params.get('name');
         if (!repoName) {
-          console.error('ProjectAboutComponent: No repository name provided');
-          this.handleError('No repository name provided');
-          return of({} as Repository);
+          throw new Error('Repository name not found in route');
         }
-
-        console.log(`ProjectAboutComponent: Calling githubService.getRepositoryWithAllDocs(${repoName})`);
-
-        // Use the optimized method to get complete repository data
+        
+        console.log(`ProjectAboutComponent: Loading repository: ${repoName}`);
+        
         return this.githubService.getRepositoryWithAllDocs(repoName).pipe(
           tap(repo => {
-            console.log('ProjectAboutComponent: Repository loaded successfully:', repo);
-            console.log('ProjectAboutComponent: Setting loading to false');
-            this.loading = false;
+            if (repo) {
+              console.log('ProjectAboutComponent: Repository loaded successfully:', repo);
+              this.loading = false;
+              
+              // Check if we already have difficulty data cached
+              if (!this.difficultyService.isDifficultyLoaded(repo.name) && 
+                  !this.difficultyService.isDifficultyLoading(repo.name)) {
+                // Trigger background fetch if not already cached
+                console.log(`ProjectAboutComponent: Triggering background difficulty fetch for ${repo.name}`);
+                this.difficultyService.getDifficultyAnalysis(repo.name).subscribe({
+                  next: (analysis) => {
+                    console.log(`ProjectAboutComponent: Difficulty analysis loaded for ${repo.name}:`, analysis);
+                  },
+                  error: (err) => {
+                    console.warn(`ProjectAboutComponent: Failed to load difficulty for ${repo.name}:`, err);
+                  }
+                });
+              }
+            }
           }),
           catchError(error => {
-            console.error(`ProjectAboutComponent: Error loading repository ${repoName}:`, error);
-            console.error('ProjectAboutComponent: Error details:', {
-              status: error.status,
-              message: error.message,
-              error: error
-            });
+            console.error('ProjectAboutComponent: Error loading repository:', error);
             
-            // Handle specific error cases
             if (error.status === 404) {
-              this.handleError(`Repository "${repoName}" not found`);
+              this.handleError('Repository not found');
             } else if (error.status === 403) {
               this.handleError('API rate limit exceeded. Please try again later.');
             } else if (error.status === 0) {
@@ -84,28 +102,11 @@ export class ProjectAboutComponent implements OnInit {
               this.handleError('Failed to load repository data. Please try again.');
             }
             
-            return of({} as Repository);
+            return of(null);
           })
         );
       })
     );
-    
-    console.log('ProjectAboutComponent: Observable created, subscribing for debug...');
-    
-    // Add a subscription for debugging (remove this after debugging)
-    this.repository$.subscribe({
-      next: (repo) => {
-        console.log('ProjectAboutComponent: Observable emitted:', repo);
-        console.log('ProjectAboutComponent: Loading state:', this.loading);
-        console.log('ProjectAboutComponent: Error state:', this.error);
-      },
-      error: (err) => {
-        console.error('ProjectAboutComponent: Observable error:', err);
-      },
-      complete: () => {
-        console.log('ProjectAboutComponent: Observable completed');
-      }
-    });
   }
 
   private handleError(message: string): void {
@@ -115,53 +116,69 @@ export class ProjectAboutComponent implements OnInit {
     console.error('ProjectAboutComponent Error:', message);
   }
 
-  // Tab management
+  // ===== NAVIGATION AND UI METHODS =====
+  
   setActiveTab(tab: string): void {
     this.activeTab = tab;
   }
 
-  // Retry functionality
   retryLoad(): void {
+    this.error = false;
+    this.errorMessage = '';
+    this.loading = true;
     this.loadRepositoryData();
   }
 
-  // Navigation helpers
   goBack(): void {
     this.router.navigate(['/projects']);
   }
 
-  // Repository data helper methods using ProjectConfigHelper
+  openGithubRepo(repo: Repository): void {
+    if (repo?.html_url) {
+      window.open(repo.html_url, '_blank');
+    }
+  }
+
+  openHomepage(repo: Repository): void {
+    if (repo?.homepage) {
+      window.open(repo.homepage, '_blank');
+    }
+  }
+
+  // ===== PROJECT DATA EXTRACTION METHODS =====
+  
   getProjectTitle(repo: Repository): string {
-    if (!repo || !repo.name) return 'Unknown Project';
+    if (!repo?.name) return 'Unknown Project';
     return ProjectConfigHelper.getProjectTitle(repo.repoContext, repo.name);
   }
 
   getProjectDescription(repo: Repository): string {
-    if (!repo || !repo.name) return 'No description available';
+    if (!repo?.name) return 'No description available';
     return ProjectConfigHelper.getProjectDescription(repo.repoContext, repo.name);
   }
 
   getScreenshotUrl(repo: Repository): string | undefined {
-    if (!repo || !repo.name) return undefined;
+    if (!repo?.name) return undefined;
     return ProjectConfigHelper.getScreenshotUrl(repo.repoContext, repo.name);
   }
 
   getProjectTags(repo: Repository): string[] {
-    if (!repo || !repo.name) return [];
+    if (!repo?.name) return [];
     return ProjectConfigHelper.getProjectTags(repo.repoContext, repo.name);
   }
 
   getTechStack(repo: Repository): TechStack[] {
-    if (!repo || !repo.repoContext) return [];
+    if (!repo?.repoContext) return [];
     return ProjectConfigHelper.getTechStack(repo.repoContext);
   }
 
   getProjectMetrics(repo: Repository) {
-    if (!repo || !repo.repoContext) return {};
+    if (!repo?.repoContext) return {};
     return ProjectConfigHelper.getProjectMetrics(repo.repoContext);
   }
 
-  // Specific data extraction methods with null checks
+  // ===== PROJECT IDENTITY METHODS =====
+  
   getProjectType(repo: Repository): string {
     return repo?.repoContext?.project_identity?.type || 'project';
   }
@@ -178,6 +195,8 @@ export class ProjectAboutComponent implements OnInit {
     return repo?.repoContext?.project_identity?.curriculum_stage || 'main';
   }
 
+  // ===== TECHNOLOGY STACK METHODS =====
+  
   getPrimaryTechStack(repo: Repository): string[] {
     return repo?.repoContext?.tech_stack?.primary || [repo?.language].filter(Boolean);
   }
@@ -198,6 +217,8 @@ export class ProjectAboutComponent implements OnInit {
     return repo?.repoContext?.tech_stack?.testing_frameworks || [];
   }
 
+  // ===== SKILLS AND COMPETENCY METHODS =====
+  
   getTechnicalSkills(repo: Repository): string[] {
     return repo?.repoContext?.skill_manifest?.technical || [];
   }
@@ -214,10 +235,8 @@ export class ProjectAboutComponent implements OnInit {
     return repo?.repoContext?.skill_manifest?.prerequisites || [];
   }
 
-  getDifficultyRating(repo: Repository): string {
-    return repo?.repoContext?.assessment?.difficulty || 'intermediate';
-  }
-
+  // ===== ASSESSMENT METHODS =====
+  
   getEstimatedHours(repo: Repository): number {
     return repo?.repoContext?.assessment?.estimated_hours || 0;
   }
@@ -230,7 +249,8 @@ export class ProjectAboutComponent implements OnInit {
     return repo?.repoContext?.assessment?.evaluation_criteria || [];
   }
 
-  // Component and structure data
+  // ===== STRUCTURE AND COMPONENTS METHODS =====
+  
   getMainDirectories(repo: Repository): any[] {
     return repo?.repoContext?.components?.main_directories || [];
   }
@@ -256,17 +276,68 @@ export class ProjectAboutComponent implements OnInit {
     return repo?.repoContext?.associatedProjects || [];
   }
 
-  // UI helper methods
-  getDifficultyColor(difficulty: string): string {
-    const colors: { [key: string]: string } = {
-      'beginner': '#4ade80',
-      'intermediate': '#fbbf24', 
-      'advanced': '#fb923c',
-      'expert': '#ef4444'
-    };
-    return colors[difficulty] || '#6b7280';
+  // ===== DIFFICULTY METHODS - USING SERVICE =====
+  
+  isDifficultyLoading(repoName: string): boolean {
+    return this.difficultyService.isDifficultyLoading(repoName);
   }
 
+  getDifficultyAnalysis(repoName: string): DifficultyAnalysis | null {
+    return this.difficultyService.getCachedDifficulty(repoName);
+  }
+
+  getDifficultyScore(repoName: string): number {
+    const analysis = this.getDifficultyAnalysis(repoName);
+    return analysis?.score || 0;
+  }
+
+  getDifficultyRating(repo: Repository): string {
+    const analysis = this.getDifficultyAnalysis(repo.name);
+    return analysis?.difficulty || this.calculateFallbackDifficulty(repo);
+  }
+
+  getDifficultyTooltip(repoName: string): string {
+    const analysis = this.getDifficultyAnalysis(repoName);
+    if (!analysis) return 'Difficulty analysis not available';
+    
+    return `${analysis.difficulty} (${analysis.score}/100) - ${(analysis.confidence * 100).toFixed(0)}% confidence`;
+  }
+
+  // Fix: Single getDifficultyColor method that works with both signatures
+  getDifficultyColor(input: string | Repository): string {
+    let difficulty: string;
+    
+    if (typeof input === 'string') {
+      // Called with repository name
+      const analysis = this.getDifficultyAnalysis(input);
+      difficulty = analysis?.difficulty || 'intermediate';
+    } else {
+      // Called with Repository object (legacy support)
+      difficulty = this.getDifficultyRating(input);
+    }
+    
+    return this.difficultyService.getDifficultyColor(difficulty);
+  }
+
+  private calculateFallbackDifficulty(repo: Repository): string {
+    if (!repo?.repoContext) return 'intermediate';
+    
+    let score = 0;
+    const techStack = repo.repoContext.tech_stack;
+    
+    if (techStack?.primary?.length > 0) score += techStack.primary.length * 2;
+    if (techStack?.secondary?.length > 0) score += techStack.secondary.length;
+    
+    const components = repo.repoContext.components;
+    if (components) score += Object.keys(components).length * 2;
+    
+    if (score >= 20) return 'advanced';
+    if (score >= 10) return 'intermediate';
+    return 'beginner';
+  }
+
+  // ===== UI HELPER METHODS =====
+  
   getCompetencyColor(level: string): string {
     const colors: { [key: string]: string } = {
       'beginner': '#10b981',
@@ -277,7 +348,8 @@ export class ProjectAboutComponent implements OnInit {
     return colors[level] || '#6b7280';
   }
 
-  // Content validation helpers
+  // ===== CONTENT VALIDATION METHODS =====
+  
   hasReadme(repo: Repository): boolean {
     return !!repo?.readme && repo.readme.trim().length > 0;
   }
@@ -306,7 +378,8 @@ export class ProjectAboutComponent implements OnInit {
     return this.getAssociatedProjects(repo).length > 0;
   }
 
-  // Utility methods
+  // ===== UTILITY METHODS =====
+  
   formatDuration(minutes: number): string {
     if (minutes < 60) return `${minutes}m`;
     const hours = Math.floor(minutes / 60);
@@ -316,18 +389,5 @@ export class ProjectAboutComponent implements OnInit {
 
   formatFileCount(count: number): string {
     return count.toLocaleString();
-  }
-
-  // External link helpers
-  openGithubRepo(repo: Repository): void {
-    if (repo?.html_url) {
-      window.open(repo.html_url, '_blank');
-    }
-  }
-
-  openHomepage(repo: Repository): void {
-    if (repo?.homepage) {
-      window.open(repo.homepage, '_blank');
-    }
   }
 }

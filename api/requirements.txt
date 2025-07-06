@@ -6,6 +6,4 @@ azure-functions
 requests
 openai
 azure-storage-blob
-# pandas
-# numpy
-# pytz
+azure-monitor-opentelemetry

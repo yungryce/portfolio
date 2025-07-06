@@ -22,7 +22,7 @@ export class PortfolioService {
   queryPortfolio(query: string): Observable<PortfolioQueryResponse> {
     console.log('Querying portfolio with:', query);
     return this.http.post<PortfolioQueryResponse>(
-      `${this.configService.apiUrl}/portfolio/query`,
+      `${this.configService.apiUrl}/ai`,
       { query }
     ).pipe(
       tap(response => console.log('AI Response:', response))
