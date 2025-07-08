@@ -7,3 +7,4 @@ requests
 openai
 azure-storage-blob
 azure-monitor-opentelemetry
+tiktoken

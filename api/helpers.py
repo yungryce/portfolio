@@ -1,7 +1,9 @@
 import json
 import logging
 import azure.functions as func
-from typing import Optional
+import tiktoken
+from typing import Optional, Dict, List, Any
+from datetime import datetime
 
 
 def format_file_response(file_content: str, file_path: str, logger: Optional[logging.Logger] = None) -> func.HttpResponse:
@@ -176,3 +178,86 @@ def create_success_response(data: dict, cache_control: str = "public, max-age=90
             "Content-Type": "application/json; charset=utf-8"
         }
     )
+
+
+# New AI Assistant utility functions
+def count_tokens(text: str, model: str = "gpt-3.5-turbo") -> int:
+    """Count tokens in text using tiktoken."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+        return len(encoding.encode(text))
+    except Exception:
+        # Fallback to rough estimation
+        return len(text) // 4
+
+
+def safe_get_nested_value(data: Dict, path: str, default: Any = None) -> Any:
+    """Safely get nested dictionary value using dot notation."""
+    keys = path.split('.')
+    current = data
+    
+    for key in keys:
+        if isinstance(current, dict) and key in current:
+            current = current[key]
+        else:
+            return default
+    
+    return current
+
+
+def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
+    """Truncate text to maximum length with suffix."""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length - len(suffix)] + suffix
+
+
+def normalize_string(value: Any) -> str:
+    """Safely normalize any value to a lowercase string."""
+    if value is None:
+        return ""
+    return str(value).lower()
+
+
+def extract_keywords_from_text(text: str, min_length: int = 3) -> List[str]:
+    """Extract keywords from text, filtering by minimum length."""
+    if not text:
+        return []
+    
+    words = text.lower().split()
+    return [word for word in words if len(word) >= min_length]
+
+
+def calculate_text_similarity(text1: str, text2: str) -> float:
+    """Calculate basic text similarity using word overlap."""
+    if not text1 or not text2:
+        return 0.0
+    
+    words1 = set(text1.lower().split())
+    words2 = set(text2.lower().split())
+    
+    intersection = words1.intersection(words2)
+    union = words1.union(words2)
+    
+    if not union:
+        return 0.0
+    
+    return len(intersection) / len(union)
+
+
+def validate_component_data(comp_data: Any) -> bool:
+    """Validate component data structure."""
+    if isinstance(comp_data, dict):
+        return True
+    elif isinstance(comp_data, list):
+        return all(isinstance(item, dict) for item in comp_data)
+    return False
+
+
+def extract_component_info(comp_data: Any) -> List[Dict[str, str]]:
+    """Extract component information from various data structures."""
+    if isinstance(comp_data, dict):
+        return [comp_data]
+    elif isinstance(comp_data, list):
+        return [item for item in comp_data if isinstance(item, dict)]
+    return []

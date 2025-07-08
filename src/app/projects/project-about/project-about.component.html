@@ -1,480 +1,482 @@
-<div class="container mx-auto p-4">
-  
-  <!-- Loading State -->
-  <div *ngIf="loading" class="loading-container">
-    <div class="loading-spinner"></div>
-    <p>Loading project details...</p>
-  </div>
-
-  <!-- Error State -->
-  <div *ngIf="error" class="error-container">
-    <div class="error-icon">⚠️</div>
-    <h2>Failed to Load Project</h2>
-    <p>{{ errorMessage }}</p>
-    <div class="error-actions">
-      <button (click)="retryLoad()" class="retry-button">Try Again</button>
-      <button (click)="goBack()" class="back-button">Back to Projects</button>
-    </div>
-  </div>
-
-  <!-- Repository Content -->
-  <div *ngIf="!loading && !error && (repository$ | async) as repo" class="max-w-7xl mx-auto">
+<ng-container *ngIf="repository$ | async as repo">
+  <div class="container mx-auto p-4">
     
-    <!-- Navigation -->
-    <div class="mb-6">
-      <button (click)="goBack()" class="back-link">
-        <i class="fas fa-arrow-left mr-2"></i>Back to Projects
-      </button>
+    <!-- Loading State -->
+    <div *ngIf="loading" class="loading-container">
+      <div class="loading-spinner"></div>
+      <p>Loading project details...</p>
     </div>
-    
-    <!-- Project Header -->
-    <div class="project-header">
-      <div class="header-content">
-        <div class="flex items-start justify-between mb-4">
-          <div class="flex-1">
-            <h1 class="project-title">{{ getProjectTitle(repo) }}</h1>
-            <p class="project-description">{{ getProjectDescription(repo) }}</p>
+
+    <!-- Error State -->
+    <div *ngIf="error" class="error-container">
+      <div class="error-icon">⚠️</div>
+      <h2>Failed to Load Project</h2>
+      <p>{{ errorMessage }}</p>
+      <div class="error-actions">
+        <button (click)="retryLoad()" class="retry-button">Try Again</button>
+        <button (click)="goBack()" class="back-button">Back to Projects</button>
+      </div>
+    </div>
+
+    <!-- Repository Content -->
+    <div *ngIf="!loading && !error" class="max-w-7xl mx-auto">
+      
+      <!-- Navigation -->
+      <div class="mb-6">
+        <button (click)="goBack()" class="back-link">
+          <i class="fas fa-arrow-left mr-2"></i>Back to Projects
+        </button>
+      </div>
+      
+      <!-- Project Header -->
+      <div class="project-header">
+        <div class="header-content">
+          <div class="flex items-start justify-between mb-4">
+            <div class="flex-1">
+              <h1 class="project-title">{{ getProjectTitle(repo) }}</h1>
+              <p class="project-description">{{ getProjectDescription(repo) }}</p>
+            </div>
+            
+            <!-- Screenshot -->
+            <div *ngIf="getScreenshotUrl(repo)" class="screenshot-container ml-6">
+              <img [src]="getScreenshotUrl(repo)" 
+                   [alt]="getProjectTitle(repo) + ' screenshot'"
+                   class="screenshot-image">
+            </div>
           </div>
           
-          <!-- Screenshot -->
-          <div *ngIf="getScreenshotUrl(repo)" class="screenshot-container ml-6">
-            <img [src]="getScreenshotUrl(repo)" 
-                 [alt]="getProjectTitle(repo) + ' screenshot'"
-                 class="screenshot-image">
+          <!-- Project Meta -->
+          <div class="project-meta">
+            <span class="project-badge" 
+                  [style.background-color]="getCompetencyColor(getCompetencyLevel(repo))">
+              {{ getProjectType(repo) }}
+            </span>
+            <span class="project-badge scope">{{ getProjectScope(repo) }}</span>
+            <span class="project-badge version">v{{ getProjectVersion(repo) }}</span>
+            <span class="project-badge stage">{{ getCurriculumStage(repo) }}</span>
           </div>
         </div>
+
+        <!-- Project Links -->
+        <div class="project-links">
+          <button (click)="openGithubRepo(repo)" class="github-link">
+            <i class="fab fa-github"></i> View Code
+          </button>
+          <button *ngIf="repo.homepage" (click)="openHomepage(repo)" class="demo-link">
+            <i class="fas fa-external-link-alt"></i> Live Demo
+          </button>
+          <div class="stars">
+            <i class="fas fa-star"></i> {{ repo.stargazers_count }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Project Overview Grid -->
+      <div *ngIf="hasRepoContext(repo)" class="overview-grid">
         
-        <!-- Project Meta -->
-        <div class="project-meta">
-          <span class="project-badge" 
-                [style.background-color]="getCompetencyColor(getCompetencyLevel(repo))">
-            {{ getProjectType(repo) }}
-          </span>
-          <span class="project-badge scope">{{ getProjectScope(repo) }}</span>
-          <span class="project-badge version">v{{ getProjectVersion(repo) }}</span>
-          <span class="project-badge stage">{{ getCurriculumStage(repo) }}</span>
-        </div>
-      </div>
-
-      <!-- Project Links -->
-      <div class="project-links">
-        <button (click)="openGithubRepo(repo)" class="github-link">
-          <i class="fab fa-github"></i> View Code
-        </button>
-        <button *ngIf="repo.homepage" (click)="openHomepage(repo)" class="demo-link">
-          <i class="fas fa-external-link-alt"></i> Live Demo
-        </button>
-        <div class="stars">
-          <i class="fas fa-star"></i> {{ repo.stargazers_count }}
-        </div>
-      </div>
-    </div>
-
-    <!-- Project Overview Grid -->
-    <div *ngIf="hasRepoContext(repo)" class="overview-grid">
-      
-      <!-- Quick Stats -->
-      <div class="stats-card">
-        <h3>Project Metrics</h3>
-        <div class="metrics-grid">
-          <div class="metric-item">
-            <div class="metric-label">Difficulty</div>
-            <div class="metric-value">
-              <ng-container *ngIf="!isDifficultyLoading(repo.name); else difficultyLoading">
-                <span class="difficulty-rating" 
-                      [style.color]="getDifficultyColor(repo.name)"
-                      [title]="getDifficultyTooltip(repo.name)">
-                  {{ getDifficultyRating(repo) }}
-                </span>
-                <span *ngIf="getDifficultyScore(repo.name) > 0" class="difficulty-score">
-                  ({{ getDifficultyScore(repo.name) }}/100)
-                </span>
-              </ng-container>
-              <ng-template #difficultyLoading>
-                <div class="loading-indicator">
-                  <span class="loading-spinner"></span>
-                  <span class="loading-text">Analyzing...</span>
-                </div>
-              </ng-template>
+        <!-- Quick Stats -->
+        <div class="stats-card">
+          <h3>Project Metrics</h3>
+          <div class="metrics-grid">
+            <div class="metric-item">
+              <div class="metric-label">Difficulty</div>
+              <div class="metric-value">
+                <ng-container *ngIf="!isDifficultyLoading(repo.name); else difficultyLoading">
+                  <span class="difficulty-rating" 
+                        [style.color]="getDifficultyColor(repo.name)"
+                        [title]="getDifficultyTooltip(repo.name)">
+                    {{ getDifficultyRating(repo) }}
+                  </span>
+                  <span *ngIf="getDifficultyScore(repo.name) > 0" class="difficulty-score">
+                    ({{ getDifficultyScore(repo.name) }}/100)
+                  </span>
+                </ng-container>
+                <ng-template #difficultyLoading>
+                  <div class="loading-indicator">
+                    <span class="loading-spinner"></span>
+                    <span class="loading-text">Analyzing...</span>
+                  </div>
+                </ng-template>
+              </div>
+            </div>
+            <div class="metric-item" *ngIf="getEstimatedHours(repo) > 0">
+              <div class="metric-label">Est. Hours</div>
+              <div class="metric-value">{{ getEstimatedHours(repo) }}h</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-label">Competency</div>
+              <div class="metric-value" 
+                   [style.color]="getCompetencyColor(getCompetencyLevel(repo))">
+                {{ getCompetencyLevel(repo) }}
+              </div>
+            </div>
+            <div class="metric-item" *ngIf="repo.language">
+              <div class="metric-label">Language</div>
+              <div class="metric-value">{{ repo.language }}</div>
             </div>
           </div>
-          <div class="metric-item" *ngIf="getEstimatedHours(repo) > 0">
-            <div class="metric-label">Est. Hours</div>
-            <div class="metric-value">{{ getEstimatedHours(repo) }}h</div>
+        </div>
+
+        <!-- Project Tags -->
+        <div class="tags-card" *ngIf="getProjectTags(repo).length > 0">
+          <h3>Topics</h3>
+          <div class="tags-container">
+            <span *ngFor="let tag of getProjectTags(repo)" class="tag">
+              {{ tag }}
+            </span>
           </div>
-          <div class="metric-item">
-            <div class="metric-label">Competency</div>
-            <div class="metric-value" 
-                 [style.color]="getCompetencyColor(getCompetencyLevel(repo))">
-              {{ getCompetencyLevel(repo) }}
+        </div>
+
+      </div>
+
+      <!-- Tech Stack Section -->
+      <div *ngIf="hasRepoContext(repo)" class="tech-section">
+        <h2>Technical Stack</h2>
+        
+        <div class="tech-categories">
+          <!-- Primary Technologies -->
+          <div *ngIf="getPrimaryTechStack(repo).length > 0" class="tech-category">
+            <h3><i class="fas fa-star"></i> Primary Technologies</h3>
+            <div class="tech-badges">
+              <span *ngFor="let tech of getPrimaryTechStack(repo)" class="tech-badge primary">
+                {{ tech }}
+              </span>
             </div>
           </div>
-          <div class="metric-item" *ngIf="repo.language">
-            <div class="metric-label">Language</div>
-            <div class="metric-value">{{ repo.language }}</div>
+
+          <!-- Secondary Technologies -->
+          <div *ngIf="getSecondaryTechStack(repo).length > 0" class="tech-category">
+            <h3><i class="fas fa-tools"></i> Tools & Libraries</h3>
+            <div class="tech-badges">
+              <span *ngFor="let tech of getSecondaryTechStack(repo)" class="tech-badge secondary">
+                {{ tech }}
+              </span>
+            </div>
           </div>
-        </div>
-      </div>
 
-      <!-- Project Tags -->
-      <div class="tags-card" *ngIf="getProjectTags(repo).length > 0">
-        <h3>Topics</h3>
-        <div class="tags-container">
-          <span *ngFor="let tag of getProjectTags(repo)" class="tag">
-            {{ tag }}
-          </span>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- Tech Stack Section -->
-    <div *ngIf="hasRepoContext(repo)" class="tech-section">
-      <h2>Technical Stack</h2>
-      
-      <div class="tech-categories">
-        <!-- Primary Technologies -->
-        <div *ngIf="getPrimaryTechStack(repo).length > 0" class="tech-category">
-          <h3><i class="fas fa-star"></i> Primary Technologies</h3>
-          <div class="tech-badges">
-            <span *ngFor="let tech of getPrimaryTechStack(repo)" class="tech-badge primary">
-              {{ tech }}
-            </span>
+          <!-- Key Libraries -->
+          <div *ngIf="getKeyLibraries(repo).length > 0" class="tech-category">
+            <h3><i class="fas fa-puzzle-piece"></i> Key Libraries</h3>
+            <div class="tech-badges">
+              <span *ngFor="let lib of getKeyLibraries(repo)" class="tech-badge library">
+                {{ lib }}
+              </span>
+            </div>
           </div>
-        </div>
 
-        <!-- Secondary Technologies -->
-        <div *ngIf="getSecondaryTechStack(repo).length > 0" class="tech-category">
-          <h3><i class="fas fa-tools"></i> Tools & Libraries</h3>
-          <div class="tech-badges">
-            <span *ngFor="let tech of getSecondaryTechStack(repo)" class="tech-badge secondary">
-              {{ tech }}
-            </span>
-          </div>
-        </div>
-
-        <!-- Key Libraries -->
-        <div *ngIf="getKeyLibraries(repo).length > 0" class="tech-category">
-          <h3><i class="fas fa-puzzle-piece"></i> Key Libraries</h3>
-          <div class="tech-badges">
-            <span *ngFor="let lib of getKeyLibraries(repo)" class="tech-badge library">
-              {{ lib }}
-            </span>
-          </div>
-        </div>
-
-        <!-- Development Tools -->
-        <div *ngIf="getDevelopmentTools(repo).length > 0" class="tech-category">
-          <h3><i class="fas fa-wrench"></i> Development Tools</h3>
-          <div class="tech-badges">
-            <span *ngFor="let tool of getDevelopmentTools(repo)" class="tech-badge tool">
-              {{ tool }}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Skills Section -->
-    <div *ngIf="hasRepoContext(repo)" class="skills-section">
-      <h2>Skills Demonstrated</h2>
-      
-      <div class="skills-grid">
-        <div *ngIf="getTechnicalSkills(repo).length > 0" class="skill-category">
-          <h3><i class="fas fa-code"></i> Technical Skills</h3>
-          <ul class="skill-list">
-            <li *ngFor="let skill of getTechnicalSkills(repo)">{{ skill }}</li>
-          </ul>
-        </div>
-
-        <div *ngIf="getDomainSkills(repo).length > 0" class="skill-category">
-          <h3><i class="fas fa-brain"></i> Domain Knowledge</h3>
-          <ul class="skill-list">
-            <li *ngFor="let skill of getDomainSkills(repo)">{{ skill }}</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-
-    <!-- Architecture & Components -->
-    <div *ngIf="hasComponents(repo)" class="architecture-section">
-      <h2>Project Architecture</h2>
-      
-      <div class="components-grid">
-        <div *ngFor="let directory of getMainDirectories(repo)" class="component-card">
-          <div class="component-header">
-            <h4><i class="fas fa-folder"></i> {{ directory.path }}</h4>
-            <span class="complexity-badge" 
-                  [class]="'complexity-' + directory.complexity">
-              {{ directory.complexity }}
-            </span>
-          </div>
-          <p class="component-purpose">{{ directory.purpose }}</p>
-          
-          <div *ngIf="directory.responsibilities" class="responsibilities">
-            <h5>Key Responsibilities:</h5>
-            <ul>
-              <li *ngFor="let responsibility of directory.responsibilities">
-                {{ responsibility }}
-              </li>
-            </ul>
-          </div>
-          
-          <div *ngIf="directory.key_files" class="key-files">
-            <h5>Key Files:</h5>
-            <div class="file-tags">
-              <span *ngFor="let file of directory.key_files" class="file-tag">
-                {{ file }}
+          <!-- Development Tools -->
+          <div *ngIf="getDevelopmentTools(repo).length > 0" class="tech-category">
+            <h3><i class="fas fa-wrench"></i> Development Tools</h3>
+            <div class="tech-badges">
+              <span *ngFor="let tool of getDevelopmentTools(repo)" class="tech-badge tool">
+                {{ tool }}
               </span>
             </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Content Tabs -->
-    <div class="content-tabs">
-      <div class="tabs-nav">
-        <button class="tab-button" 
-                [class.active]="activeTab === 'readme'"
-                (click)="setActiveTab('readme')">
-          <i class="fas fa-book"></i> README
-        </button>
-        <button *ngIf="hasArchitecture(repo)" 
-                class="tab-button" 
-                [class.active]="activeTab === 'architecture'"
-                (click)="setActiveTab('architecture')">
-          <i class="fas fa-sitemap"></i> Architecture
-        </button>
-        <button *ngIf="hasSkillsIndex(repo)" 
-                class="tab-button" 
-                [class.active]="activeTab === 'skills'"
-                (click)="setActiveTab('skills')">
-          <i class="fas fa-graduation-cap"></i> Skills Index
-        </button>
-        <button *ngIf="hasDeploymentWorkflow(repo)" 
-                class="tab-button" 
-                [class.active]="activeTab === 'deployment'"
-                (click)="setActiveTab('deployment')">
-          <i class="fas fa-rocket"></i> Deployment
-        </button>
-      </div>
-
-      <!-- README Content -->
-      <div class="tab-content" [class.active]="activeTab === 'readme'">
-        <div *ngIf="hasReadme(repo)" class="readme-content">
-          <markdown [data]="repo.readme"></markdown>
-        </div>
-        <div *ngIf="!hasReadme(repo)" class="no-content">
-          <p>No README available for this repository.</p>
-        </div>
-      </div>
-
-      <!-- Architecture Content -->
-      <div *ngIf="hasArchitecture(repo)" 
-           class="tab-content" 
-           [class.active]="activeTab === 'architecture'">
-        <div class="architecture-content">
-          <markdown [data]="repo.architecture"></markdown>
-        </div>
-      </div>
-
-      <!-- Skills Index Content -->
-      <div *ngIf="hasSkillsIndex(repo)" 
-           class="tab-content" 
-           [class.active]="activeTab === 'skills'">
-        <div class="skills-content">
-          <markdown [data]="repo.skillsIndex"></markdown>
-        </div>
-      </div>
-
-      <!-- Deployment Workflow Content -->
-      <div *ngIf="hasDeploymentWorkflow(repo)" 
-           class="tab-content" 
-           [class.active]="activeTab === 'deployment'">
-        <div class="deployment-content">
-          <h3>Deployment Workflow</h3>
-          <div class="workflow-steps">
-            <div *ngFor="let step of getDeploymentWorkflow(repo); let i = index" class="workflow-step">
-              <div class="step-number">{{ i + 1 }}</div>
-              <div class="step-content">
-                <h4>{{ step.name || step }}</h4>
-                <p *ngIf="step.description">{{ step.description }}</p>
-                <div *ngIf="step.commands" class="step-commands">
-                  <code *ngFor="let command of step.commands">{{ command }}</code>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Assessment & Outcomes -->
-    <div *ngIf="hasRepoContext(repo)" class="assessment-section">
-      <div class="assessment-grid">
+      <!-- Skills Section -->
+      <div *ngIf="hasRepoContext(repo)" class="skills-section">
+        <h2>Skills Demonstrated</h2>
         
-        <!-- Complexity Factors -->
-        <div *ngIf="getComplexityFactors(repo).length > 0" class="assessment-card">
-          <h3><i class="fas fa-puzzle-piece"></i> Complexity Factors</h3>
-          <ul class="assessment-list">
-            <li *ngFor="let factor of getComplexityFactors(repo)">{{ factor }}</li>
-          </ul>
-        </div>
+        <div class="skills-grid">
+          <div *ngIf="getTechnicalSkills(repo).length > 0" class="skill-category">
+            <h3><i class="fas fa-code"></i> Technical Skills</h3>
+            <ul class="skill-list">
+              <li *ngFor="let skill of getTechnicalSkills(repo)">{{ skill }}</li>
+            </ul>
+          </div>
 
-        <!-- Evaluation Criteria -->
-        <div *ngIf="getEvaluationCriteria(repo).length > 0" class="assessment-card">
-          <h3><i class="fas fa-check-circle"></i> Evaluation Criteria</h3>
-          <ul class="assessment-list">
-            <li *ngFor="let criteria of getEvaluationCriteria(repo)">{{ criteria }}</li>
-          </ul>
-        </div>
-
-        <!-- Prerequisites -->
-        <div *ngIf="getPrerequisites(repo).length > 0" class="assessment-card">
-          <h3><i class="fas fa-graduation-cap"></i> Prerequisites</h3>
-          <ul class="assessment-list">
-            <li *ngFor="let prereq of getPrerequisites(repo)">{{ prereq }}</li>
-          </ul>
+          <div *ngIf="getDomainSkills(repo).length > 0" class="skill-category">
+            <h3><i class="fas fa-brain"></i> Domain Knowledge</h3>
+            <ul class="skill-list">
+              <li *ngFor="let skill of getDomainSkills(repo)">{{ skill }}</li>
+            </ul>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Associated Projects -->
-    <div *ngIf="hasAssociatedProjects(repo)" class="related-projects">
-      <h2>Related Projects</h2>
-      <div class="related-grid">
-        <div *ngFor="let project of getAssociatedProjects(repo)" class="related-card">
-          <h4>{{ project.name }}</h4>
-          <p *ngIf="project.description">{{ project.description }}</p>
-          <span *ngIf="project.relationship" class="relationship-badge">
-            {{ project.relationship }}
-          </span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Footer Actions -->
-    <div class="footer-actions">
-      <button (click)="openGithubRepo(repo)" class="primary-action">
-        <i class="fab fa-github"></i> View Source Code
-      </button>
-      <button *ngIf="repo.homepage" (click)="openHomepage(repo)" class="secondary-action">
-        <i class="fas fa-external-link-alt"></i> Visit Project
-      </button>
-      <button (click)="goBack()" class="tertiary-action">
-        <i class="fas fa-arrow-left"></i> Back to Projects
-      </button>
-    </div>
-
-    <!-- Detailed Difficulty Analysis -->
-    <div *ngIf="getDifficultyAnalysis(repo.name) as analysis" class="difficulty-analysis-section">
-      <h2>Difficulty Analysis</h2>
-      
-      <div class="analysis-grid">
-        <!-- Overall Score -->
-        <div class="analysis-card">
-          <h3>Overall Assessment</h3>
-          <div class="difficulty-score-display">
-            <div class="score-circle" [style.color]="getDifficultyColor(repo.name)">
-              <span class="score-value">{{ analysis.score }}</span>
-              <span class="score-max">/100</span>
+      <!-- Architecture & Components -->
+      <div *ngIf="hasComponents(repo)" class="architecture-section">
+        <h2>Project Architecture</h2>
+        
+        <div class="components-grid">
+          <div *ngFor="let directory of getMainDirectories(repo)" class="component-card">
+            <div class="component-header">
+              <h4><i class="fas fa-folder"></i> {{ directory.path }}</h4>
+              <span class="complexity-badge" 
+                    [class]="'complexity-' + directory.complexity">
+                {{ directory.complexity }}
+              </span>
             </div>
-            <div class="score-details">
-              <div class="difficulty-level" [style.color]="getDifficultyColor(repo.name)">
-                {{ analysis.difficulty | titlecase }}
-              </div>
-              <div class="confidence-level">
-                {{ (analysis.confidence * 100) | number:'1.0-0' }}% Confidence
+            <p class="component-purpose">{{ directory.purpose }}</p>
+            
+            <div *ngIf="directory.responsibilities" class="responsibilities">
+              <h5>Key Responsibilities:</h5>
+              <ul>
+                <li *ngFor="let responsibility of directory.responsibilities">
+                  {{ responsibility }}
+                </li>
+              </ul>
+            </div>
+            
+            <div *ngIf="directory.key_files" class="key-files">
+              <h5>Key Files:</h5>
+              <div class="file-tags">
+                <span *ngFor="let file of directory.key_files" class="file-tag">
+                  {{ file }}
+                </span>
               </div>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Breakdown -->
-        <div class="analysis-card">
-          <h3>Complexity Breakdown</h3>
-          <div class="breakdown-bars">
-            <div class="breakdown-item">
-              <span class="breakdown-label">Technology Stack</span>
-              <div class="breakdown-bar">
-                <div class="breakdown-fill" 
-                     [style.width.%]="(analysis.breakdown.technology_complexity / 30) * 100"
-                     [style.background-color]="getDifficultyColor(repo.name)">
-                </div>
-              </div>
-              <span class="breakdown-score">{{ analysis.breakdown.technology_complexity }}/30</span>
-            </div>
-            
-            <div class="breakdown-item">
-              <span class="breakdown-label">Architecture</span>
-              <div class="breakdown-bar">
-                <div class="breakdown-fill" 
-                     [style.width.%]="(analysis.breakdown.architecture_complexity / 25) * 100"
-                     [style.background-color]="getDifficultyColor(repo.name)">
-                </div>
-              </div>
-              <span class="breakdown-score">{{ analysis.breakdown.architecture_complexity }}/25</span>
-            </div>
-            
-            <div class="breakdown-item">
-              <span class="breakdown-label">Skills Required</span>
-              <div class="breakdown-bar">
-                <div class="breakdown-fill" 
-                     [style.width.%]="(analysis.breakdown.skill_requirements / 20) * 100"
-                     [style.background-color]="getDifficultyColor(repo.name)">
-                </div>
-              </div>
-              <span class="breakdown-score">{{ analysis.breakdown.skill_requirements }}/20</span>
-            </div>
-            
-            <div class="breakdown-item">
-              <span class="breakdown-label">Project Scope</span>
-              <div class="breakdown-bar">
-                <div class="breakdown-fill" 
-                     [style.width.%]="(analysis.breakdown.project_scope / 15) * 100"
-                     [style.background-color]="getDifficultyColor(repo.name)">
-                </div>
-              </div>
-              <span class="breakdown-score">{{ analysis.breakdown.project_scope }}/15</span>
-            </div>
-            
-            <div class="breakdown-item">
-              <span class="breakdown-label">Repository Size</span>
-              <div class="breakdown-bar">
-                <div class="breakdown-fill" 
-                     [style.width.%]="(analysis.breakdown.repository_metrics / 10) * 100"
-                     [style.background-color]="getDifficultyColor(repo.name)">
-                </div>
-              </div>
-              <span class="breakdown-score">{{ analysis.breakdown.repository_metrics }}/10</span>
-            </div>
+      <!-- Content Tabs -->
+      <div class="content-tabs">
+        <div class="tabs-nav">
+          <button class="tab-button" 
+                  [class.active]="activeTab === 'readme'"
+                  (click)="setActiveTab('readme')">
+            <i class="fas fa-book"></i> README
+          </button>
+          <button *ngIf="hasArchitecture(repo)" 
+                  class="tab-button" 
+                  [class.active]="activeTab === 'architecture'"
+                  (click)="setActiveTab('architecture')">
+            <i class="fas fa-sitemap"></i> Architecture
+          </button>
+          <button *ngIf="hasSkillsIndex(repo)" 
+                  class="tab-button" 
+                  [class.active]="activeTab === 'skills'"
+                  (click)="setActiveTab('skills')">
+            <i class="fas fa-graduation-cap"></i> Skills Index
+          </button>
+          <button *ngIf="hasDeploymentWorkflow(repo)" 
+                  class="tab-button" 
+                  [class.active]="activeTab === 'deployment'"
+                  (click)="setActiveTab('deployment')">
+            <i class="fas fa-rocket"></i> Deployment
+          </button>
+        </div>
+
+        <!-- README Content -->
+        <div class="tab-content" [class.active]="activeTab === 'readme'">
+          <div *ngIf="hasReadme(repo)" class="readme-content">
+            <markdown [data]="repo.readme"></markdown>
+          </div>
+          <div *ngIf="!hasReadme(repo)" class="no-content">
+            <p>No README available for this repository.</p>
           </div>
         </div>
 
-        <!-- Reasoning -->
-        <div class="analysis-card">
-          <h3>Analysis Factors</h3>
-          <ul class="reasoning-list">
-            <li *ngFor="let reason of analysis.reasoning" class="reasoning-item">
-              <i class="fas fa-check-circle"></i>
-              {{ reason }}
-            </li>
-          </ul>
+        <!-- Architecture Content -->
+        <div *ngIf="hasArchitecture(repo)" 
+             class="tab-content" 
+             [class.active]="activeTab === 'architecture'">
+          <div class="architecture-content">
+            <markdown [data]="repo.architecture"></markdown>
+          </div>
+        </div>
+
+        <!-- Skills Index Content -->
+        <div *ngIf="hasSkillsIndex(repo)" 
+             class="tab-content" 
+             [class.active]="activeTab === 'skills'">
+          <div class="skills-content">
+            <markdown [data]="repo.skillsIndex"></markdown>
+          </div>
+        </div>
+
+        <!-- Deployment Workflow Content -->
+        <div *ngIf="hasDeploymentWorkflow(repo)" 
+             class="tab-content" 
+             [class.active]="activeTab === 'deployment'">
+          <div class="deployment-content">
+            <h3>Deployment Workflow</h3>
+            <div class="workflow-steps">
+              <div *ngFor="let step of getDeploymentWorkflow(repo); let i = index" class="workflow-step">
+                <div class="step-number">{{ i + 1 }}</div>
+                <div class="step-content">
+                  <h4>{{ step.name || step }}</h4>
+                  <p *ngIf="step.description">{{ step.description }}</p>
+                  <div *ngIf="step.commands" class="step-commands">
+                    <code *ngFor="let command of step.commands">{{ command }}</code>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Loading state for difficulty analysis -->
-    <div *ngIf="isDifficultyLoading(repo.name)" class="difficulty-analysis-loading">
-      <h2>Difficulty Analysis</h2>
-      <div class="analysis-loading-card">
-        <div class="loading-indicator">
-          <span class="loading-spinner"></span>
-          <span class="loading-text">Analyzing project complexity...</span>
+      <!-- Assessment & Outcomes -->
+      <div *ngIf="hasRepoContext(repo)" class="assessment-section">
+        <div class="assessment-grid">
+          
+          <!-- Complexity Factors -->
+          <div *ngIf="getComplexityFactors(repo).length > 0" class="assessment-card">
+            <h3><i class="fas fa-puzzle-piece"></i> Complexity Factors</h3>
+            <ul class="assessment-list">
+              <li *ngFor="let factor of getComplexityFactors(repo)">{{ factor }}</li>
+            </ul>
+          </div>
+
+          <!-- Evaluation Criteria -->
+          <div *ngIf="getEvaluationCriteria(repo).length > 0" class="assessment-card">
+            <h3><i class="fas fa-check-circle"></i> Evaluation Criteria</h3>
+            <ul class="assessment-list">
+              <li *ngFor="let criteria of getEvaluationCriteria(repo)">{{ criteria }}</li>
+            </ul>
+          </div>
+
+          <!-- Prerequisites -->
+          <div *ngIf="getPrerequisites(repo).length > 0" class="assessment-card">
+            <h3><i class="fas fa-graduation-cap"></i> Prerequisites</h3>
+            <ul class="assessment-list">
+              <li *ngFor="let prereq of getPrerequisites(repo)">{{ prereq }}</li>
+            </ul>
+          </div>
         </div>
       </div>
-    </div>
 
+      <!-- Associated Projects -->
+      <div *ngIf="hasAssociatedProjects(repo)" class="related-projects">
+        <h2>Related Projects</h2>
+        <div class="related-grid">
+          <div *ngFor="let project of getAssociatedProjects(repo)" class="related-card">
+            <h4>{{ project.name }}</h4>
+            <p *ngIf="project.description">{{ project.description }}</p>
+            <span *ngIf="project.relationship" class="relationship-badge">
+              {{ project.relationship }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="footer-actions">
+        <button (click)="openGithubRepo(repo)" class="primary-action">
+          <i class="fab fa-github"></i> View Source Code
+        </button>
+        <button *ngIf="repo.homepage" (click)="openHomepage(repo)" class="secondary-action">
+          <i class="fas fa-external-link-alt"></i> Visit Project
+        </button>
+        <button (click)="goBack()" class="tertiary-action">
+          <i class="fas fa-arrow-left"></i> Back to Projects
+        </button>
+      </div>
+
+      <!-- Detailed Difficulty Analysis -->
+      <div *ngIf="getDifficultyAnalysis(repo.name) as analysis" class="difficulty-analysis-section">
+        <h2>Difficulty Analysis</h2>
+        
+        <div class="analysis-grid">
+          <!-- Overall Score -->
+          <div class="analysis-card">
+            <h3>Overall Assessment</h3>
+            <div class="difficulty-score-display">
+              <div class="score-circle" [style.color]="getDifficultyColor(repo.name)">
+                <span class="score-value">{{ analysis.score }}</span>
+                <span class="score-max">/100</span>
+              </div>
+              <div class="score-details">
+                <div class="difficulty-level" [style.color]="getDifficultyColor(repo.name)">
+                  {{ analysis.difficulty | titlecase }}
+                </div>
+                <div class="confidence-level">
+                  {{ (analysis.confidence * 100) | number:'1.0-0' }}% Confidence
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Breakdown -->
+          <div class="analysis-card">
+            <h3>Complexity Breakdown</h3>
+            <div class="breakdown-bars">
+              <div class="breakdown-item">
+                <span class="breakdown-label">Technology Stack</span>
+                <div class="breakdown-bar">
+                  <div class="breakdown-fill" 
+                       [style.width.%]="(analysis.breakdown.technology_complexity / 30) * 100"
+                       [style.background-color]="getDifficultyColor(repo.name)">
+                  </div>
+                </div>
+                <span class="breakdown-score">{{ analysis.breakdown.technology_complexity }}/30</span>
+              </div>
+              
+              <div class="breakdown-item">
+                <span class="breakdown-label">Architecture</span>
+                <div class="breakdown-bar">
+                  <div class="breakdown-fill" 
+                       [style.width.%]="(analysis.breakdown.architecture_complexity / 25) * 100"
+                       [style.background-color]="getDifficultyColor(repo.name)">
+                  </div>
+                </div>
+                <span class="breakdown-score">{{ analysis.breakdown.architecture_complexity }}/25</span>
+              </div>
+              
+              <div class="breakdown-item">
+                <span class="breakdown-label">Skills Required</span>
+                <div class="breakdown-bar">
+                  <div class="breakdown-fill" 
+                       [style.width.%]="(analysis.breakdown.skill_requirements / 20) * 100"
+                       [style.background-color]="getDifficultyColor(repo.name)">
+                  </div>
+                </div>
+                <span class="breakdown-score">{{ analysis.breakdown.skill_requirements }}/20</span>
+              </div>
+              
+              <div class="breakdown-item">
+                <span class="breakdown-label">Project Scope</span>
+                <div class="breakdown-bar">
+                  <div class="breakdown-fill" 
+                       [style.width.%]="(analysis.breakdown.project_scope / 15) * 100"
+                       [style.background-color]="getDifficultyColor(repo.name)">
+                  </div>
+                </div>
+                <span class="breakdown-score">{{ analysis.breakdown.project_scope }}/15</span>
+              </div>
+              
+              <div class="breakdown-item">
+                <span class="breakdown-label">Repository Size</span>
+                <div class="breakdown-bar">
+                  <div class="breakdown-fill" 
+                       [style.width.%]="(analysis.breakdown.repository_metrics / 10) * 100"
+                       [style.background-color]="getDifficultyColor(repo.name)">
+                  </div>
+                </div>
+                <span class="breakdown-score">{{ analysis.breakdown.repository_metrics }}/10</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reasoning -->
+          <div class="analysis-card">
+            <h3>Analysis Factors</h3>
+            <ul class="reasoning-list">
+              <li *ngFor="let reason of analysis.reasoning" class="reasoning-item">
+                <i class="fas fa-check-circle"></i>
+                {{ reason }}
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading state for difficulty analysis -->
+      <div *ngIf="isDifficultyLoading(repo.name)" class="difficulty-analysis-loading">
+        <h2>Difficulty Analysis</h2>
+        <div class="analysis-loading-card">
+          <div class="loading-indicator">
+            <span class="loading-spinner"></span>
+            <span class="loading-text">Analyzing project complexity...</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
   </div>
-</div>
+</ng-container>

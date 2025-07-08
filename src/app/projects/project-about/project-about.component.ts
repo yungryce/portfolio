@@ -37,9 +37,13 @@ export class ProjectAboutComponent implements OnInit, OnDestroy {
   ) { }
 
   ngOnInit(): void {
-    console.log('ProjectAboutComponent: ngOnInit called');
-    this.setupDifficultyStateSubscription();
     this.loadRepositoryData();
+    this.setupDifficultyStateSubscription();
+
+    // TEMP: subscribe for debugging
+    this.repository$.subscribe(repo => {
+      console.log('DEBUG: repository$ emitted', repo);
+    });
   }
 
   ngOnDestroy(): void {
@@ -60,7 +64,7 @@ export class ProjectAboutComponent implements OnInit, OnDestroy {
     
     this.repository$ = this.route.paramMap.pipe(
       switchMap(params => {
-        const repoName = params.get('name');
+        const repoName = params.get('repoName');
         if (!repoName) {
           throw new Error('Repository name not found in route');
         }

@@ -8,12 +8,7 @@ from datetime import datetime
 from github_client import GitHubClient
 
 # Import AI assistant functions and class
-from ai_assistant import (
-    filter_repositories_with_terms,
-    query_ai_assistant_with_context as ai_assistant_context,
-    extract_search_terms,
-    AIAssistant  # Add the class import
-)
+from ai_assistant import AIAssistant
 
 # Import helper functions
 from helpers import (
@@ -25,8 +20,19 @@ from helpers import (
 )
 
 # Configure logging
+LOG_FILE_PATH = os.getenv("API_LOG_FILE", "api_function_app.log")
 logger = logging.getLogger('portfolio.api')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
+
+# Remove all handlers associated with the logger object (avoid duplicate logs)
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+
+file_handler = logging.FileHandler(LOG_FILE_PATH, mode='a', encoding='utf-8')
+file_handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 app = func.FunctionApp()
 
@@ -180,50 +186,26 @@ def ai_query(req: func.HttpRequest) -> func.HttpResponse:
             logger.error(f"Repository retrieval failed: {str(e)}", exc_info=True)
             return handle_github_error(e, logger)
         
-        # Stage 1: Extract search terms ONCE from all repositories
+        # Create AI Assistant instance
         try:
-            logger.info("Extracting search terms from query and repositories")
-            search_terms = extract_search_terms(query.lower(), all_repos)
-            logger.info(f"Extracted search terms: {dict(search_terms)}")
+            ai_assistant = AIAssistant(github_token=github_token, username=username)
         except Exception as e:
-            logger.error(f"Search term extraction failed: {str(e)}", exc_info=True)
-            search_terms = {'tech': [], 'skills': [], 'components': [], 'project': [], 'general': []}
+            logger.error(f"AI Assistant initialization failed: {str(e)}", exc_info=True)
+            return create_error_response(f"AI Assistant initialization error: {str(e)}", 500)
         
-        # Stage 2: Filter repositories using pre-extracted search terms
+        # Use the complete pipeline method
         try:
-            logger.info("Filtering repositories based on query relevance")
-            relevant_repos = filter_repositories_with_terms(query, all_repos, search_terms)
-            logger.info(f"Found {len(relevant_repos)} relevant repositories")
-        except Exception as e:
-            logger.error(f"Repository filtering failed: {str(e)}", exc_info=True)
-            # Fallback to all repos if filtering fails
-            relevant_repos = all_repos
-        
-        # Stage 3: Generate AI response with filtered context
-        try:
-            logger.info("Querying AI assistant with filtered repository data")
-            ai_response = ai_assistant_context(query, relevant_repos)
+            logger.info("Processing query with AI assistant pipeline")
+            ai_response, metadata = ai_assistant.process_query(query, all_repos)
             logger.info(f"AI assistant generated a response of {len(ai_response)} chars")
         except Exception as e:
-            logger.error(f"AI query failed: {str(e)}", exc_info=True)
+            logger.error(f"AI query processing failed: {str(e)}", exc_info=True)
             return create_error_response(f"AI processing error: {str(e)}", 500)
         
         # Return the AI response with enhanced metadata
         result = {
             "response": ai_response,
-            "metadata": {
-                "total_repos_searched": len(all_repos),
-                "relevant_repos_found": len(relevant_repos),
-                "query_processed": query[:100] + "..." if len(query) > 100 else query,
-                "search_terms_found": {
-                    "tech": len(search_terms.get('tech', [])),
-                    "skills": len(search_terms.get('skills', [])),
-                    "components": len(search_terms.get('components', [])),
-                    "project": len(search_terms.get('project', [])),
-                    "general": len(search_terms.get('general', []))
-                },
-                "repositories_analyzed": [repo.get('name', 'Unknown') for repo in relevant_repos[:5]]
-            }
+            "metadata": metadata
         }
         
         logger.info("Portfolio query processed successfully")
@@ -287,7 +269,6 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Error calculating repository difficulty: {str(e)}", exc_info=True)
         return create_error_response(f"Internal server error: {str(e)}", 500)
 
-# Add this timer trigger function
 
 @app.timer_trigger(schedule="0 0 * * * *", arg_name="myTimer", run_on_startup=False,
                    use_monitor=True) 
