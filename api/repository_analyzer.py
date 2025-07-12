@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
-from helpers import (
+from api.fa_helpers import (
     normalize_string,
     extract_keywords_from_text,
     extract_component_info,
@@ -107,7 +107,7 @@ class RepositoryAnalyzer:
                 'base_score': 6
             },
             'basic': {
-                'technologies': ['html', 'css', 'javascript', 'python', 'java', 'c++', 'php'],
+                'technologies': ['html', 'css', 'javascript', 'python', 'java', 'c++', 'c', 'php'],
                 'score_multiplier': 0.8,
                 'base_score': 3
             }

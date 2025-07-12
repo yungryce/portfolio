@@ -4,16 +4,31 @@ import time
 from typing import Dict, List, Optional, Tuple, Any
 from openai import OpenAI
 from github_client import GitHubClient
-from helpers import (
-    count_tokens, 
-    safe_get_nested_value, 
-    truncate_text, 
-    normalize_string,
-    extract_keywords_from_text,
-    validate_component_data,
-    extract_component_info
+from ai_helpers import (
+    # Text processing
+    count_tokens, truncate_text, normalize_string,
+    
+    # Language processing
+    extract_language_terms, calculate_language_score, get_language_matches,
+    process_language_data,
+    
+    # Component processing
+    extract_component_info, validate_component_data,
+    
+    # Keyword extraction
+    extract_tech_keywords, extract_skill_keywords, extract_component_keywords,
+    extract_project_keywords, find_matching_terms,
+    
+    # Search and scoring
+    extract_context_search_terms, calculate_tech_score, calculate_skill_score,
+    calculate_component_score, calculate_project_score, calculate_general_score,
+    calculate_bonus_score,
+    
+    # Difficulty calculation
+    calculate_tech_difficulty, calculate_architecture_difficulty,
+    calculate_skill_difficulty, calculate_project_difficulty,
+    calculate_metrics_difficulty
 )
-
 
 # Use the existing logger from function_app.py
 logger = logging.getLogger('portfolio.api')
@@ -67,201 +82,116 @@ class AIAssistant:
         return OpenAI(
             api_key=self.groq_api_key,
             base_url="https://api.groq.com/openai/v1"
-        )
+        ) 
     
-    def _extract_tech_keywords(self, tech_stack: Dict) -> set:
-        """Extract technology keywords from tech stack."""
-        keywords = set()
+    def _filter_by_language_priority(self, query: str, repositories: List[Dict], 
+                                   search_terms: Dict, query_languages: List[str]) -> List[Dict]:
+        """Filter repositories with language-first priority."""
+        language_scored_repos = []
         
-        for key in ['primary', 'secondary', 'key_libraries', 'development_tools']:
-            if key in tech_stack and tech_stack[key]:
-                keywords.update(tech.lower() for tech in tech_stack[key] if tech)
-        
-        return keywords
-    
-    def _extract_skill_keywords(self, skill_manifest: Dict) -> set:
-        """Extract skill keywords from skill manifest."""
-        keywords = set()
-        
-        for key in ['technical', 'domain']:
-            if key in skill_manifest and skill_manifest[key]:
-                keywords.update(skill.lower() for skill in skill_manifest[key] if skill)
-        
-        return keywords
-    
-    def _extract_component_keywords(self, components: Dict) -> set:
-        """Extract component keywords from components data."""
-        keywords = set()
-        
-        for comp_name, comp_data in components.items():
-            keywords.add(comp_name.lower())
+        for repo in repositories:
+            # Get language data
+            languages = repo.get('languages', {})
+            total_bytes = repo.get('total_language_bytes', 0)
             
-            # Handle different component data structures
-            comp_items = extract_component_info(comp_data)
-            for item in comp_items:
-                comp_type = item.get('type', '')
-                comp_desc = item.get('description', '')
-                
-                if comp_type:
-                    keywords.add(comp_type.lower())
-                
-                if comp_desc:
-                    keywords.update(extract_keywords_from_text(comp_desc))
-        
-        return keywords
-    
-    def _extract_project_keywords(self, project_identity: Dict) -> set:
-        """Extract project keywords from project identity."""
-        keywords = set()
-        
-        for key in ['type', 'scope', 'name']:
-            value = project_identity.get(key, '')
-            if value:
-                keywords.update(extract_keywords_from_text(value))
-        
-        return keywords
-    
-    def _find_matching_terms(self, query: str, keywords: set) -> List[str]:
-        """Find matching terms between query and keywords."""
-        query_lower = query.lower()
-        return [term for term in keywords if term in query_lower]
-    
-    def _calculate_tech_score(self, tech_stack: Dict, search_terms: Dict) -> float:
-        """Calculate technology stack relevance score."""
-        score = 0.0
-        
-        # Primary tech stack scoring
-        if 'primary' in tech_stack:
-            primary_tech = [tech.lower() for tech in tech_stack['primary']]
-            for term in search_terms.get('tech', []):
-                if any(term in tech for tech in primary_tech):
-                    score += 3.0
-        
-        # Secondary tech stack scoring
-        if 'secondary' in tech_stack:
-            secondary_tech = [tech.lower() for tech in tech_stack['secondary']]
-            for term in search_terms.get('tech', []):
-                if any(term in tech for tech in secondary_tech):
-                    score += 2.0
-        
-        # Key libraries scoring
-        if 'key_libraries' in tech_stack:
-            key_libraries = [lib.lower() for lib in tech_stack['key_libraries']]
-            for term in search_terms.get('tech', []):
-                if any(term in lib for lib in key_libraries):
-                    score += 2.5
-        
-        return score
-    
-    def _calculate_skill_score(self, skill_manifest: Dict, search_terms: Dict) -> float:
-        """Calculate skill manifest relevance score."""
-        score = 0.0
-        
-        # Technical skills scoring
-        if 'technical' in skill_manifest:
-            technical_skills = [skill.lower() for skill in skill_manifest['technical']]
-            for term in search_terms.get('skills', []):
-                if any(term in skill for skill in technical_skills):
-                    score += 1.8
-        
-        # Domain skills scoring
-        if 'domain' in skill_manifest:
-            domain_skills = [skill.lower() for skill in skill_manifest['domain']]
-            for term in search_terms.get('skills', []):
-                if any(term in skill for skill in domain_skills):
-                    score += 1.5
-        
-        return score
-    
-    def _calculate_component_score(self, components: Dict, search_terms: Dict) -> float:
-        """Calculate component relevance score."""
-        score = 0.0
-        
-        for comp_name, comp_data in components.items():
-            comp_items = extract_component_info(comp_data)
+            # Calculate language score (primary factor)
+            language_score = calculate_language_score(languages, query_languages, total_bytes)
             
-            for item in comp_items:
-                comp_type = normalize_string(item.get('type', ''))
-                comp_desc = normalize_string(item.get('description', ''))
-                comp_name_norm = normalize_string(comp_name)
-                
-                for term in search_terms.get('components', []):
-                    if (term in comp_type or 
-                        term in comp_desc or 
-                        term in comp_name_norm):
-                        score += 1.2
-        
-        return score
-    
-    def _calculate_project_score(self, project_identity: Dict, search_terms: Dict) -> float:
-        """Calculate project identity relevance score."""
-        score = 0.0
-        
-        project_name = normalize_string(project_identity.get('name', ''))
-        project_type = normalize_string(project_identity.get('type', ''))
-        project_desc = normalize_string(project_identity.get('description', ''))
-        
-        for term in search_terms.get('project', []):
-            if (term in project_name or 
-                term in project_type or 
-                term in project_desc):
-                score += 1.0
-        
-        return score
-    
-    def _calculate_general_score(self, repo: Dict, search_terms: Dict) -> float:
-        """Calculate general terms relevance score."""
-        score = 0.0
-        
-        repo_name = normalize_string(repo.get('name', ''))
-        repo_description = normalize_string(repo.get('description', ''))
-        repo_language = normalize_string(repo.get('language', ''))
-        repo_topics = [normalize_string(topic) for topic in (repo.get('topics') or [])]
-        
-        for term in search_terms.get('general', []):
-            if (term in repo_name or 
-                term in repo_description or 
-                term in repo_language or 
-                any(term in topic for topic in repo_topics)):
-                score += 0.8
-        
-        return score
-    
-    def _calculate_bonus_score(self, repo_context: Dict, repo: Dict) -> float:
-        """Calculate bonus scores for comprehensive repos."""
-        score = 0.0
-        
-        # Context completeness bonuses
-        if repo_context:
-            tech_stack = repo_context.get('tech_stack', {})
-            skill_manifest = repo_context.get('skill_manifest', {})
-            components = repo_context.get('components', {})
-            project_identity = repo_context.get('project_identity', {})
+            # Calculate traditional relevance score (secondary factor)
+            traditional_score = self.calculate_repo_relevance_score(repo, query.lower(), search_terms)
             
-            if tech_stack.get('primary'):
-                score += 0.5
-            if skill_manifest.get('technical'):
-                score += 0.3
-            if components:
-                score += 0.2
-            if project_identity.get('description'):
-                score += 0.2
+            # Language-first scoring: language matches are heavily weighted
+            if language_score > 0:
+                # Base score from language match, boosted by relevance
+                combined_score = (language_score * 10) + (traditional_score * 0.3)
+                
+                # Get matched languages for metadata
+                matched_languages = []
+                for lang in query_languages:
+                    for repo_lang in languages.keys():
+                        if lang.lower() == repo_lang.lower():
+                            matched_languages.append({
+                                'query_lang': lang,
+                                'repo_lang': repo_lang,
+                                'bytes': languages[repo_lang],
+                                'percentage': repo.get('language_percentages', {}).get(repo_lang, 0)
+                            })
+                            break
+                        elif lang.lower() in repo_lang.lower() or repo_lang.lower() in lang.lower():
+                            matched_languages.append({
+                                'query_lang': lang,
+                                'repo_lang': repo_lang,
+                                'bytes': languages[repo_lang],
+                                'percentage': repo.get('language_percentages', {}).get(repo_lang, 0)
+                            })
+                            break
+                
+                # Sort matched languages by bytes (most used first)
+                matched_languages.sort(key=lambda x: x['bytes'], reverse=True)
+                
+                language_scored_repos.append({
+                    'repo': repo,
+                    'combined_score': combined_score,
+                    'language_score': language_score,
+                    'traditional_score': traditional_score,
+                    'matched_languages': matched_languages,
+                    'has_language_match': True
+                })
+            else:
+                # No language match, use traditional scoring with penalty
+                combined_score = traditional_score * 0.1  # Heavily penalized
+                
+                if combined_score > 0:  # Only include if there's some relevance
+                    language_scored_repos.append({
+                        'repo': repo,
+                        'combined_score': combined_score,
+                        'language_score': 0,
+                        'traditional_score': traditional_score,
+                        'matched_languages': [],
+                        'has_language_match': False
+                    })
         
-        # Recency bonus
-        if repo.get('updated_at'):
-            try:
-                from datetime import datetime
-                updated_date = datetime.fromisoformat(repo['updated_at'].replace('Z', '+00:00'))
-                days_since_update = (datetime.now().replace(tzinfo=updated_date.tzinfo) - updated_date).days
-                if days_since_update < 365:
-                    score += 0.5
-            except:
-                pass
+        # Sort by combined score (language-first)
+        language_scored_repos.sort(key=lambda x: (x['has_language_match'], x['combined_score']), reverse=True)
         
-        return score
-    
+        # Log top results
+        logger.info(f"Language-first filtering results:")
+        for i, item in enumerate(language_scored_repos[:5]):
+            repo = item['repo']
+            lang_info = f"Languages: {[m['repo_lang'] for m in item['matched_languages']]}" if item['matched_languages'] else "No language match"
+            logger.info(f"  {i+1}. {repo['name']}: Combined={item['combined_score']:.2f} "
+                       f"(Lang={item['language_score']:.2f}, Traditional={item['traditional_score']:.2f}) "
+                       f"{lang_info}")
+        
+        return [item['repo'] for item in language_scored_repos[:10]]
+
+
+    def _filter_by_relevance_only(self, query: str, repositories: List[Dict], search_terms: Dict) -> List[Dict]:
+        """Filter repositories using traditional relevance scoring only."""
+        scored_repos = []
+        
+        for repo in repositories:
+            score = self.calculate_repo_relevance_score(repo, query.lower(), search_terms)
+            
+            if score > 0:
+                scored_repos.append({
+                    'repo': repo,
+                    'relevance_score': score,
+                    'matched_categories': self.get_matched_categories(repo, search_terms)
+                })
+        
+        # Sort by relevance score
+        scored_repos.sort(key=lambda x: x['relevance_score'], reverse=True)
+        
+        # Log results
+        logger.info(f"Traditional filtering results:")
+        for i, item in enumerate(scored_repos[:5]):
+            logger.info(f"  {i+1}. {item['repo']['name']}: {item['relevance_score']:.2f}")
+        
+        return [item['repo'] for item in scored_repos[:10]]
+
     def _build_repo_summary(self, repo: Dict, index: int) -> List[str]:
-        """Build a summary section for a repository."""
+        """Enhanced repository summary with prioritized language information."""
         repo_name = repo.get('name', 'Unknown')
         repo_context = repo.get('repoContext', {}) or {}
         
@@ -274,7 +204,25 @@ class AIAssistant:
         if repo.get('description'):
             repo_info.append(f"Description: {truncate_text(repo['description'], 200)}")
         
-        if repo.get('language'):
+        # Enhanced language information (prioritized)
+        if repo.get('languages'):
+            languages = repo['languages']
+            total_bytes = repo.get('total_language_bytes', 0)
+            language_percentages = repo.get('language_percentages', {})
+            
+            if total_bytes > 0:
+                # Use pre-sorted languages if available
+                languages_sorted = repo.get('languages_sorted', [])
+                if not languages_sorted:
+                    languages_sorted = sorted(languages.items(), key=lambda x: x[1], reverse=True)
+                
+                repo_info.append(f"Programming Languages (by usage):")
+                for i, (lang, bytes_count) in enumerate(languages_sorted[:5]):  # Top 5 languages
+                    percentage = language_percentages.get(lang, 0)
+                    repo_info.append(f"  {i+1}. {lang}: {percentage}% ({bytes_count:,} bytes)")
+            else:
+                repo_info.append(f"Primary Language: {repo.get('language', 'Not specified')}")
+        elif repo.get('language'):
             repo_info.append(f"Primary Language: {repo['language']}")
         
         if repo.get('topics'):
@@ -319,7 +267,7 @@ class AIAssistant:
                     repo_info.append(f"  {display_name} ({comp_type}): {comp_desc}")
         
         return repo_info
-    
+
     def _add_context_files(self, repo_name: str, repo_info: List[str], max_chars: int = 1000) -> None:
         """Add context files to repo info with character limits."""
         if not self.gh_client:
@@ -340,70 +288,9 @@ class AIAssistant:
                 content = truncate_text(additional_files[file_key], char_limit)
                 repo_info.append(content)
     
-    def extract_context_search_terms(self, query: str, repositories: List[Dict] = None) -> Dict[str, List[str]]:
-        """
-        Dynamic search term extraction from repository contexts without hardcoded keywords.
-        
-        Args:
-            query: User query string
-            repositories: List of repository dictionaries with context
-            
-        Returns:
-            Dictionary of categorized search terms
-        """
-        # Initialize dynamic keyword collections
-        dynamic_keywords = {
-            'tech': set(),
-            'skills': set(), 
-            'components': set(),
-            'project': set()
-        }
-        
-        # Extract keywords from repository contexts if provided
-        if repositories:
-            for repo in repositories:
-                repo_context = repo.get('repoContext', {})
-                
-                # Extract different types of keywords
-                dynamic_keywords['tech'].update(
-                    self._extract_tech_keywords(repo_context.get('tech_stack', {}))
-                )
-                dynamic_keywords['skills'].update(
-                    self._extract_skill_keywords(repo_context.get('skill_manifest', {}))
-                )
-                dynamic_keywords['components'].update(
-                    self._extract_component_keywords(repo_context.get('components', {}))
-                )
-                dynamic_keywords['project'].update(
-                    self._extract_project_keywords(repo_context.get('project_identity', {}))
-                )
-        
-        # Extract matching terms from query
-        found_terms = {
-            'tech': self._find_matching_terms(query, dynamic_keywords['tech']),
-            'skills': self._find_matching_terms(query, dynamic_keywords['skills']),
-            'components': self._find_matching_terms(query, dynamic_keywords['components']),
-            'project': self._find_matching_terms(query, dynamic_keywords['project']),
-            'general': []
-        }
-        
-        # Extract general terms
-        query_words = query.lower().split()
-        all_known_terms = (dynamic_keywords['tech'] | 
-                          dynamic_keywords['skills'] | 
-                          dynamic_keywords['components'] | 
-                          dynamic_keywords['project'])
-        
-        for word in query_words:
-            if len(word) > 3 and word not in all_known_terms:
-                found_terms['general'].append(word)
-
-        logger.info(f"Extracted context search terms: {found_terms}")
-        return found_terms
-    
     def filter_repositories_with_terms(self, query: str, repositories: List[Dict], search_terms: Dict) -> List[Dict]:
         """
-        Filter repositories using pre-extracted search terms (optimized version).
+        Enhanced filtering with language-based prioritization.
         
         Args:
             query: User query string
@@ -411,32 +298,21 @@ class AIAssistant:
             search_terms: Pre-extracted search terms
             
         Returns:
-            List of filtered repositories sorted by relevance
+            List of filtered repositories sorted by relevance (language-first if applicable)
         """
-        logger.info(f"Filtering {len(repositories)} repositories using pre-extracted search terms")
+        logger.info(f"Filtering {len(repositories)} repositories using enhanced language-aware filtering")
         
-        scored_repos = []
+        # Extract language terms from query
+        query_languages = extract_language_terms(query)
         
-        for repo in repositories:
-            score = self.calculate_repo_relevance_score(repo, query.lower(), search_terms)
-            
-            if score > 0:
-                scored_repos.append({
-                    'repo': repo,
-                    'relevance_score': score,
-                    'matched_categories': self.get_matched_categories(repo, search_terms)
-                })
-        
-        # Sort by relevance score and return top repositories
-        scored_repos.sort(key=lambda x: x['relevance_score'], reverse=True)
-        
-        # Log scoring details
-        logger.info(f"Top scoring repositories:")
-        for i, item in enumerate(scored_repos[:5]):
-            logger.info(f"  {i+1}. {item['repo']['name']}: {item['relevance_score']:.2f}")
-        
-        return [item['repo'] for item in scored_repos[:10]]
-    
+        if query_languages:
+            logger.info(f"Detected programming languages in query: {query_languages}")
+            return self._filter_by_language_priority(query, repositories, search_terms, query_languages)
+        else:
+            logger.info("No programming languages detected, using traditional filtering")
+            return self._filter_by_relevance_only(query, repositories, search_terms)
+
+
     def calculate_repo_relevance_score(self, repo: Dict, query: str, search_terms: Dict) -> float:
         """
         Calculate relevance score for a repository based on query using repo context structure.
@@ -452,18 +328,18 @@ class AIAssistant:
         repo_context = repo.get('repoContext', {}) or {}
         repo_name = normalize_string(repo.get('name', ''))
         
-        # Calculate individual scores
-        tech_score = self._calculate_tech_score(repo_context.get('tech_stack', {}), search_terms)
-        skill_score = self._calculate_skill_score(repo_context.get('skill_manifest', {}), search_terms)
-        component_score = self._calculate_component_score(repo_context.get('components', {}), search_terms)
-        project_score = self._calculate_project_score(repo_context.get('project_identity', {}), search_terms)
-        general_score = self._calculate_general_score(repo, search_terms)
-        bonus_score = self._calculate_bonus_score(repo_context, repo)
+        # Calculate individual scores using helper functions
+        tech_score = calculate_tech_score(repo_context.get('tech_stack', {}), search_terms)
+        skill_score = calculate_skill_score(repo_context.get('skill_manifest', {}), search_terms)
+        component_score = calculate_component_score(repo_context.get('components', {}), search_terms)
+        project_score = calculate_project_score(repo_context.get('project_identity', {}), search_terms)
+        general_score = calculate_general_score(repo, search_terms)
+        bonus_score = calculate_bonus_score(repo_context, repo)
         
         # Total score
         total_score = tech_score + skill_score + component_score + project_score + general_score + bonus_score
         
-        logger.info(f"Calculated relevance score for repo '{repo_name}': {total_score:.2f}")
+        logger.debug(f"Calculated relevance score for repo '{repo_name}': {total_score:.2f}")
         return total_score
     
     def get_matched_categories(self, repo: Dict, search_terms: Dict) -> List[str]:
@@ -660,7 +536,7 @@ Use the architecture documentation and project manifests to give comprehensive a
     
     def process_query(self, query: str, repositories: List[Dict]) -> Tuple[str, Dict]:
         """
-        Main method to process a query with complete pipeline.
+        Enhanced query processing with language-first filtering.
         
         Args:
             query: User query string
@@ -670,13 +546,20 @@ Use the architecture documentation and project manifests to give comprehensive a
             Tuple of (AI response, metadata dictionary)
         """
         logger.info(f"Processing query: {query[:100]}...")
+        query = query.lower()
+        
+        # Process repositories for AI usage (adds language calculations)
+        processed_repos = self.get_repositories_for_ai(username=self.username)
+        
+        # Extract language terms early for metadata
+        query_languages = extract_language_terms(query)
         
         # Stage 1: Extract search terms
-        search_terms = self.extract_context_search_terms(query.lower(), repositories)
+        search_terms = extract_context_search_terms(query, processed_repos)
         logger.info(f"Extracted search terms: {dict(search_terms)}")
-        
-        # Stage 2: Filter repositories
-        relevant_repos = self.filter_repositories_with_terms(query, repositories, search_terms)
+        return search_terms, []
+        # Stage 2: Enhanced filtering with language-first priority
+        relevant_repos = self.filter_repositories_with_terms(query, processed_repos, search_terms)
         logger.info(f"Found {len(relevant_repos)} relevant repositories")
         
         # Stage 3: Build enhanced context
@@ -685,11 +568,13 @@ Use the architecture documentation and project manifests to give comprehensive a
         # Stage 4: Query AI
         ai_response = self.query_ai_with_context(query, enhanced_context)
         
-        # Build metadata
+        # Build enhanced metadata
         metadata = {
             "total_repos_searched": len(repositories),
             "relevant_repos_found": len(relevant_repos),
             "query_processed": query[:100] + "..." if len(query) > 100 else query,
+            "detected_languages": query_languages,
+            "language_based_filtering": len(query_languages) > 0,
             "search_terms_found": {
                 "tech": len(search_terms.get('tech', [])),
                 "skills": len(search_terms.get('skills', [])),
@@ -701,7 +586,70 @@ Use the architecture documentation and project manifests to give comprehensive a
             "context_size_chars": len(enhanced_context)
         }
         
+        # Add language-specific metadata if applicable
+        if query_languages:
+            language_matches = []
+            for repo in relevant_repos[:5]:
+                repo_languages = repo.get('languages', {})
+                total_bytes = repo.get('total_language_bytes', 0)
+                
+                # Get detailed language matches
+                from api.fa_helpers import get_language_matches
+                matches = get_language_matches(repo_languages, query_languages)
+                
+                if matches:
+                    language_matches.append({
+                        "repository": repo['name'],
+                        "language_matches": matches,
+                        "total_languages": len(repo_languages),
+                        "primary_language": repo.get('language', 'Unknown'),
+                        "total_bytes": total_bytes
+                    })
+            
+            metadata["language_matches"] = language_matches
+        
         return ai_response, metadata
+
+    def get_repositories_for_ai(self, username: str = None, include_languages: bool = True) -> List[Dict]:
+        """
+        Convenience method to get repositories optimized for AI Assistant.
+        This combines data fetching with AI-specific processing.
+        
+        Args:
+            username: GitHub username
+            include_languages: Whether to include language data
+            
+        Returns:
+            list: Repositories with AI-specific enhancements
+        """
+        if not self.gh_client:
+            logger.error("GitHub client not available for repository fetching")
+            return []
+        
+        username = username or self.username
+        
+        # Get raw repository data
+        repos = self.gh_client.get_all_repos_with_context(username, include_languages)
+
+        processed_repos = []
+        
+        for repo in repos:
+            # Create a copy to avoid modifying the original
+            processed_repo = repo.copy()
+            
+            # Process language data using helper function
+            processed_repo = process_language_data(processed_repo)
+            
+            # Add other AI-specific enhancements here if needed
+            # For example, you could add:
+            # - Calculated complexity scores
+            # - Normalized tech stack data
+            # - Extracted keywords
+            # - Difficulty ratings
+            
+            processed_repos.append(processed_repo)
+        logger.debug(f"-----------------------------processed_repos: {len(processed_repos)}")
+        return processed_repos
 
     def calculate_difficulty_score(self, repo: Dict) -> Dict[str, Any]:
         """
@@ -964,3 +912,6 @@ Use the architecture documentation and project manifests to give comprehensive a
         """
         difficulty_data = self.calculate_difficulty_score(repo)
         return difficulty_data['difficulty']
+    
+
+

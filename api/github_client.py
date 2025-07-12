@@ -139,6 +139,32 @@ class GitHubClient:
             logger.warning(f"Error saving to cache for key {cache_key}: {str(e)}")
             return False
         
+    def _get_repo_languages(self, username=None, repo=None):
+        """
+        Get programming languages used in a repository.
+        Independent of metadata - can be called standalone.
+        
+        Args:
+            username: GitHub username
+            repo: Repository name
+            
+        Returns:
+            dict: Language names mapped to byte counts
+        """
+        username = username or self.username
+        if not repo:
+            raise ValueError("Repository name is required")
+        
+        languages_endpoint = f"repos/{username}/{repo}/languages"
+        
+        try:
+            # Let make_request handle caching with longer TTL for languages (4 hours)
+            languages_data = self.make_request('GET', languages_endpoint, cache_ttl=14400)
+            return languages_data if languages_data else {}
+        except Exception as e:
+            logger.warning(f"Failed to fetch languages for {username}/{repo}: {str(e)}")
+            return {}
+        
     def _decode_file_content(self, file_data, path, endpoint):
         """Helper to decode file content from GitHub API response."""
         content = file_data.get('content', '')
@@ -340,31 +366,67 @@ class GitHubClient:
         # All retries failed
         raise Exception(f"GitHub API request failed after {retries} attempts: {str(last_exception)}")
         
+    def get_repo_metadata(self, username=None, repo=None, include_languages=False):
+        """
+        Get detailed information for a repository.
         
+        Args:
+            username: GitHub username
+            repo: Repository name  
+            include_languages: Whether to also fetch language data
+            
+        Returns:
+            dict: Repository metadata, optionally with languages
+        """
+        username = username or self.username
+        if not repo:
+            raise ValueError("Repository name is required")
         
-    def get_repo_metadata(self, username=None, repo=None):
-            """Get detailed information for a repository."""
-            username = username or self.username
-            if not repo:
-                raise ValueError("Repository name is required")
-                
-            endpoint = f"repos/{username}/{repo}"
-            return self.make_request('GET', endpoint)
+        endpoint = f"repos/{username}/{repo}"
+        
+        repo_data = self.make_request('GET', endpoint, cache_ttl=7200)  # 2 hour cache for metadata
+        if not repo_data:
+            return None
 
-    def get_all_repos_metadata(self, username=None, per_page=100):
-        """Get repositories for a user with pagination handling and optimized caching."""
+        # Optionally fetch languages if requested
+        if include_languages:
+            try:
+                languages_data = self._get_repo_languages(username, repo)
+                repo_data['languages'] = languages_data
+            except Exception as e:
+                logger.warning(f"Failed to fetch languages for {username}/{repo}: {str(e)}")
+                repo_data['languages'] = {}
+
+        return repo_data
+
+    def get_all_repos_metadata(self, username=None, per_page=100, include_languages=False):
+        """
+        Get repositories for a user with pagination handling and optimized caching.
+        
+        Args:
+            username: GitHub username (defaults to instance username)
+            per_page: Number of repositories per page (max 100)
+            include_languages: Whether to fetch language data for each repository
+            
+        Returns:
+            list: Repository metadata, optionally with language data
+        """
         username = username or self.username
         endpoint = f"users/{username}/repos"
         params = {'sort': 'updated', 'per_page': per_page}
         
-        # Use a specific cache key for the complete repository list
-        complete_cache_key = self._generate_cache_key(f"users_{username}_repos_complete", {'per_page': per_page})
+        # Cache key for the complete aggregated result (all pages + optional languages)
+        cache_suffix = "_with_languages" if include_languages else "_basic"
+        complete_cache_key = self._generate_cache_key(f"users_{username}_repos_complete{cache_suffix}", {'per_page': per_page})
+        
+        # Check cache for complete result
         cached_data = self._get_from_cache(complete_cache_key)
         if cached_data is not None:
-            logger.info(f"Using cached repository data for {username}")
+            logger.info(f"Using cached repository data for {username} " + 
+                       ("(with languages)" if include_languages else "(basic)"))
             return cached_data
         
-        # If not cached, fetch all pages
+        # If not cached, fetch all pages (make_request handles individual page caching)
         all_repos = []
         page = 1
         
@@ -373,7 +435,8 @@ class GitHubClient:
             logger.info(f"Fetching repositories page {page} for {username}")
             
             try:
-                repos = self.make_request('GET', endpoint, params=params, cache_ttl=1800)  # 30 min cache per page
+                # make_request handles caching of individual pages automatically
+                repos = self.make_request('GET', endpoint, params=params, cache_ttl=1800)  # 30 min per page
                 
                 if not repos or not isinstance(repos, list):
                     break
@@ -389,11 +452,25 @@ class GitHubClient:
             except Exception as e:
                 logger.error(f"Error fetching repos for {username}, page {page}: {str(e)}")
                 break
-        
-        # Cache the complete repository list with longer TTL
+    
+        # Enhance with languages if requested (each language call also cached by make_request)
+        if include_languages and all_repos:
+            logger.info(f"Fetching language data for {len(all_repos)} repositories")
+            for repo in all_repos:
+                try:
+                    # _get_repo_languages calls make_request which handles caching
+                    languages = self._get_repo_languages(username, repo['name'])
+                    repo['languages'] = languages
+                except Exception as e:
+                    logger.warning(f"Failed to fetch languages for {repo['name']}: {str(e)}")
+                    repo['languages'] = {}
+    
+        # Cache ONLY the complete aggregated result (not individual API responses)
         if all_repos:
-            self._save_to_cache(complete_cache_key, all_repos, ttl=7200)  # Cache for 2 hours
-            
+            self._save_to_cache(complete_cache_key, all_repos, ttl=7200)  # 2 hours for complete result
+            logger.info(f"Cached {len(all_repos)} repositories for {username} " + 
+                       ("with languages" if include_languages else "without languages"))
+                
         return all_repos
 
     def get_file_content(self, username=None, repo=None, path=None):
@@ -454,34 +531,48 @@ class GitHubClient:
         # Use the optimized get_file_content method
         return self.get_file_content(username, repo, container_path or "")
     
-    def get_all_repos_with_context(self, username=None):
+    def get_all_repos_with_context(self, username=None, include_languages=True):
         """
-        Get all repositories with their context files for comprehensive searching.
+        Get all repositories with context and optionally languages.
+        Optimized for bulk operations with AI Assistant.
+        
+        Args:
+            username: GitHub username
+            include_languages: Whether to fetch language data for each repository
+    
+        Returns:
+            list: Repository data with context and optionally languages (raw data)
         """
         username = username or self.username
         
-        # Check if we have cached data
-        cache_key = f"repos_with_context_{username}"
+        # Cache key for the complete enhanced result
+        cache_suffix = "_with_languages" if include_languages else "_basic"
+        cache_key = f"repos_with_context_{username}{cache_suffix}"
+        
+        # Check cache for complete enhanced result
         cached_data = self._get_from_cache(cache_key)
         if cached_data:
-            logger.info(f"Using cached repository data with context for {username}")
+            logger.info(f"Using cached repository data with context for {username} " +
+                       ("(with languages)" if include_languages else "(without languages)"))
             return cached_data
+
+        # Get all repositories (this method handles its own caching)
+        all_repos = self.get_all_repos_metadata(username, include_languages=include_languages)
         
-        # Get all repositories
-        all_repos = self.get_all_repos_metadata(username)
-        
-        # Enhance each repository with context
+        # Enhance each repository with context (get_file_content uses make_request which caches)
         repos_with_context = []
         for repo in all_repos:
             try:
-                # Get repository context
-                repo_context = self.get_file_content(username, repo['name'], '.repo-context.json')
+                repo_name = repo['name']
+                
+                # Get repository context (make_request handles caching)
+                repo_context = self.get_file_content(username, repo_name, '.repo-context.json')
                 
                 if repo_context and isinstance(repo_context, str):
                     try:
                         repo['repoContext'] = json.loads(repo_context)
                     except json.JSONDecodeError:
-                        logger.warning(f"Invalid JSON in context for {repo['name']}")
+                        logger.warning(f"Invalid JSON in context for {repo_name}")
                         repo['repoContext'] = {}
                 else:
                     repo['repoContext'] = {}
@@ -489,13 +580,19 @@ class GitHubClient:
                 repos_with_context.append(repo)
                 
             except Exception as e:
-                logger.warning(f"Failed to get context for {repo['name']}: {str(e)}")
+                logger.warning(f"Failed to enhance {repo.get('name', 'unknown')}: {str(e)}")
+                # Ensure repo has required fields even on error
+                if 'languages' not in repo and include_languages:
+                    repo['languages'] = {}
                 repo['repoContext'] = {}
                 repos_with_context.append(repo)
-        
-        # Cache the enhanced data
-        self._save_to_cache(cache_key, repos_with_context, ttl=3600)  # 1 hour cache
-        
+    
+        # Cache ONLY the complete enhanced result (raw data)
+        self._save_to_cache(cache_key, repos_with_context, ttl=3600)  # 1 hour for enhanced data
+    
+        logger.info(f"Enhanced {len(repos_with_context)} repositories with context for {username} " +
+                   ("(with languages)" if include_languages else "(without languages)"))
+    
         return repos_with_context
     
     def cleanup_expired_cache(self, batch_size=100, dry_run=False):

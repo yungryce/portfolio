@@ -11,7 +11,7 @@ from github_client import GitHubClient
 from ai_assistant import AIAssistant
 
 # Import helper functions
-from helpers import (
+from fa_helpers import (
     format_file_response,
     handle_github_error,
     validate_github_params,
@@ -62,7 +62,7 @@ def get_repository_metadata(req: func.HttpRequest) -> func.HttpResponse:
     
     try:
         # Get repository details
-        repo_details = gh_client.get_repo_metadata(username, repo)
+        repo_details = gh_client.get_repo_metadata(username, repo, include_languages=True)
         
         if not repo_details:
             logger.warning(f"Repository not found: {username}/{repo}")
@@ -185,7 +185,7 @@ def ai_query(req: func.HttpRequest) -> func.HttpResponse:
         except Exception as e:
             logger.error(f"Repository retrieval failed: {str(e)}", exc_info=True)
             return handle_github_error(e, logger)
-        
+
         # Create AI Assistant instance
         try:
             ai_assistant = AIAssistant(github_token=github_token, username=username)
@@ -198,6 +198,10 @@ def ai_query(req: func.HttpRequest) -> func.HttpResponse:
             logger.info("Processing query with AI assistant pipeline")
             ai_response, metadata = ai_assistant.process_query(query, all_repos)
             logger.info(f"AI assistant generated a response of {len(ai_response)} chars")
+            return create_success_response({
+                "response": None,
+                "metadata": metadata
+            })
         except Exception as e:
             logger.error(f"AI query processing failed: {str(e)}", exc_info=True)
             return create_error_response(f"AI processing error: {str(e)}", 500)
