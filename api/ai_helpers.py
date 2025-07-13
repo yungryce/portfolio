@@ -1,6 +1,7 @@
 import tiktoken
 import logging
 import re
+from data_fiter import technical_terms_structured, extract_language_terms
 from typing import Dict, List, Any, Tuple, Optional
 from datetime import datetime
 
@@ -59,54 +60,48 @@ def calculate_text_similarity(text1: str, text2: str) -> float:
 # LANGUAGE DETECTION AND PROCESSING
 # ==============================================================================
 
-def extract_language_terms(query: str) -> List[str]:
-    """Extract programming language terms from a query with improved detection using regex."""
-    # Enhanced programming languages and their variations
-    language_patterns = {
-        'python': [r'\bpython\b', r'\bpy\b', r'\bdjango\b', r'\bflask\b', r'\bfastapi\b', r'\bpandas\b', r'\bnumpy\b', r'\bpytorch\b', r'\btensorflow\b'],
-        'javascript': [r'\bjavascript\b', r'\bjs\b', r'\bnode\b', r'\bnodejs\b', r'\breact\b', r'\bvue\b', r'\bangular\b', r'\bexpress\b', r'\bnext\b'],
-        'typescript': [r'\btypescript\b', r'\bts\b'],
-        'java': [r'\bjava\b', r'\bspring\b', r'\bspringboot\b', r'\bmaven\b', r'\bgradle\b'],
-        'c++': [r'\bc\+\+\b', r'\bcpp\b', r'\bcplus\b'],
-        'c#': [r'\bc#\b', r'\bcsharp\b', r'\bdotnet\b', r'\b\.net\b'],
-        'c': [r'\bc\b', r'\bc language\b', r'\bbrainfuck\b', r'\blimbo\b', r'\bm\b'],  # Added regex for 'c'
-        'php': [r'\bphp\b', r'\blaravel\b', r'\bsymfony\b', r'\bcomposer\b', r'\bblade\b'],
-        'go': [r'\bgolang\b', r'\bgo\b'],
-        'rust': [r'\brust\b'],
-        'kotlin': [r'\bkotlin\b'],
-        'swift': [r'\bswift\b'],
-        'ruby': [r'\bruby\b', r'\brails\b'],
-        'scala': [r'\bscala\b'],
-        'r': [r'\br\b', r'\br language\b', r'\brstudio\b'],  # Added regex for 'r'
-        'matlab': [r'\bmatlab\b'],
-        'sql': [r'\bsql\b', r'\bmysql\b', r'\bpostgresql\b', r'\bsqlite\b', r'\bmongodb\b'],
-        'html': [r'\bhtml\b', r'\bhtml5\b'],
-        'css': [r'\bcss\b', r'\bcss3\b', r'\bscss\b', r'\bsass\b'],
-        'shell': [r'\bshell\b', r'\bbash\b', r'\bsh\b'],
-        'powershell': [r'\bpowershell\b', r'\bps1\b'],
-        'dockerfile': [r'\bdocker\b', r'\bdockerfile\b'],
-        'yaml': [r'\byaml\b', r'\byml\b'],
-        'json': [r'\bjson\b'],
-        'xml': [r'\bxml\b'],
-        'hcl': [r'\bhcl\b'],
-        'jinja': [r'\bjinja\b'],
-        'mako': [r'\bmako\b'],
-        'procfile': [r'\bprocfile\b'],
-        'assembly': [r'\bassembly\b'],
-        'puppet': [r'\bpuppet\b']
-    }
+def process_language_data(repo: dict) -> dict:
+    """
+    Process language data for a repository to add calculated fields.
+    This is a utility function for processing repository language data.
     
-    query_lower = query.lower()
-    found_languages = []
+    Args:
+        repo: Repository dictionary with 'languages' field
+        
+    Returns:
+        dict: Repository with processed language data added
+    """
+    if not repo.get('languages'):
+        # Ensure consistent structure even without languages
+        repo['total_language_bytes'] = 0
+        repo['language_percentages'] = {}
+        repo['languages_sorted'] = []
+        return repo
     
-    for language, patterns in language_patterns.items():
-        for pattern in patterns:
-            if re.search(pattern, query_lower):
-                found_languages.append(language)
-                break  # Only add each language once
+    languages = repo['languages']
+    total_bytes = sum(languages.values())
+    repo['total_language_bytes'] = total_bytes
+    # logger.debug(f"Processing languages for repo {repo.get('name', 'unknown')}: {languages} (Total bytes: {total_bytes})")
     
-    return found_languages
+    if total_bytes > 0:
+        # Calculate language percentages
+        repo['language_percentages'] = {
+            lang: round((bytes_count / total_bytes) * 100, 1)
+            for lang, bytes_count in languages.items()
+        }
+        
+        # Sort languages by usage (most used first)
+        repo['languages_sorted'] = sorted(
+            languages.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )
+    else:
+        repo['language_percentages'] = {}
+        repo['languages_sorted'] = []
     
+    return repo
+
 
 def calculate_language_score(repo_languages: Dict[str, int], query_languages: List[str], 
                            total_bytes: int = 0) -> float:
@@ -153,12 +148,24 @@ def calculate_language_score(repo_languages: Dict[str, int], query_languages: Li
                     else:
                         score += 3  # Reduced score for partial matches
                     break
-    
+
     return score
 
-def get_language_matches(repo_languages: Dict[str, int], query_languages: List[str]) -> List[Dict]:
-    """Get detailed language matches for debugging/metadata."""
+def get_language_matches(repo_languages: Dict[str, int], query_languages: List[str], 
+                         relevance_scores: Dict = None) -> List[Dict]:
+    """
+    Get matched languages between repository and user query with enhanced context.
+    
+    Args:
+        repo_languages: Dictionary of repository languages and their byte counts
+        query_languages: List of languages from user query
+        relevance_scores: Optional dictionary of category relevance scores
+        
+    Returns:
+        List of matched language dictionaries with enhanced context
+    """
     matches = []
+    language_relevance = relevance_scores.get('language', 0) if relevance_scores else 0
     
     for query_lang in query_languages:
         query_lang_lower = query_lang.lower()
@@ -166,94 +173,48 @@ def get_language_matches(repo_languages: Dict[str, int], query_languages: List[s
         # Check for direct matches first
         for repo_lang, bytes_count in repo_languages.items():
             if query_lang_lower == repo_lang.lower():
+                # Add enhanced confidence based on relevance score
+                confidence = "high"
+                if relevance_scores:
+                    if language_relevance > 10:
+                        confidence = "very high"
+                    elif language_relevance > 5:
+                        confidence = "high"
+                    else:
+                        confidence = "medium"
+                
                 matches.append({
                     'query_language': query_lang,
                     'repo_language': repo_lang,
                     'match_type': 'direct',
-                    'bytes': bytes_count
+                    'bytes': bytes_count,
+                    'confidence': confidence
                 })
                 break
         else:
             # Check for partial matches
             for repo_lang, bytes_count in repo_languages.items():
                 if query_lang_lower in repo_lang.lower() or repo_lang.lower() in query_lang_lower:
+                    # Add enhanced confidence based on relevance score
+                    confidence = "medium"
+                    if relevance_scores:
+                        if language_relevance > 8:
+                            confidence = "high"
+                        elif language_relevance > 3:
+                            confidence = "medium"
+                        else:
+                            confidence = "low"
+                    
                     matches.append({
                         'query_language': query_lang,
                         'repo_language': repo_lang,
                         'match_type': 'partial',
-                        'bytes': bytes_count
+                        'bytes': bytes_count,
+                        'confidence': confidence
                     })
                     break
     
     return matches
-
-def process_language_data(repo: dict) -> dict:
-    """
-    Process language data for a repository to add calculated fields.
-    This is a utility function for processing repository language data.
-    
-    Args:
-        repo: Repository dictionary with 'languages' field
-        
-    Returns:
-        dict: Repository with processed language data added
-    """
-    if not repo.get('languages'):
-        # Ensure consistent structure even without languages
-        repo['total_language_bytes'] = 0
-        repo['language_percentages'] = {}
-        repo['languages_sorted'] = []
-        return repo
-    
-    languages = repo['languages']
-    total_bytes = sum(languages.values())
-    repo['total_language_bytes'] = total_bytes
-    # logger.debug(f"Processing languages for repo {repo.get('name', 'unknown')}: {languages} (Total bytes: {total_bytes})")
-    
-    if total_bytes > 0:
-        # Calculate language percentages
-        repo['language_percentages'] = {
-            lang: round((bytes_count / total_bytes) * 100, 1)
-            for lang, bytes_count in languages.items()
-        }
-        
-        # Sort languages by usage (most used first)
-        repo['languages_sorted'] = sorted(
-            languages.items(), 
-            key=lambda x: x[1], 
-            reverse=True
-        )
-    else:
-        repo['language_percentages'] = {}
-        repo['languages_sorted'] = []
-    
-    return repo
-
-def sort_repos_by_language_relevance(repositories: List[Dict], query_languages: List[str]) -> List[Dict]:
-    """Sort repositories by language relevance score."""
-    if not query_languages:
-        return repositories
-    
-    scored_repos = []
-    
-    for repo in repositories:
-        languages = repo.get('languages', {})
-        total_bytes = repo.get('total_language_bytes', 0)
-        
-        language_score = calculate_language_score(languages, query_languages, total_bytes)
-        
-        scored_repos.append({
-            'repo': repo,
-            'language_score': language_score,
-            'matched_languages': [lang for lang in query_languages 
-                                if any(lang.lower() in repo_lang.lower() 
-                                      for repo_lang in languages.keys())]
-        })
-    
-    # Sort by language score (descending)
-    scored_repos.sort(key=lambda x: x['language_score'], reverse=True)
-    
-    return [item['repo'] for item in scored_repos]
 
 # ==============================================================================
 # COMPONENT AND CONTEXT PROCESSING
@@ -292,6 +253,42 @@ def safe_get_nested_value(data: Dict, path: str, default: Any = None) -> Any:
 # KEYWORD EXTRACTION FUNCTIONS
 # ==============================================================================
 
+
+def trim_processed_repo(repo: Dict) -> Dict:
+    """
+    Trim repository dictionary to only include relevant keys.
+    
+    Args:
+        repo: Repository dictionary with all data
+        
+    Returns:
+        Dictionary with only the relevant keys preserved
+    """
+    # Define top-level keys to keep
+    keys_to_keep = [
+        'id', 'name', 'url', 'description', 'fork', 
+        'created_at', 'updated_at', 'pushed_at', 'size',
+        'language', 'license', 'allow_forking', 'topics', 
+        'visibility', 'languages', 'repoContext',
+        'total_language_bytes', 'language_percentages', 
+        'languages_sorted', 'relevance_scores',
+        'language_relevance_score', 'matched_query_languages'
+    ]
+    
+    # Create new dictionary with only desired keys
+    trimmed_repo = {k: v for k, v in repo.items() if k in keys_to_keep}
+    
+    # Handle nested owner dictionary separately
+    if 'owner' in repo and isinstance(repo['owner'], dict):
+        trimmed_repo['owner'] = {}
+        # Only keep 'login' and 'url' from owner dictionary
+        for nested_key in ['login', 'url']:
+            if nested_key in repo['owner']:
+                trimmed_repo['owner'][nested_key] = repo['owner'][nested_key]
+    
+    return trimmed_repo
+
+
 def extract_tech_keywords(tech_stack: Dict) -> set:
     """Extract technology keywords from tech stack."""
     keywords = set()
@@ -299,7 +296,6 @@ def extract_tech_keywords(tech_stack: Dict) -> set:
     for key in ['primary', 'secondary', 'key_libraries', 'development_tools']:
         if key in tech_stack and tech_stack[key]:
             keywords.update(tech.lower() for tech in tech_stack[key] if tech)
-    
     return keywords
 
 def extract_skill_keywords(skill_manifest: Dict) -> set:
@@ -317,19 +313,45 @@ def extract_component_keywords(components: Dict) -> set:
     keywords = set()
     
     for comp_name, comp_data in components.items():
-        keywords.add(comp_name.lower())
-        
+        keywords.add(comp_name)
         # Handle different component data structures
         comp_items = extract_component_info(comp_data)
+        
         for item in comp_items:
             comp_type = item.get('type', '')
             comp_desc = item.get('description', '')
-            
+            comp_path = item.get('path', '')
+            comp_source = item.get('source', '')
+            comp_name = item.get('name', '')
+            comp_key_files = item.get('key_files', [])
+            comp_dependencies = item.get('dependencies', [])
+
             if comp_type:
                 keywords.add(comp_type.lower())
             
             if comp_desc:
                 keywords.update(extract_keywords_from_text(comp_desc))
+                
+            if comp_path:
+                keywords.add(comp_path.lower())
+                
+            if comp_name:
+                keywords.add(comp_name.lower())
+                
+            if comp_source:
+                keywords.add(comp_source.lower())
+            if comp_key_files:
+                for file in comp_key_files:
+                    if isinstance(file, str):
+                        keywords.add(file.lower())
+                    elif isinstance(file, dict):
+                        keywords.update(extract_keywords_from_text(file.get('name', '')))
+            if comp_dependencies:
+                for dep in comp_dependencies:
+                    if isinstance(dep, str):
+                        keywords.add(dep.lower())
+                    elif isinstance(dep, dict):
+                        keywords.update(extract_keywords_from_text(dep.get('name', '')))
     
     return keywords
 
@@ -337,7 +359,7 @@ def extract_project_keywords(project_identity: Dict) -> set:
     """Extract project keywords from project identity."""
     keywords = set()
     
-    for key in ['type', 'scope', 'name']:
+    for key in ['type', 'scope', 'name', 'description']:
         value = project_identity.get(key, '')
         if value:
             keywords.update(extract_keywords_from_text(value))
@@ -353,14 +375,17 @@ def find_matching_terms(query: str, keywords: set) -> List[str]:
         # Use regex to match whole words
         if re.search(rf'\b{re.escape(term)}\b', query_lower):
             found_terms.append(term)
-    
+
     return found_terms
+
+
+
 
 # ==============================================================================
 # SEARCH TERM EXTRACTION
 # ==============================================================================
 
-def extract_context_search_terms(query: str, repositories: List[Dict] = None) -> Dict[str, List[str]]:
+def extract_context_terms(query: str, repositories: List[Dict] = None) -> Dict[str, List[str]]:
     """
     Dynamic search term extraction from repository contexts without hardcoded keywords.
     
@@ -371,53 +396,154 @@ def extract_context_search_terms(query: str, repositories: List[Dict] = None) ->
     Returns:
         Dictionary of categorized search terms
     """
-    # Initialize dynamic keyword collections
-    dynamic_keywords = {
-        'tech': set(),
-        'skills': set(), 
-        'components': set(),
-        'project': set()
-    }
-    
-    # Extract keywords from repository contexts if provided
-    if repositories:
-        for repo in repositories:
-            repo_context = repo.get('repoContext', {})
-            
-            # Extract different types of keywords
-            dynamic_keywords['tech'].update(
-                extract_tech_keywords(repo_context.get('tech_stack', {}))
-            )
-            dynamic_keywords['skills'].update(
-                extract_skill_keywords(repo_context.get('skill_manifest', {}))
-            )
-            dynamic_keywords['components'].update(
-                extract_component_keywords(repo_context.get('components', {}))
-            )
-            dynamic_keywords['project'].update(
-                extract_project_keywords(repo_context.get('project_identity', {}))
-            )
-    # Extract matching terms from query
+    # Initialize result structure with empty lists
     found_terms = {
-        'tech': find_matching_terms(query, dynamic_keywords['tech']),
-        'skills': find_matching_terms(query, dynamic_keywords['skills']),
-        'components': find_matching_terms(query, dynamic_keywords['components']),
-        'project': find_matching_terms(query, dynamic_keywords['project']),
+        'tech': [],
         'general': []
     }
     
-    # Extract general terms
-    query_words = query.lower().split()
-    all_known_terms = (dynamic_keywords['tech'] | 
-                      dynamic_keywords['skills'] | 
-                      dynamic_keywords['components'] | 
-                      dynamic_keywords['project'])
+    # Skip extraction if no repositories provided
+    if not repositories:
+        return found_terms
     
-    for word in query_words:
-        if len(word) > 3 and word not in all_known_terms:
-            found_terms['general'].append(word)
+    # Extract all technical keywords from repositories into a single set
+    tech_keywords = set()
 
+    for repo in repositories:
+        repo_context = repo.get('repoContext', {})
+        
+        # Extract all technical keywords
+        tech_keywords.update(extract_tech_keywords(repo_context.get('tech_stack', {})))
+        tech_keywords.update(extract_skill_keywords(repo_context.get('skill_manifest', {})))
+        tech_keywords.update(extract_component_keywords(repo_context.get('components', {})))
+        tech_keywords.update(extract_project_keywords(repo_context.get('project_identity', {})))
+    
+    # Process compound terms to extract individual components
+    expanded_keywords = set(tech_keywords)
+
+    for term in tech_keywords:
+        # Handle dot-separated terms (like filenames)
+        if '.' in term:
+            parts = term.split('.')
+            for part in parts:
+                if len(part) > 2 and part in technical_terms_structured["technical_keywords"]:
+                    expanded_keywords.add(part)
+                    
+            # Add file extension if present
+            if len(parts) > 1 and parts[-1] in technical_terms_structured["file_extensions"]:
+                expanded_keywords.add(parts[-1])
+        
+        # Handle hyphenated terms
+        elif '-' in term:
+            for part in term.split('-'):
+                if len(part) > 2 and part in technical_terms_structured["technical_keywords"]:
+                    expanded_keywords.add(part)
+        
+        # Handle space-separated terms
+        elif ' ' in term:
+            for part in term.split():
+                if len(part) > 2 and part in technical_terms_structured["technical_keywords"]:
+                    expanded_keywords.add(part)
+    
+    # Filter keywords for meaningful terms
+    filtered_keywords = {
+        term for term in expanded_keywords if is_meaningful_term(term)
+    }
+    logger.debug(f"===--: Extracted technical keywords: {filtered_keywords}")
+    
+    # Process the query to find matches
+    query_words = re.findall(r'\b[a-zA-Z0-9_-]+\b', query.lower())
+    
+    # First pass: Find direct matches with keywords
+    for word in query_words:
+        # Skip very short terms
+        if len(word) <= 2:
+            continue
+            
+        # Check if it's a technical keyword or in our filtered keywords
+        if word in technical_terms_structured["technical_keywords"] or word in filtered_keywords:
+            if word not in found_terms['tech']:
+                found_terms['tech'].append(word)
+    
+    # Second pass: Add remaining terms to general
+    for word in query_words:
+        if len(word) > 3 and word not in found_terms['tech'] and word not in found_terms['general']:
+            found_terms['general'].append(word)
+    
     return found_terms
+
+def is_meaningful_term(term: str) -> bool:
+    """
+    Optimized function to determine if a term is meaningful using technical patterns.
+    Improved to handle filenames, hyphenated terms, and special technical formats.
+    
+    Args:
+        term: The term to evaluate
+        
+    Returns:
+        bool: True if the term is considered meaningful
+    """
+    # Early return for empty terms
+    if not term:
+        return False
+    
+    # Check if the entire term is a recognized programming language
+    if term in extract_language_terms(term):
+        return True
+    
+    # Check for file extension pattern (e.g., app.py, index.html)
+    parts = term.split('.')
+    if len(parts) > 1 and parts[-1] in technical_terms_structured["file_extensions"]:
+        return True
+    
+    # Check for hyphenated technical terms (e.g., react-router)
+    if '-' in term:
+        hyphen_parts = term.split('-')
+        for part in hyphen_parts:
+            if part in technical_terms_structured["technical_keywords"]:
+                return True
+    
+    # Continue with regular space-separated term processing
+    term_parts = term.split()
+    
+    # No parts (empty string or just whitespace)
+    if not term_parts:
+        return False
+    
+    # Flag to track if we found a technical keyword in the term
+    has_technical_keyword = False
+    has_version_pattern = False
+    
+    # Check each part for technical keywords and version patterns
+    for part in term_parts:
+        # Skip the term if any part is a stop word
+        if part in technical_terms_structured["stop_words"]:
+            return False
+        
+        # Check if part is a technical keyword
+        if part in technical_terms_structured["technical_keywords"]:
+            has_technical_keyword = True
+        
+        # Check if part is a file extension
+        if part in technical_terms_structured["file_extensions"]:
+            has_technical_keyword = True  # Treat file extensions like technical keywords
+        
+        # Check if part matches a version pattern
+        for pattern in technical_terms_structured["version_patterns"]:
+            if pattern.match(part):
+                has_version_pattern = True
+                break
+    
+    # If term has only one part and it's just a version number, reject it
+    if len(term_parts) == 1 and has_version_pattern and not has_technical_keyword:
+        return False
+    
+    # Accept the term if it has a technical keyword
+    if has_technical_keyword:
+        return True
+    
+    # If we reach here, the term wasn't found to be meaningful
+    return False
 
 # ==============================================================================
 # SCORING FUNCTIONS
@@ -513,7 +639,7 @@ def calculate_general_score(repo: Dict, search_terms: Dict) -> float:
     repo_name = normalize_string(repo.get('name', ''))
     repo_description = normalize_string(repo.get('description', ''))
     repo_language = normalize_string(repo.get('language', ''))
-    repo_topics = [normalize_string(topic) for topic in (repo.get('topics') or [])]
+    repo_topics = normalize_string(repo.get('topics') or [])
     
     for term in search_terms.get('general', []):
         if (term in repo_name or 
@@ -524,11 +650,22 @@ def calculate_general_score(repo: Dict, search_terms: Dict) -> float:
     
     return score
 
-def calculate_bonus_score(repo_context: Dict, repo: Dict) -> float:
-    """Calculate bonus scores for comprehensive repos."""
-    score = 0.0
+def calculate_bonus_score(repo: Dict, search_terms: Dict) -> float:
+    """
+    Calculate comprehensive bonus score using repository relevance scores.
     
-    # Context completeness bonuses
+    Args:
+        repo: Repository dictionary with all metadata and relevance scores
+        search_terms: Dictionary of search terms by category
+        
+    Returns:
+        Total bonus score
+    """
+    score = 0.0
+    repo_context = repo.get('repoContext', {})
+    relevance_scores = repo.get('relevance_scores', {})
+    
+    # Context completeness bonuses (keep these as they're about repo quality)
     if repo_context:
         tech_stack = repo_context.get('tech_stack', {})
         skill_manifest = repo_context.get('skill_manifest', {})
@@ -544,13 +681,49 @@ def calculate_bonus_score(repo_context: Dict, repo: Dict) -> float:
         if project_identity.get('description'):
             score += 0.2
     
-    # Recency bonus
+    # Enhanced scoring based on relevance_scores if available
+    if relevance_scores:
+        # Cross-category scoring - repositories with balanced matches across categories
+        non_zero_categories = sum(1 for cat_score in relevance_scores.values() if cat_score > 0)
+        if non_zero_categories >= 3:
+            score += 0.8  # Significant bonus for matching 3+ categories
+        elif non_zero_categories == 2:
+            score += 0.4  # Moderate bonus for matching 2 categories
+        
+        # High-relevance bonus - repositories with exceptionally high scores in any category
+        high_scores = sum(1 for cat_score in relevance_scores.values() if cat_score > 5.0)
+        if high_scores >= 2:
+            score += 1.0  # Major bonus for high relevance in multiple categories
+        elif high_scores == 1:
+            score += 0.5  # Minor bonus for high relevance in one category
+        
+        # Language-specific scoring using relevance_scores instead of matched_query_languages
+        language_score = relevance_scores.get('language', 0)
+        if language_score > 10:
+            score += 0.9  # Exceptional language match
+        elif language_score > 5:
+            score += 0.6  # Strong language match
+        elif language_score > 0:
+            score += 0.3  # Some language match
+    else:
+        # Fallback to original language matching if relevance_scores not available
+        language_terms = search_terms.get('languages', [])
+        if language_terms and repo.get('languages'):
+            matched_languages = len(repo.get('matched_query_languages', []))
+            if matched_languages > 1:
+                score += 0.8
+            elif matched_languages == 1:
+                score += 0.4
+    
+    # Recency bonus (keep this as it's independent of matching)
     if repo.get('updated_at'):
         try:
             updated_date = datetime.fromisoformat(repo['updated_at'].replace('Z', '+00:00'))
             days_since_update = (datetime.now().replace(tzinfo=updated_date.tzinfo) - updated_date).days
-            if days_since_update < 365:
-                score += 0.5
+            if days_since_update < 90:  # Very recent (3 months)
+                score += 0.7
+            elif days_since_update < 365:  # Within a year
+                score += 0.4
         except:
             pass
     
@@ -719,3 +892,30 @@ def calculate_metrics_difficulty(repo: Dict) -> Tuple[int, List[str], float]:
         reasoning.append(f"Complex primary language: {repo_language}")
     
     return score, reasoning, confidence
+
+
+# def sort_repos_by_language_relevance(repositories: List[Dict], query_languages: List[str]) -> List[Dict]:
+#     """Sort repositories by language relevance score."""
+#     if not query_languages:
+#         return repositories
+    
+#     scored_repos = []
+    
+#     for repo in repositories:
+#         languages = repo.get('languages', {})
+#         total_bytes = repo.get('total_language_bytes', 0)
+        
+#         language_score = calculate_language_score(languages, query_languages, total_bytes)
+        
+#         scored_repos.append({
+#             'repo': repo,
+#             'language_score': language_score,
+#             'matched_languages': [lang for lang in query_languages 
+#                                 if any(lang.lower() in repo_lang.lower() 
+#                                       for repo_lang in languages.keys())]
+#         })
+    
+#     # Sort by language score (descending)
+#     scored_repos.sort(key=lambda x: x['language_score'], reverse=True)
+    
+#     return [item['repo'] for item in scored_repos]

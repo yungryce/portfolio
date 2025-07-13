@@ -4,23 +4,24 @@ import time
 from typing import Dict, List, Optional, Tuple, Any
 from openai import OpenAI
 from github_client import GitHubClient
+from data_fiter import extract_language_terms
 from ai_helpers import (
     # Text processing
     count_tokens, truncate_text, normalize_string,
     
     # Language processing
-    extract_language_terms, calculate_language_score, get_language_matches,
+    calculate_language_score, get_language_matches,
     process_language_data,
     
     # Component processing
-    extract_component_info, validate_component_data,
+    extract_component_info, validate_component_data, trim_processed_repo,
     
     # Keyword extraction
     extract_tech_keywords, extract_skill_keywords, extract_component_keywords,
     extract_project_keywords, find_matching_terms,
     
     # Search and scoring
-    extract_context_search_terms, calculate_tech_score, calculate_skill_score,
+    extract_context_terms, calculate_tech_score, calculate_skill_score,
     calculate_component_score, calculate_project_score, calculate_general_score,
     calculate_bonus_score,
     
@@ -84,111 +85,33 @@ class AIAssistant:
             base_url="https://api.groq.com/openai/v1"
         ) 
     
-    def _filter_by_language_priority(self, query: str, repositories: List[Dict], 
-                                   search_terms: Dict, query_languages: List[str]) -> List[Dict]:
-        """Filter repositories with language-first priority."""
-        language_scored_repos = []
-        
-        for repo in repositories:
-            # Get language data
-            languages = repo.get('languages', {})
-            total_bytes = repo.get('total_language_bytes', 0)
-            
-            # Calculate language score (primary factor)
-            language_score = calculate_language_score(languages, query_languages, total_bytes)
-            
-            # Calculate traditional relevance score (secondary factor)
-            traditional_score = self.calculate_repo_relevance_score(repo, query.lower(), search_terms)
-            
-            # Language-first scoring: language matches are heavily weighted
-            if language_score > 0:
-                # Base score from language match, boosted by relevance
-                combined_score = (language_score * 10) + (traditional_score * 0.3)
-                
-                # Get matched languages for metadata
-                matched_languages = []
-                for lang in query_languages:
-                    for repo_lang in languages.keys():
-                        if lang.lower() == repo_lang.lower():
-                            matched_languages.append({
-                                'query_lang': lang,
-                                'repo_lang': repo_lang,
-                                'bytes': languages[repo_lang],
-                                'percentage': repo.get('language_percentages', {}).get(repo_lang, 0)
-                            })
-                            break
-                        elif lang.lower() in repo_lang.lower() or repo_lang.lower() in lang.lower():
-                            matched_languages.append({
-                                'query_lang': lang,
-                                'repo_lang': repo_lang,
-                                'bytes': languages[repo_lang],
-                                'percentage': repo.get('language_percentages', {}).get(repo_lang, 0)
-                            })
-                            break
-                
-                # Sort matched languages by bytes (most used first)
-                matched_languages.sort(key=lambda x: x['bytes'], reverse=True)
-                
-                language_scored_repos.append({
-                    'repo': repo,
-                    'combined_score': combined_score,
-                    'language_score': language_score,
-                    'traditional_score': traditional_score,
-                    'matched_languages': matched_languages,
-                    'has_language_match': True
-                })
-            else:
-                # No language match, use traditional scoring with penalty
-                combined_score = traditional_score * 0.1  # Heavily penalized
-                
-                if combined_score > 0:  # Only include if there's some relevance
-                    language_scored_repos.append({
-                        'repo': repo,
-                        'combined_score': combined_score,
-                        'language_score': 0,
-                        'traditional_score': traditional_score,
-                        'matched_languages': [],
-                        'has_language_match': False
-                    })
-        
-        # Sort by combined score (language-first)
-        language_scored_repos.sort(key=lambda x: (x['has_language_match'], x['combined_score']), reverse=True)
-        
+    def _filter_by_language_priority(self, repositories: List[Dict]) -> List[Dict]:
+        """
+        Filter repositories with language-first priority.
+
+        Args:
+            repositories: List of repository dictionaries (already processed)
+
+        Returns:
+            List of repositories sorted by language relevance.
+        """
+        # Filter repositories with a positive language relevance score
+        language_scored_repos = [
+            repo for repo in repositories if repo.get('language_relevance_score', 0) > 0
+        ]
+
+        # Sort by language relevance score (descending)
+        language_scored_repos.sort(key=lambda x: x['language_relevance_score'], reverse=True)
+
         # Log top results
-        logger.info(f"Language-first filtering results:")
-        for i, item in enumerate(language_scored_repos[:5]):
-            repo = item['repo']
-            lang_info = f"Languages: {[m['repo_lang'] for m in item['matched_languages']]}" if item['matched_languages'] else "No language match"
-            logger.info(f"  {i+1}. {repo['name']}: Combined={item['combined_score']:.2f} "
-                       f"(Lang={item['language_score']:.2f}, Traditional={item['traditional_score']:.2f}) "
-                       f"{lang_info}")
-        
-        return [item['repo'] for item in language_scored_repos[:10]]
+        logger.info("Language-first filtering results:")
+        for i, repo in enumerate(language_scored_repos[:5]):
+            matched_languages = repo.get('matched_query_languages', [])
+            lang_info = f"Languages: {[m['repo_lang'] for m in matched_languages]}" if matched_languages else "No language match"
+            logger.info(f"  {i+1}. {repo['name']}: Language Relevance={repo['language_relevance_score']:.2f} {lang_info}")
 
+        return language_scored_repos
 
-    def _filter_by_relevance_only(self, query: str, repositories: List[Dict], search_terms: Dict) -> List[Dict]:
-        """Filter repositories using traditional relevance scoring only."""
-        scored_repos = []
-        
-        for repo in repositories:
-            score = self.calculate_repo_relevance_score(repo, query.lower(), search_terms)
-            
-            if score > 0:
-                scored_repos.append({
-                    'repo': repo,
-                    'relevance_score': score,
-                    'matched_categories': self.get_matched_categories(repo, search_terms)
-                })
-        
-        # Sort by relevance score
-        scored_repos.sort(key=lambda x: x['relevance_score'], reverse=True)
-        
-        # Log results
-        logger.info(f"Traditional filtering results:")
-        for i, item in enumerate(scored_repos[:5]):
-            logger.info(f"  {i+1}. {item['repo']['name']}: {item['relevance_score']:.2f}")
-        
-        return [item['repo'] for item in scored_repos[:10]]
 
     def _build_repo_summary(self, repo: Dict, index: int) -> List[str]:
         """Enhanced repository summary with prioritized language information."""
@@ -288,59 +211,6 @@ class AIAssistant:
                 content = truncate_text(additional_files[file_key], char_limit)
                 repo_info.append(content)
     
-    def filter_repositories_with_terms(self, query: str, repositories: List[Dict], search_terms: Dict) -> List[Dict]:
-        """
-        Enhanced filtering with language-based prioritization.
-        
-        Args:
-            query: User query string
-            repositories: List of repository dictionaries
-            search_terms: Pre-extracted search terms
-            
-        Returns:
-            List of filtered repositories sorted by relevance (language-first if applicable)
-        """
-        logger.info(f"Filtering {len(repositories)} repositories using enhanced language-aware filtering")
-        
-        # Extract language terms from query
-        query_languages = extract_language_terms(query)
-        
-        if query_languages:
-            logger.info(f"Detected programming languages in query: {query_languages}")
-            return self._filter_by_language_priority(query, repositories, search_terms, query_languages)
-        else:
-            logger.info("No programming languages detected, using traditional filtering")
-            return self._filter_by_relevance_only(query, repositories, search_terms)
-
-
-    def calculate_repo_relevance_score(self, repo: Dict, query: str, search_terms: Dict) -> float:
-        """
-        Calculate relevance score for a repository based on query using repo context structure.
-        
-        Args:
-            repo: Repository dictionary with context
-            query: User query string
-            search_terms: Pre-extracted search terms
-            
-        Returns:
-            Relevance score as float
-        """
-        repo_context = repo.get('repoContext', {}) or {}
-        repo_name = normalize_string(repo.get('name', ''))
-        
-        # Calculate individual scores using helper functions
-        tech_score = calculate_tech_score(repo_context.get('tech_stack', {}), search_terms)
-        skill_score = calculate_skill_score(repo_context.get('skill_manifest', {}), search_terms)
-        component_score = calculate_component_score(repo_context.get('components', {}), search_terms)
-        project_score = calculate_project_score(repo_context.get('project_identity', {}), search_terms)
-        general_score = calculate_general_score(repo, search_terms)
-        bonus_score = calculate_bonus_score(repo_context, repo)
-        
-        # Total score
-        total_score = tech_score + skill_score + component_score + project_score + general_score + bonus_score
-        
-        logger.debug(f"Calculated relevance score for repo '{repo_name}': {total_score:.2f}")
-        return total_score
     
     def get_matched_categories(self, repo: Dict, search_terms: Dict) -> List[str]:
         """
@@ -458,6 +328,341 @@ class AIAssistant:
         
         return enhanced_context
     
+    
+    def process_query(self, query: str, repositories: List[Dict]) -> Tuple[str, Dict]:
+        """
+        Enhanced query processing with language-first filtering.
+        
+        Args:
+            query: User query string
+            repositories: List of repository dictionaries with context
+            
+        Returns:
+            Tuple of (AI response, metadata dictionary)
+        """
+        logger.info(f"Processing query: {query[:100]}...")
+        
+        # Stage 1: Extract search terms and language terms
+        search_terms = extract_context_terms(query, repositories)
+        language_terms = extract_language_terms(query)
+
+        # Combine language terms into the search terms dictionary
+        search_terms['languages'] = language_terms
+        logger.info(f"Extracted search terms: {dict(search_terms)}")
+        
+        # Stage 2: Process repositories with enhanced filtering
+        start_time = time.time()
+        processed_repos = self.process_languages(repositories, search_terms)
+        relevant_repos = self.filter_repositories_with_terms(processed_repos, search_terms)
+        processing_time = time.time() - start_time
+        
+        logger.info(f"Repository processing completed in {processing_time:.2f}s")
+
+        # Fallback: if no strong matches found, get top repos by difficulty and bytes
+        if len(relevant_repos) == 0:
+            logger.info("No strong matches found, using fallback strategy")
+            # Add fallback repo with message 
+            relevant_repos = self._get_fallback_repositories(repositories, 5)
+            fallback_message = "No direct matches found for your query, but here are some notable repositories that may be relevant:"
+        else:
+            fallback_message = "I found the following repositories that match your query:"
+        
+        logger.info(f"Found {len(relevant_repos)} relevant repositories")
+        
+        # Stage 3: Build enhanced context
+        enhanced_context = self.build_enhanced_context(relevant_repos)
+        
+        # Stage 4: Query AI with fallback message if needed
+        if fallback_message:
+            query_with_context = f"{query}\n\nNote: {fallback_message}"
+            ai_response = self.query_ai_with_context(query_with_context, enhanced_context)
+        else:
+            ai_response = self.query_ai_with_context(query, enhanced_context)
+            
+        metadata = {
+            "total_repos_searched": len(repositories),
+            "relevant_repos_found": len(relevant_repos),
+            "query_processed": query[:100] + "..." if len(query) > 100 else query,
+            "detected_languages": language_terms,  # FIXED: Use language_terms instead
+            "language_based_filtering": len(language_terms) > 0,  # FIXED: Use language_terms
+            "fallback_used": fallback_message is not None,
+            "search_terms_found": {
+                "tech": len(search_terms.get('tech', [])),
+                "skills": len(search_terms.get('skills', [])),
+                "components": len(search_terms.get('components', [])),
+                "project": len(search_terms.get('project', [])),
+                "general": len(search_terms.get('general', []))
+            },
+            "repositories_analyzed": [repo.get('name', 'Unknown') for repo in relevant_repos[:5]],
+            "context_size_chars": len(enhanced_context),
+            "processing_time_seconds": round(processing_time, 2)
+        }
+        
+        # Add language-specific metadata if applicable
+        if language_terms and relevant_repos:  # FIXED: Use language_terms
+            language_matches = []
+            for repo in relevant_repos[:5]:  # Limit to top 5 for efficiency
+                repo_languages = repo.get('languages', {})
+                total_bytes = repo.get('total_language_bytes', 0)
+                
+                # Get detailed language matches with error handling
+                try:
+                    # FIXED: Pass relevance_scores to get_language_matches
+                    matches = get_language_matches(
+                        repo_languages, 
+                        language_terms,
+                        repo.get('relevance_scores', {})
+                    )
+                    
+                    if matches:
+                        language_matches.append({
+                            "repository": repo.get('name', 'Unknown'),
+                            "language_matches": matches,
+                            "total_languages": len(repo_languages),
+                            "primary_language": repo.get('language', 'Unknown'),
+                            "total_bytes": total_bytes
+                        })
+                except Exception as e:
+                    logger.error(f"Error getting language matches for {repo.get('name', 'Unknown')}: {str(e)}")
+            
+            metadata["language_matches"] = language_matches
+            
+            # Add detailed score breakdown for top matches
+            if relevant_repos:
+                top_matches_details = []
+                for repo in relevant_repos[:3]:
+                    scores = repo.get('relevance_scores', {})
+                    top_matches_details.append({
+                        "name": repo.get('name', 'Unknown'),
+                        "total_score": repo.get('total_relevance_score', 0),
+                        "score_breakdown": {
+                            "language": scores.get('language', 0),
+                            "tech": scores.get('tech', 0),
+                            "skill": scores.get('skill', 0),
+                            "component": scores.get('component', 0),
+                            "project": scores.get('project', 0),
+                            "general": scores.get('general', 0),
+                            "bonus": scores.get('bonus', 0)
+                        }
+                    })
+                metadata["top_matches_details"] = top_matches_details
+        
+        return ai_response, metadata
+
+
+    def process_languages(self, repositories: List[Dict], search_terms: Dict) -> List[Dict]:
+        """
+        Process repositories with language data and optional query language filtering.
+        
+        Args:
+            repositories: List of repository dictionaries
+            query_languages: Optional list of programming languages from query for filtering
+            
+        Returns:
+            List of repositories with AI-specific enhancements and optional language filtering
+        """
+        processed_repos = []
+        language_terms = search_terms.get('languages', [])
+
+        for repo in repositories:
+            # Create a copy to avoid modifying the original
+            processed_repo = repo.copy()
+            
+            # add a function that trims down processed_repo
+            processed_repo = trim_processed_repo(processed_repo)
+
+            # Add language processing data
+            processed_repo = process_language_data(processed_repo)
+            
+            # Calculate relevance scores for each category in search_terms
+            repo_languages = processed_repo.get('languages', {})
+            total_bytes = processed_repo.get('total_language_bytes', 0)
+            
+            # Calculate all category scores
+            language_score = calculate_language_score(repo_languages, language_terms, total_bytes)
+            tech_score = calculate_tech_score(processed_repo.get('repoContext', {}).get('tech_stack', {}), search_terms)
+            skill_score = calculate_skill_score(processed_repo.get('repoContext', {}).get('skill_manifest', {}), search_terms)
+            component_score = calculate_component_score(processed_repo.get('repoContext', {}).get('components', {}), search_terms)
+            project_score = calculate_project_score(processed_repo.get('repoContext', {}).get('project_identity', {}), search_terms)
+            general_score = calculate_general_score(processed_repo, search_terms)
+        
+            # Store category-specific scores in a structured format
+            processed_repo['relevance_scores'] = {
+                'language': language_score,
+                'tech': tech_score,
+                'skill': skill_score,
+                'component': component_score,
+                'project': project_score,
+                'general': general_score
+            }
+            
+            # Store language-specific data
+            processed_repo['language_relevance_score'] = language_score
+            
+            # Enhanced: Pass relevance_scores to get_language_matches
+            matched_languages = get_language_matches(
+                repo_languages, 
+                language_terms, 
+                processed_repo['relevance_scores']
+            )
+            processed_repo['matched_query_languages'] = matched_languages
+            
+            # Enhanced: Calculate bonus score using relevance_scores
+            bonus_score = calculate_bonus_score(processed_repo, search_terms)
+            processed_repo['relevance_scores']['bonus'] = bonus_score
+            
+            # Calculate total score
+            total_relevance_score = (
+                language_score + tech_score + skill_score + 
+                component_score + project_score + general_score + bonus_score
+            )
+            processed_repo['total_relevance_score'] = total_relevance_score
+            
+            processed_repos.append(processed_repo)
+        
+        # Sort repositories by total relevance score
+        processed_repos.sort(key=lambda x: x.get('total_relevance_score', 0), reverse=True)
+        logger.debug(f"Total Processed length {len(processed_repos)} repositories with relevance scores")
+        logger.info(f"Top 3 processed repositories by total relevance score:")
+        for i, repo in enumerate(processed_repos[:3]):
+            scores = repo.get('relevance_scores', {})
+            logger.info(f"  {i+1}. {repo.get('name', 'Unknown')}: "
+                        f"Total={repo.get('total_relevance_score', 0):.2f} "
+                        f"[lang:{scores.get('language', 0):.1f}, "
+                        f"tech:{scores.get('tech', 0):.1f}, "
+                        f"skill:{scores.get('skill', 0):.1f}, "
+                        f"comp:{scores.get('component', 0):.1f}, "
+                        f"proj:{scores.get('project', 0):.1f}, "
+                        f"gen:{scores.get('general', 0):.1f}, "
+                        f"bonus:{scores.get('bonus', 0):.1f}]")
+        return processed_repos
+
+    def filter_repositories_with_terms(self, repositories: List[Dict], search_terms: Dict) -> List[Dict]:
+        """
+        Enhanced filtering with language-based prioritization.
+        """
+        # Use language terms already extracted in search_terms
+        language_terms = search_terms.get('languages', [])
+
+        # Decide filtering strategy
+        if language_terms and any(repo.get('language_relevance_score', 0) > 0 for repo in repositories):
+            logger.info(f"Using language-first filtering for: {language_terms}")
+            
+            # Just filter by positive language score and take top results
+            language_filtered = [
+                repo for repo in repositories if repo.get('language_relevance_score', 0) > 0
+            ]
+            
+            # Only re-sort if we really want language to be the primary factor
+            language_filtered.sort(key=lambda x: x.get('language_relevance_score', 0), reverse=True)
+            
+            # FIXED: Safe access to matched_languages with explicit error handling
+            for repo in language_filtered:
+                matched_languages = repo.get('matched_query_languages', [])
+                
+                # Defensive approach to extract language information
+                language_names = []
+                try:
+                    if matched_languages:
+                        for m in matched_languages:
+                            if isinstance(m, dict):
+                                # Check for various possible key names
+                                if 'repo_language' in m:
+                                    language_names.append(m['repo_language'])
+                                elif 'language' in m:
+                                    language_names.append(m['language'])
+                                else:
+                                    # Add all keys for debugging
+                                    language_names.append(f"Unknown({','.join(m.keys()) if m else 'empty'})")
+                            else:
+                                language_names.append(str(m))
+                except Exception as e:
+                    logger.error(f"Error processing language info: {str(e)}")
+                    language_names = ["Error processing languages"]
+                
+                # Format language info safely
+                lang_info = f"Languages: {language_names}" if language_names else "No language match"
+            
+            logger.info("Language-first filtering results:")
+            return language_filtered[:10]  # Limit to top 10
+        else:
+            logger.info("Using traditional relevance filtering")
+            # Just take top repos by total relevance (already sorted)
+            return repositories[:10]  # Limit to top 10
+
+    def _filter_by_relevance_only(self, query: str, repositories: List[Dict], search_terms: Dict) -> List[Dict]:
+        """Filter repositories using traditional relevance scoring only."""
+        scored_repos = []
+        
+        for repo in repositories:
+            score = self.calculate_repo_relevance_score(repo, query.lower(), search_terms)
+            
+            if score > 0:
+                scored_repos.append({
+                    'repo': repo,
+                    'relevance_score': score,
+                    'matched_categories': self.get_matched_categories(repo, search_terms)
+                })
+        
+        # Sort by relevance score
+        scored_repos.sort(key=lambda x: x['relevance_score'], reverse=True)
+        
+        # Log results
+        logger.info(f"Traditional filtering results:")
+        for i, item in enumerate(scored_repos[:5]):
+            logger.info(f"  {i+1}. {item['repo']['name']}: {item['relevance_score']:.2f}")
+        
+        return [item['repo'] for item in scored_repos[:10]]
+
+    def _get_fallback_repositories(self, repositories: List[Dict], limit: int = 5) -> List[Dict]:
+        """
+        Get fallback repositories based on difficulty and total bytes when no strong matches found.
+        
+        Args:
+            repositories: List of all repositories
+            limit: Maximum number of repositories to return
+            
+        Returns:
+            List of top repositories by difficulty and size
+        """
+        scored_repos = []
+        
+        for repo in repositories:
+            # Calculate difficulty score
+            difficulty_data = self.calculate_difficulty_score(repo)
+            difficulty_score = difficulty_data.get('score', 0)
+            
+            # Get total language bytes
+            total_bytes = repo.get('total_language_bytes', 0)
+            if total_bytes == 0:
+                # Calculate if not already processed
+                languages = repo.get('languages', {})
+                total_bytes = sum(languages.values()) if languages else 0
+            
+            # Combined score: difficulty (0-100) + normalized bytes
+            # Normalize bytes to 0-50 scale for balance
+            normalized_bytes = min(total_bytes / 100000, 50)  # 100KB = 50 points max
+            combined_score = difficulty_score + normalized_bytes
+            
+            scored_repos.append({
+                'repo': repo,
+                'combined_score': combined_score,
+                'difficulty_score': difficulty_score,
+                'total_bytes': total_bytes
+            })
+        
+        # Sort by combined score
+        scored_repos.sort(key=lambda x: x['combined_score'], reverse=True)
+        
+        logger.info(f"Fallback: Selected top {limit} repositories by difficulty and size")
+        for i, item in enumerate(scored_repos[:limit]):
+            logger.info(f"  {i+1}. {item['repo']['name']}: "
+                    f"Combined={item['combined_score']:.1f} "
+                    f"(Difficulty={item['difficulty_score']}, Bytes={item['total_bytes']})")
+        
+        return [item['repo'] for item in scored_repos[:limit]]
+
+
     def query_ai_with_context(self, query: str, enhanced_context: str) -> str:
         """
         Query the AI assistant with enhanced context and size management.
@@ -534,122 +739,36 @@ Use the architecture documentation and project manifests to give comprehensive a
             logger.error(f"Request ID: {request_id} - Error calling AI API: {str(e)}")
             return f"I apologize, but I encountered an error while processing your request: {str(e)}"
     
-    def process_query(self, query: str, repositories: List[Dict]) -> Tuple[str, Dict]:
+    def calculate_repo_relevance_score(self, repo: Dict, query: str, search_terms: Dict) -> float:
         """
-        Enhanced query processing with language-first filtering.
+        Calculate relevance score for a repository based on query using repo context structure.
         
         Args:
+            repo: Repository dictionary with context
             query: User query string
-            repositories: List of repository dictionaries with context
+            search_terms: Pre-extracted search terms
             
         Returns:
-            Tuple of (AI response, metadata dictionary)
+            Relevance score as float
         """
-        logger.info(f"Processing query: {query[:100]}...")
-        query = query.lower()
+        repo_context = repo.get('repoContext', {}) or {}
+        repo_name = normalize_string(repo.get('name', ''))
         
-        # Process repositories for AI usage (adds language calculations)
-        processed_repos = self.get_repositories_for_ai(username=self.username)
+        # Calculate individual scores using helper functions
+        tech_score = calculate_tech_score(repo_context.get('tech_stack', {}), search_terms)
+        skill_score = calculate_skill_score(repo_context.get('skill_manifest', {}), search_terms)
+        component_score = calculate_component_score(repo_context.get('components', {}), search_terms)
+        project_score = calculate_project_score(repo_context.get('project_identity', {}), search_terms)
+        general_score = calculate_general_score(repo, search_terms)
+        bonus_score = calculate_bonus_score(repo, search_terms)
         
-        # Extract language terms early for metadata
-        query_languages = extract_language_terms(query)
+        # Total score
+        total_score = tech_score + skill_score + component_score + project_score + general_score + bonus_score
         
-        # Stage 1: Extract search terms
-        search_terms = extract_context_search_terms(query, processed_repos)
-        logger.info(f"Extracted search terms: {dict(search_terms)}")
-        return search_terms, []
-        # Stage 2: Enhanced filtering with language-first priority
-        relevant_repos = self.filter_repositories_with_terms(query, processed_repos, search_terms)
-        logger.info(f"Found {len(relevant_repos)} relevant repositories")
-        
-        # Stage 3: Build enhanced context
-        enhanced_context = self.build_enhanced_context(relevant_repos)
-        
-        # Stage 4: Query AI
-        ai_response = self.query_ai_with_context(query, enhanced_context)
-        
-        # Build enhanced metadata
-        metadata = {
-            "total_repos_searched": len(repositories),
-            "relevant_repos_found": len(relevant_repos),
-            "query_processed": query[:100] + "..." if len(query) > 100 else query,
-            "detected_languages": query_languages,
-            "language_based_filtering": len(query_languages) > 0,
-            "search_terms_found": {
-                "tech": len(search_terms.get('tech', [])),
-                "skills": len(search_terms.get('skills', [])),
-                "components": len(search_terms.get('components', [])),
-                "project": len(search_terms.get('project', [])),
-                "general": len(search_terms.get('general', []))
-            },
-            "repositories_analyzed": [repo.get('name', 'Unknown') for repo in relevant_repos[:5]],
-            "context_size_chars": len(enhanced_context)
-        }
-        
-        # Add language-specific metadata if applicable
-        if query_languages:
-            language_matches = []
-            for repo in relevant_repos[:5]:
-                repo_languages = repo.get('languages', {})
-                total_bytes = repo.get('total_language_bytes', 0)
-                
-                # Get detailed language matches
-                from api.fa_helpers import get_language_matches
-                matches = get_language_matches(repo_languages, query_languages)
-                
-                if matches:
-                    language_matches.append({
-                        "repository": repo['name'],
-                        "language_matches": matches,
-                        "total_languages": len(repo_languages),
-                        "primary_language": repo.get('language', 'Unknown'),
-                        "total_bytes": total_bytes
-                    })
-            
-            metadata["language_matches"] = language_matches
-        
-        return ai_response, metadata
-
-    def get_repositories_for_ai(self, username: str = None, include_languages: bool = True) -> List[Dict]:
-        """
-        Convenience method to get repositories optimized for AI Assistant.
-        This combines data fetching with AI-specific processing.
-        
-        Args:
-            username: GitHub username
-            include_languages: Whether to include language data
-            
-        Returns:
-            list: Repositories with AI-specific enhancements
-        """
-        if not self.gh_client:
-            logger.error("GitHub client not available for repository fetching")
-            return []
-        
-        username = username or self.username
-        
-        # Get raw repository data
-        repos = self.gh_client.get_all_repos_with_context(username, include_languages)
-
-        processed_repos = []
-        
-        for repo in repos:
-            # Create a copy to avoid modifying the original
-            processed_repo = repo.copy()
-            
-            # Process language data using helper function
-            processed_repo = process_language_data(processed_repo)
-            
-            # Add other AI-specific enhancements here if needed
-            # For example, you could add:
-            # - Calculated complexity scores
-            # - Normalized tech stack data
-            # - Extracted keywords
-            # - Difficulty ratings
-            
-            processed_repos.append(processed_repo)
-        logger.debug(f"-----------------------------processed_repos: {len(processed_repos)}")
-        return processed_repos
+        logger.debug(f"Calculated relevance score for repo '{repo_name}': {total_score:.2f}")
+        return total_score
+    
+    
 
     def calculate_difficulty_score(self, repo: Dict) -> Dict[str, Any]:
         """

@@ -196,12 +196,8 @@ def ai_query(req: func.HttpRequest) -> func.HttpResponse:
         # Use the complete pipeline method
         try:
             logger.info("Processing query with AI assistant pipeline")
-            ai_response, metadata = ai_assistant.process_query(query, all_repos)
-            logger.info(f"AI assistant generated a response of {len(ai_response)} chars")
-            return create_success_response({
-                "response": None,
-                "metadata": metadata
-            })
+            ai_response, metadata = ai_assistant.process_query(query.lower(), all_repos)
+
         except Exception as e:
             logger.error(f"AI query processing failed: {str(e)}", exc_info=True)
             return create_error_response(f"AI processing error: {str(e)}", 500)
