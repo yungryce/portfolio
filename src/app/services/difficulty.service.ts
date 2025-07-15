@@ -84,7 +84,7 @@ export class DifficultyService {
 
     // Fetch from API
     return this.http.get<DifficultyResponse>(
-      `${this.configService.apiUrl}/repository-difficulty?repo=${encodeURIComponent(repoName)}`
+      `${this.configService.apiUrl}/repository/${encodeURIComponent(repoName)}/difficulty`
     ).pipe(
       map(response => response.difficulty_analysis),
       tap(analysis => {

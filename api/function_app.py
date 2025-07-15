@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 import azure.functions as func
 from datetime import datetime
 
@@ -154,6 +155,7 @@ def get_repository_file_content(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="ai", auth_level=func.AuthLevel.ANONYMOUS, methods=["POST", "OPTIONS"])
 def ai_query(req: func.HttpRequest) -> func.HttpResponse:
     logger.info('Processing portfolio query with AI assistance')
+    start_time = time.time()
     
     try:
         # Parse request body
@@ -209,23 +211,24 @@ def ai_query(req: func.HttpRequest) -> func.HttpResponse:
         }
         
         logger.info("Portfolio query processed successfully")
-        return create_success_response(result)
+        processing_time = time.time() - start_time
+        return create_success_response(result, round(processing_time, 2)
+)
             
     except Exception as e:
         logger.error(f"Error processing portfolio query: {str(e)}", exc_info=True)
         return create_error_response(f"Internal server error: {str(e)}", 500)
 
 
-
-@app.route(route="repository-difficulty", auth_level=func.AuthLevel.ANONYMOUS, methods=["GET"])
+@app.route(route="repository/{repo}/difficulty", auth_level=func.AuthLevel.ANONYMOUS, methods=["GET"])
 def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
     """Get difficulty rating for a specific repository"""
     logger.info('Processing repository difficulty request')
     
     try:
-        repo_name = req.params.get('repo')
+        repo_name = req.route_params.get('repo')
         if not repo_name:
-            return create_error_response("Missing 'repo' parameter", 400)
+            return create_error_response("Missing repository name in URL path", 400)
         
         # Get GitHub token
         github_token = os.getenv('GITHUB_TOKEN')
@@ -251,12 +254,31 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
         if not target_repo:
             return create_error_response(f"Repository '{repo_name}' not found", 404)
         
-        # Calculate difficulty
-        difficulty_data = ai_assistant.calculate_difficulty_score(target_repo)
+        # Process language data first for best analysis
+        from ai_helpers import process_language_data
+        processed_repo = process_language_data(target_repo)
+        
+        # Calculate difficulty with enhanced scoring
+        difficulty_data = ai_assistant.calculate_difficulty_score(processed_repo)
+        
+        # Extract key repository metrics for context
+        primary_language = processed_repo.get('language', 'Unknown')
+        languages = list(processed_repo.get('languages', {}).keys())[:5]  # Top 5 languages
+        
+        # Get topics and technologies for context
+        topics = processed_repo.get('topics', [])
+        tech_stack = processed_repo.get('repoContext', {}).get('tech_stack', {})
+        primary_techs = tech_stack.get('primary', []) if tech_stack else []
         
         result = {
             "repository": repo_name,
             "difficulty_analysis": difficulty_data,
+            "context": {
+                "primary_language": primary_language,
+                "languages": languages,
+                "topics": topics,
+                "primary_technologies": primary_techs
+            },
             "metadata": {
                 "analyzed_at": datetime.now().isoformat(),
                 "analysis_version": "1.0"

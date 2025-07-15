@@ -1,10 +1,11 @@
 import logging
 import os
 import time
+import math
 from typing import Dict, List, Optional, Tuple, Any
 from openai import OpenAI
 from github_client import GitHubClient
-from data_fiter import extract_language_terms
+from data_fiter import extract_language_terms, advanced_skills, complexity_indicators
 from ai_helpers import (
     # Text processing
     count_tokens, truncate_text, normalize_string,
@@ -14,7 +15,7 @@ from ai_helpers import (
     process_language_data,
     
     # Component processing
-    extract_component_info, validate_component_data, trim_processed_repo,
+    extract_component_info, validate_component_data,
     
     # Keyword extraction
     extract_tech_keywords, extract_skill_keywords, extract_component_keywords,
@@ -84,35 +85,6 @@ class AIAssistant:
             api_key=self.groq_api_key,
             base_url="https://api.groq.com/openai/v1"
         ) 
-    
-    def _filter_by_language_priority(self, repositories: List[Dict]) -> List[Dict]:
-        """
-        Filter repositories with language-first priority.
-
-        Args:
-            repositories: List of repository dictionaries (already processed)
-
-        Returns:
-            List of repositories sorted by language relevance.
-        """
-        # Filter repositories with a positive language relevance score
-        language_scored_repos = [
-            repo for repo in repositories if repo.get('language_relevance_score', 0) > 0
-        ]
-
-        # Sort by language relevance score (descending)
-        language_scored_repos.sort(key=lambda x: x['language_relevance_score'], reverse=True)
-
-        # Log top results
-        logger.info("Language-first filtering results:")
-        for i, repo in enumerate(language_scored_repos[:5]):
-            matched_languages = repo.get('matched_query_languages', [])
-            lang_info = f"Languages: {[m['repo_lang'] for m in matched_languages]}" if matched_languages else "No language match"
-            logger.info(f"  {i+1}. {repo['name']}: Language Relevance={repo['language_relevance_score']:.2f} {lang_info}")
-
-        return language_scored_repos
-
-
     def _build_repo_summary(self, repo: Dict, index: int) -> List[str]:
         """Enhanced repository summary with prioritized language information."""
         repo_name = repo.get('name', 'Unknown')
@@ -345,47 +317,33 @@ class AIAssistant:
         # Stage 1: Extract search terms and language terms
         search_terms = extract_context_terms(query, repositories)
         language_terms = extract_language_terms(query)
-
-        # Combine language terms into the search terms dictionary
         search_terms['languages'] = language_terms
         logger.info(f"Extracted search terms: {dict(search_terms)}")
         
-        # Stage 2: Process repositories with enhanced filtering
-        start_time = time.time()
-        processed_repos = self.process_languages(repositories, search_terms)
-        relevant_repos = self.filter_repositories_with_terms(processed_repos, search_terms)
-        processing_time = time.time() - start_time
+        # Stage 2: Process repositories with unified scoring (replaces both process_languages and filter_repositories_with_terms)
+        relevant_repos = self.process_languages(repositories, search_terms, limit=10)
         
-        logger.info(f"Repository processing completed in {processing_time:.2f}s")
-
         # Fallback: if no strong matches found, get top repos by difficulty and bytes
-        if len(relevant_repos) == 0:
+        fallback_used = len(relevant_repos) == 0
+        if fallback_used:
             logger.info("No strong matches found, using fallback strategy")
-            # Add fallback repo with message 
             relevant_repos = self._get_fallback_repositories(repositories, 5)
-            fallback_message = "No direct matches found for your query, but here are some notable repositories that may be relevant:"
-        else:
-            fallback_message = "I found the following repositories that match your query:"
         
         logger.info(f"Found {len(relevant_repos)} relevant repositories")
         
         # Stage 3: Build enhanced context
         enhanced_context = self.build_enhanced_context(relevant_repos)
         
-        # Stage 4: Query AI with fallback message if needed
-        if fallback_message:
-            query_with_context = f"{query}\n\nNote: {fallback_message}"
-            ai_response = self.query_ai_with_context(query_with_context, enhanced_context)
-        else:
-            ai_response = self.query_ai_with_context(query, enhanced_context)
+        # Stage 4: Query AI (context message will be handled in query_ai_with_context based on fallback_used)
+        ai_response = self.query_ai_with_context(query, enhanced_context, fallback_used)
             
         metadata = {
             "total_repos_searched": len(repositories),
             "relevant_repos_found": len(relevant_repos),
             "query_processed": query[:100] + "..." if len(query) > 100 else query,
-            "detected_languages": language_terms,  # FIXED: Use language_terms instead
-            "language_based_filtering": len(language_terms) > 0,  # FIXED: Use language_terms
-            "fallback_used": fallback_message is not None,
+            "detected_languages": language_terms,
+            "language_based_filtering": len(language_terms) > 0,
+            "fallback_used": fallback_used,
             "search_terms_found": {
                 "tech": len(search_terms.get('tech', [])),
                 "skills": len(search_terms.get('skills', [])),
@@ -395,11 +353,10 @@ class AIAssistant:
             },
             "repositories_analyzed": [repo.get('name', 'Unknown') for repo in relevant_repos[:5]],
             "context_size_chars": len(enhanced_context),
-            "processing_time_seconds": round(processing_time, 2)
         }
         
         # Add language-specific metadata if applicable
-        if language_terms and relevant_repos:  # FIXED: Use language_terms
+        if language_terms and relevant_repos: 
             language_matches = []
             for repo in relevant_repos[:5]:  # Limit to top 5 for efficiency
                 repo_languages = repo.get('languages', {})
@@ -449,17 +406,17 @@ class AIAssistant:
         
         return ai_response, metadata
 
-
-    def process_languages(self, repositories: List[Dict], search_terms: Dict) -> List[Dict]:
+    def process_languages(self, repositories: List[Dict], search_terms: Dict, limit: int = 10) -> List[Dict]:
         """
-        Process repositories with language data and optional query language filtering.
+        Process repositories with language data and return top matches by relevance.
         
         Args:
             repositories: List of repository dictionaries
-            query_languages: Optional list of programming languages from query for filtering
+            search_terms: Dictionary containing search terms including languages
+            limit: Maximum number of repositories to return
             
         Returns:
-            List of repositories with AI-specific enhancements and optional language filtering
+            List of top repositories with AI-specific enhancements sorted by relevance
         """
         processed_repos = []
         language_terms = search_terms.get('languages', [])
@@ -468,64 +425,97 @@ class AIAssistant:
             # Create a copy to avoid modifying the original
             processed_repo = repo.copy()
             
-            # add a function that trims down processed_repo
-            processed_repo = trim_processed_repo(processed_repo)
-
-            # Add language processing data
+            # Trim and process repository data
             processed_repo = process_language_data(processed_repo)
             
-            # Calculate relevance scores for each category in search_terms
-            repo_languages = processed_repo.get('languages', {})
-            total_bytes = processed_repo.get('total_language_bytes', 0)
+            # Calculate repository difficulty Scoring
+            difficulty_data = self.calculate_difficulty_score(processed_repo)
+            processed_repo['difficulty_analysis'] = difficulty_data
+
+            # Add difficulty score as factor in relevance scoring
+            # This makes high-difficulty projects slightly more relevant, all else being equal
+            difficulty_boost = difficulty_data.get('score', 0) / 1000  # Small boost based on difficulty
+
+            # Calculate all relevance scores
+            processed_repo = self._calculate_all_scores(processed_repo, search_terms)
             
-            # Calculate all category scores
-            language_score = calculate_language_score(repo_languages, language_terms, total_bytes)
-            tech_score = calculate_tech_score(processed_repo.get('repoContext', {}).get('tech_stack', {}), search_terms)
-            skill_score = calculate_skill_score(processed_repo.get('repoContext', {}).get('skill_manifest', {}), search_terms)
-            component_score = calculate_component_score(processed_repo.get('repoContext', {}).get('components', {}), search_terms)
-            project_score = calculate_project_score(processed_repo.get('repoContext', {}).get('project_identity', {}), search_terms)
-            general_score = calculate_general_score(processed_repo, search_terms)
-        
-            # Store category-specific scores in a structured format
-            processed_repo['relevance_scores'] = {
-                'language': language_score,
-                'tech': tech_score,
-                'skill': skill_score,
-                'component': component_score,
-                'project': project_score,
-                'general': general_score
-            }
-            
-            # Store language-specific data
-            processed_repo['language_relevance_score'] = language_score
-            
-            # Enhanced: Pass relevance_scores to get_language_matches
-            matched_languages = get_language_matches(
-                repo_languages, 
-                language_terms, 
-                processed_repo['relevance_scores']
-            )
-            processed_repo['matched_query_languages'] = matched_languages
-            
-            # Enhanced: Calculate bonus score using relevance_scores
-            bonus_score = calculate_bonus_score(processed_repo, search_terms)
-            processed_repo['relevance_scores']['bonus'] = bonus_score
-            
-            # Calculate total score
-            total_relevance_score = (
-                language_score + tech_score + skill_score + 
-                component_score + project_score + general_score + bonus_score
-            )
-            processed_repo['total_relevance_score'] = total_relevance_score
+            # Apply difficulty boost to total score
+            if 'total_relevance_score' in processed_repo:
+                processed_repo['total_relevance_score'] += difficulty_boost
+                
+                # Note the difficulty boost in the scores
+                if 'relevance_scores' in processed_repo:
+                    processed_repo['relevance_scores']['difficulty_boost'] = difficulty_boost
             
             processed_repos.append(processed_repo)
         
-        # Sort repositories by total relevance score
+        # Sort by total relevance score and apply limit
         processed_repos.sort(key=lambda x: x.get('total_relevance_score', 0), reverse=True)
-        logger.debug(f"Total Processed length {len(processed_repos)} repositories with relevance scores")
-        logger.info(f"Top 3 processed repositories by total relevance score:")
-        for i, repo in enumerate(processed_repos[:3]):
+        limited_repos = processed_repos[:limit]
+        
+        # Log results
+        self._log_processing_results(limited_repos, len(processed_repos), language_terms)
+        
+        return limited_repos
+
+
+    def _calculate_all_scores(self, processed_repo: Dict, search_terms: Dict) -> Dict:
+        """Extract score calculation logic for modularity."""
+        repo_languages = processed_repo.get('languages', {})
+        total_bytes = processed_repo.get('total_language_bytes', 0)
+        
+        # Calculate all category scores
+        language_score = calculate_language_score(repo_languages, search_terms.get('languages', []), total_bytes)
+        tech_score = calculate_tech_score(processed_repo.get('repoContext', {}).get('tech_stack', {}), search_terms)
+        skill_score = calculate_skill_score(processed_repo.get('repoContext', {}).get('skill_manifest', {}), search_terms)
+        component_score = calculate_component_score(processed_repo.get('repoContext', {}).get('components', {}), search_terms)
+        project_score = calculate_project_score(processed_repo.get('repoContext', {}).get('project_identity', {}), search_terms)
+        general_score = calculate_general_score(processed_repo, search_terms)
+
+        # Store category-specific scores
+        processed_repo['relevance_scores'] = {
+            'language': language_score,
+            'tech': tech_score,
+            'skill': skill_score,
+            'component': component_score,
+            'project': project_score,
+            'general': general_score
+        }
+        
+        # Store language-specific data
+        processed_repo['language_relevance_score'] = language_score
+        
+        # Enhanced: Pass relevance_scores to get_language_matches
+        matched_languages = get_language_matches(
+            repo_languages, 
+            search_terms.get('languages', []), 
+            processed_repo['relevance_scores']
+        )
+        processed_repo['matched_query_languages'] = matched_languages
+        
+        # Enhanced: Calculate bonus score using relevance_scores
+        bonus_score = calculate_bonus_score(processed_repo, search_terms)
+        processed_repo['relevance_scores']['bonus'] = bonus_score
+        
+        # Calculate total score
+        total_relevance_score = (
+            language_score + tech_score + skill_score + 
+            component_score + project_score + general_score + bonus_score
+        )
+        processed_repo['total_relevance_score'] = total_relevance_score
+        
+        return processed_repo
+
+    def _log_processing_results(self, limited_repos: List[Dict], total_processed: int, language_terms: List[str]) -> None:
+        """Extract logging logic for modularity."""
+        logger.debug(f"Total Processed {total_processed} repositories, returning top {len(limited_repos)}")
+        logger.info(f"Top {min(3, len(limited_repos))} repositories by total relevance score:")
+        
+        for i, repo in enumerate(limited_repos[:3]):
             scores = repo.get('relevance_scores', {})
+            difficulty = repo.get('difficulty_analysis', {}).get('difficulty', 'Unknown')
+            difficulty_score = repo.get('difficulty_analysis', {}).get('score', 0)
+            
             logger.info(f"  {i+1}. {repo.get('name', 'Unknown')}: "
                         f"Total={repo.get('total_relevance_score', 0):.2f} "
                         f"[lang:{scores.get('language', 0):.1f}, "
@@ -534,85 +524,10 @@ class AIAssistant:
                         f"comp:{scores.get('component', 0):.1f}, "
                         f"proj:{scores.get('project', 0):.1f}, "
                         f"gen:{scores.get('general', 0):.1f}, "
-                        f"bonus:{scores.get('bonus', 0):.1f}]")
-        return processed_repos
+                        f"bonus:{scores.get('bonus', 0):.1f}, "
+                        f"diff_boost:{scores.get('difficulty_boost', 0):.3f}] "
+                        f"Difficulty: {difficulty} ({difficulty_score:.1f})")
 
-    def filter_repositories_with_terms(self, repositories: List[Dict], search_terms: Dict) -> List[Dict]:
-        """
-        Enhanced filtering with language-based prioritization.
-        """
-        # Use language terms already extracted in search_terms
-        language_terms = search_terms.get('languages', [])
-
-        # Decide filtering strategy
-        if language_terms and any(repo.get('language_relevance_score', 0) > 0 for repo in repositories):
-            logger.info(f"Using language-first filtering for: {language_terms}")
-            
-            # Just filter by positive language score and take top results
-            language_filtered = [
-                repo for repo in repositories if repo.get('language_relevance_score', 0) > 0
-            ]
-            
-            # Only re-sort if we really want language to be the primary factor
-            language_filtered.sort(key=lambda x: x.get('language_relevance_score', 0), reverse=True)
-            
-            # FIXED: Safe access to matched_languages with explicit error handling
-            for repo in language_filtered:
-                matched_languages = repo.get('matched_query_languages', [])
-                
-                # Defensive approach to extract language information
-                language_names = []
-                try:
-                    if matched_languages:
-                        for m in matched_languages:
-                            if isinstance(m, dict):
-                                # Check for various possible key names
-                                if 'repo_language' in m:
-                                    language_names.append(m['repo_language'])
-                                elif 'language' in m:
-                                    language_names.append(m['language'])
-                                else:
-                                    # Add all keys for debugging
-                                    language_names.append(f"Unknown({','.join(m.keys()) if m else 'empty'})")
-                            else:
-                                language_names.append(str(m))
-                except Exception as e:
-                    logger.error(f"Error processing language info: {str(e)}")
-                    language_names = ["Error processing languages"]
-                
-                # Format language info safely
-                lang_info = f"Languages: {language_names}" if language_names else "No language match"
-            
-            logger.info("Language-first filtering results:")
-            return language_filtered[:10]  # Limit to top 10
-        else:
-            logger.info("Using traditional relevance filtering")
-            # Just take top repos by total relevance (already sorted)
-            return repositories[:10]  # Limit to top 10
-
-    def _filter_by_relevance_only(self, query: str, repositories: List[Dict], search_terms: Dict) -> List[Dict]:
-        """Filter repositories using traditional relevance scoring only."""
-        scored_repos = []
-        
-        for repo in repositories:
-            score = self.calculate_repo_relevance_score(repo, query.lower(), search_terms)
-            
-            if score > 0:
-                scored_repos.append({
-                    'repo': repo,
-                    'relevance_score': score,
-                    'matched_categories': self.get_matched_categories(repo, search_terms)
-                })
-        
-        # Sort by relevance score
-        scored_repos.sort(key=lambda x: x['relevance_score'], reverse=True)
-        
-        # Log results
-        logger.info(f"Traditional filtering results:")
-        for i, item in enumerate(scored_repos[:5]):
-            logger.info(f"  {i+1}. {item['repo']['name']}: {item['relevance_score']:.2f}")
-        
-        return [item['repo'] for item in scored_repos[:10]]
 
     def _get_fallback_repositories(self, repositories: List[Dict], limit: int = 5) -> List[Dict]:
         """
@@ -628,9 +543,15 @@ class AIAssistant:
         scored_repos = []
         
         for repo in repositories:
-            # Calculate difficulty score
-            difficulty_data = self.calculate_difficulty_score(repo)
-            difficulty_score = difficulty_data.get('score', 0)
+            # Reuse existing difficulty score if available
+            if 'difficulty_analysis' in repo:
+                difficulty_score = repo['difficulty_analysis'].get('score', 0)
+            else:
+                # Calculate difficulty score only if not already calculated
+                difficulty_data = self.calculate_difficulty_score(repo)
+                difficulty_score = difficulty_data.get('score', 0)
+                # Store for potential later use
+                repo['difficulty_analysis'] = difficulty_data
             
             # Get total language bytes
             total_bytes = repo.get('total_language_bytes', 0)
@@ -739,298 +660,368 @@ Use the architecture documentation and project manifests to give comprehensive a
             logger.error(f"Request ID: {request_id} - Error calling AI API: {str(e)}")
             return f"I apologize, but I encountered an error while processing your request: {str(e)}"
     
-    def calculate_repo_relevance_score(self, repo: Dict, query: str, search_terms: Dict) -> float:
-        """
-        Calculate relevance score for a repository based on query using repo context structure.
-        
-        Args:
-            repo: Repository dictionary with context
-            query: User query string
-            search_terms: Pre-extracted search terms
-            
-        Returns:
-            Relevance score as float
-        """
-        repo_context = repo.get('repoContext', {}) or {}
-        repo_name = normalize_string(repo.get('name', ''))
-        
-        # Calculate individual scores using helper functions
-        tech_score = calculate_tech_score(repo_context.get('tech_stack', {}), search_terms)
-        skill_score = calculate_skill_score(repo_context.get('skill_manifest', {}), search_terms)
-        component_score = calculate_component_score(repo_context.get('components', {}), search_terms)
-        project_score = calculate_project_score(repo_context.get('project_identity', {}), search_terms)
-        general_score = calculate_general_score(repo, search_terms)
-        bonus_score = calculate_bonus_score(repo, search_terms)
-        
-        # Total score
-        total_score = tech_score + skill_score + component_score + project_score + general_score + bonus_score
-        
-        logger.debug(f"Calculated relevance score for repo '{repo_name}': {total_score:.2f}")
-        return total_score
-    
-    
-
     def calculate_difficulty_score(self, repo: Dict) -> Dict[str, Any]:
         """
-        Calculate difficulty score for a repository using enhanced context analysis.
+        Calculate comprehensive difficulty score using rich repository context.
         
         Args:
-            repo: Repository dictionary with context
+            repo: Repository dictionary with full context
             
         Returns:
-            Dictionary containing difficulty rating, score, and reasoning
+            Dictionary with detailed difficulty analysis
         """
         if not repo:
-            return {
-                'difficulty': 'unknown',
-                'score': 0,
-                'confidence': 0.0,
-                'reasoning': ['No repository data available']
-            }
+            return self._default_difficulty_response()
         
         repo_context = repo.get('repoContext', {})
-        difficulty_score = 0
-        reasoning = []
-        confidence_factors = []
         
-        # 1. Technology Stack Complexity (0-30 points)
-        tech_stack = repo_context.get('tech_stack', {})
-        if tech_stack:
-            tech_score, tech_reasoning, tech_confidence = self._calculate_tech_difficulty(tech_stack)
-            difficulty_score += tech_score
-            reasoning.extend(tech_reasoning)
-            confidence_factors.append(tech_confidence)
+        # Direct difficulty indicators (if available)
+        explicit_assessment = repo_context.get('assessment', {})
+        explicit_difficulty = self._normalize_difficulty(explicit_assessment.get('difficulty', ''))
+        explicit_hours = explicit_assessment.get('estimated_hours', 0)
         
-        # 2. Architecture Complexity (0-25 points)
-        components = repo_context.get('components', {})
-        if components:
-            arch_score, arch_reasoning, arch_confidence = self._calculate_architecture_difficulty(components)
-            difficulty_score += arch_score
-            reasoning.extend(arch_reasoning)
-            confidence_factors.append(arch_confidence)
+        # Initialize score components
+        scores = {
+            'explicit_rating': self._map_explicit_difficulty(explicit_difficulty),
+            'curriculum_level': self._calculate_curriculum_level(repo_context),
+            'architecture_complexity': self._calculate_architecture_complexity(repo_context),
+            'skill_requirements': self._calculate_skill_requirements(repo_context),
+            'implementation_complexity': self._calculate_implementation_complexity(repo_context),
+            'deployment_complexity': self._calculate_deployment_complexity(repo_context),
+            'technology_complexity': self._calculate_technology_complexity(repo_context),
+            'integration_complexity': self._calculate_integration_complexity(repo_context),
+            'repo_metrics': self._calculate_repo_metrics(repo)
+        }
         
-        # 3. Skill Requirements (0-20 points)
-        skill_manifest = repo_context.get('skill_manifest', {})
-        if skill_manifest:
-            skill_score, skill_reasoning, skill_confidence = self._calculate_skill_difficulty(skill_manifest)
-            difficulty_score += skill_score
-            reasoning.extend(skill_reasoning)
-            confidence_factors.append(skill_confidence)
+        # Calculate confidence levels for each dimension
+        confidence = self._calculate_confidence_scores(scores, repo_context)
         
-        # 4. Project Scope (0-15 points)
-        project_identity = repo_context.get('project_identity', {})
-        if project_identity:
-            project_score, project_reasoning, project_confidence = self._calculate_project_difficulty(project_identity)
-            difficulty_score += project_score
-            reasoning.extend(project_reasoning)
-            confidence_factors.append(project_confidence)
+        # Weighted calculation of final score
+        weights = {
+            'explicit_rating': 15,
+            'curriculum_level': 10,
+            'architecture_complexity': 15,
+            'skill_requirements': 15,
+            'implementation_complexity': 10,
+            'deployment_complexity': 10,
+            'technology_complexity': 15,
+            'integration_complexity': 5,
+            'repo_metrics': 5
+        }
         
-        # 5. Repository Metrics (0-10 points)
-        metrics_score, metrics_reasoning, metrics_confidence = self._calculate_metrics_difficulty(repo)
-        difficulty_score += metrics_score
-        reasoning.extend(metrics_reasoning)
-        confidence_factors.append(metrics_confidence)
-        
-        # Calculate final metrics
-        normalized_score = min(difficulty_score, 100)
-        avg_confidence = sum(confidence_factors) / len(confidence_factors) if confidence_factors else 0.3
+        # Calculate weighted score and normalize to 0-100
+        weighted_score = sum(scores[key] * (weights[key]/100) for key in weights)
+        final_score = min(weighted_score * 100, 100)
         
         # Determine difficulty level
-        if normalized_score >= 75:
-            difficulty_level = 'expert'
-        elif normalized_score >= 50:
-            difficulty_level = 'advanced'
-        elif normalized_score >= 25:
-            difficulty_level = 'intermediate'
-        else:
-            difficulty_level = 'beginner'
+        difficulty_level = self._determine_difficulty_level(final_score)
+        
+        # Collect reasoning statements from component calculations
+        reasoning = []
+        for dimension, score in scores.items():
+            if score > 0:
+                reasoning.append(f"{dimension.replace('_', ' ').title()}: {score:.1f}/1.0")
+        
+        if explicit_hours > 0:
+            reasoning.append(f"Estimated completion hours: {explicit_hours}")
+        
+        if explicit_assessment.get('complexity_factors'):
+            reasoning.append(f"Key complexity factors: {', '.join(explicit_assessment.get('complexity_factors')[:3])}")
         
         return {
             'difficulty': difficulty_level,
-            'score': normalized_score,
-            'confidence': round(avg_confidence, 2),
+            'score': round(final_score, 1),
+            'confidence': round(sum(confidence.values()) / len(confidence), 2),
             'reasoning': reasoning,
-            'breakdown': {
-                'technology_complexity': min(tech_score if 'tech_score' in locals() else 0, 30),
-                'architecture_complexity': min(arch_score if 'arch_score' in locals() else 0, 25),
-                'skill_requirements': min(skill_score if 'skill_score' in locals() else 0, 20),
-                'project_scope': min(project_score if 'project_score' in locals() else 0, 15),
-                'repository_metrics': min(metrics_score if 'metrics_score' in locals() else 0, 10)
+            'dimensions': scores,
+            'confidence_by_dimension': confidence,
+            'explicit_assessment': {
+                'difficulty': explicit_difficulty,
+                'estimated_hours': explicit_hours
             }
         }
     
-    def _calculate_tech_difficulty(self, tech_stack: Dict) -> Tuple[int, List[str], float]:
-        """Calculate technology difficulty score."""
-        score = 0
-        reasoning = []
-        confidence = 0.8
-        
-        # Advanced and intermediate technology lists
-        advanced_techs = {
-            'kubernetes', 'docker', 'microservices', 'distributed', 'blockchain', 
-            'machine learning', 'ai', 'tensorflow', 'pytorch', 'react native', 'flutter'
-        }
-        intermediate_techs = {
-            'react', 'angular', 'vue', 'node.js', 'express', 'django', 'flask', 
-            'spring', 'laravel', 'mongodb', 'postgresql', 'redis'
-        }
-        
-        # Primary technologies
-        primary_tech = tech_stack.get('primary', [])
-        if primary_tech:
-            tech_complexity = 0
-            for tech in primary_tech:
-                tech_lower = tech.lower()
-                if any(adv in tech_lower for adv in advanced_techs):
-                    tech_complexity += 3
-                elif any(inter in tech_lower for inter in intermediate_techs):
-                    tech_complexity += 2
-                else:
-                    tech_complexity += 1
-            
-            score += min(tech_complexity, 15)
-            reasoning.append(f"Primary technologies: {', '.join(primary_tech)}")
-        
-        # Secondary technologies and libraries
-        secondary_tech = tech_stack.get('secondary', [])
-        key_libraries = tech_stack.get('key_libraries', [])
-        
-        if secondary_tech or key_libraries:
-            additional_complexity = len(secondary_tech) + len(key_libraries)
-            score += min(additional_complexity, 10)
-            reasoning.append(f"Additional technologies: {additional_complexity} tools/libraries")
-        
-        # Development tools
-        dev_tools = tech_stack.get('development_tools', [])
-        if dev_tools:
-            tools_complexity = len(dev_tools)
-            score += min(tools_complexity, 5)
-            reasoning.append(f"Development tools: {tools_complexity} specialized tools")
-        
-        return score, reasoning, confidence
     
-    def _calculate_architecture_difficulty(self, components: Dict) -> Tuple[int, List[str], float]:
-        """Calculate architecture difficulty score."""
-        score = 0
-        reasoning = []
-        confidence = 0.9
-        
-        # Number of components
-        component_count = len(components)
-        score += min(component_count * 2, 10)
-        
-        # Component complexity
-        complex_components = 0
-        complex_types = {'service', 'api', 'microservice', 'database', 'cache', 'queue'}
-        
-        for comp_name, comp_data in components.items():
-            comp_items = extract_component_info(comp_data)
-            for item in comp_items:
-                comp_type = normalize_string(item.get('type', ''))
-                if any(term in comp_type for term in complex_types):
-                    complex_components += 1
-                    break  # Count component only once
-        
-        score += min(complex_components * 3, 15)
-        reasoning.append(f"Architecture: {component_count} components, {complex_components} complex components")
-        
-        return score, reasoning, confidence
-    
-    def _calculate_skill_difficulty(self, skill_manifest: Dict) -> Tuple[int, List[str], float]:
-        """Calculate skill difficulty score."""
-        score = 0
-        reasoning = []
-        confidence = 0.7
-        
-        technical_skills = skill_manifest.get('technical', [])
-        domain_skills = skill_manifest.get('domain', [])
-        
-        if technical_skills or domain_skills:
-            skill_complexity = len(technical_skills) + len(domain_skills)
-            score += min(skill_complexity, 15)
-            
-            # Advanced skills
-            advanced_skills = {
-                'devops', 'cloud', 'aws', 'azure', 'gcp', 'security', 
-                'performance', 'scalability', 'testing', 'ci/cd'
+    def _default_difficulty_response(self) -> Dict[str, Any]:
+        """Generate default difficulty response for empty repositories."""
+        return {
+            'difficulty': 'Unknown',
+            'score': 0,
+            'confidence': 0,
+            'reasoning': ['Repository data unavailable'],
+            'dimensions': {},
+            'confidence_by_dimension': {},
+            'explicit_assessment': {
+                'difficulty': '',
+                'estimated_hours': 0
             }
-            advanced_count = sum(
-                1 for skill in technical_skills + domain_skills
-                if any(adv in skill.lower() for adv in advanced_skills)
+        }
+
+    def _normalize_difficulty(self, difficulty: str) -> str:
+        """Normalize difficulty string values."""
+        if not difficulty:
+            return ""
+        
+        difficulty = difficulty.lower().strip()
+        if difficulty in ('beginner', 'easy', 'simple'):
+            return 'beginner'
+        elif difficulty in ('intermediate', 'medium', 'moderate'):
+            return 'intermediate'
+        elif difficulty in ('advanced', 'hard', 'complex'):
+            return 'advanced'
+        elif difficulty in ('expert', 'very hard', 'very complex'):
+            return 'expert'
+        
+        return difficulty
+
+    def _map_explicit_difficulty(self, difficulty: str) -> float:
+        """Map explicit difficulty string to a 0-1 score."""
+        if not difficulty:
+            return 0.0
+        
+        mapping = {
+            'beginner': 0.25,
+            'intermediate': 0.5, 
+            'advanced': 0.75,
+            'expert': 1.0
+        }
+        
+        return mapping.get(difficulty.lower(), 0.0)
+
+    def _determine_difficulty_level(self, score: float) -> str:
+        """Map numeric score to difficulty level."""
+        if score < 25:
+            return 'Beginner'
+        elif score < 50:
+            return 'Intermediate'
+        elif score < 75:
+            return 'Advanced'
+        else:
+            return 'Expert'
+
+    def _calculate_confidence_scores(self, scores: Dict[str, float], repo_context: Dict) -> Dict[str, float]:
+        """Calculate confidence levels for each dimension."""
+        confidence = {}
+        
+        # Default confidence based on data presence
+        if repo_context.get('assessment', {}).get('difficulty'):
+            confidence['explicit_rating'] = 1.0
+        else:
+            confidence['explicit_rating'] = 0.0
+            
+        confidence['curriculum_level'] = 1.0 if repo_context.get('project_identity', {}).get('curriculum_stage') else 0.5
+        confidence['architecture_complexity'] = 0.8 if repo_context.get('components') else 0.3
+        confidence['skill_requirements'] = 0.8 if repo_context.get('skill_manifest') else 0.4
+        confidence['implementation_complexity'] = 0.7 if repo_context.get('components') else 0.3
+        confidence['deployment_complexity'] = 0.8 if repo_context.get('deployment_workflow') else 0.2
+        confidence['technology_complexity'] = 0.9 if repo_context.get('tech_stack') else 0.4
+        confidence['integration_complexity'] = 0.7 if repo_context.get('components', {}).get('integration_points') else 0.3
+        confidence['repo_metrics'] = 0.6  # Consistently available but less precise indicator
+        
+        return confidence
+
+    def _calculate_curriculum_level(self, repo_context: Dict) -> float:
+        """Calculate curriculum level score."""
+        curriculum_stage = repo_context.get('project_identity', {}).get('curriculum_stage', '').lower()
+        
+        if curriculum_stage == 'capstone':
+            return 1.0
+        elif curriculum_stage == 'advanced':
+            return 0.75
+        elif curriculum_stage == 'intermediate':
+            return 0.5
+        elif curriculum_stage == 'beginner':
+            return 0.25
+        
+        # If no explicit curriculum stage, look for clues
+        if 'capstone' in str(repo_context).lower():
+            return 0.9
+        if 'advanced' in str(repo_context).lower():
+            return 0.7
+        
+        return 0.0
+
+    def _calculate_architecture_complexity(self, repo_context: Dict) -> float:
+        """Calculate architecture complexity score."""
+        score = 0.0
+        components = repo_context.get('components', {})
+        
+        # Component count and complexity
+        if 'main_directories' in components:
+            dir_count = len(components.get('main_directories', []))
+            complex_count = sum(1 for dir in components.get('main_directories', []) 
+                                if dir.get('complexity') in ['advanced', 'expert'])
+            
+            # Score based on directory count and complexity level
+            score += min(dir_count / 10, 0.5)  # Max 0.5 for directory count
+            score += min(complex_count / 5, 0.5)  # Max 0.5 for complex components
+        
+        # Integration points
+        integration_points = components.get('integration_points', [])
+        score += min(len(integration_points) / 10, 0.4)
+        
+        # Project structure complexity
+        project_structure = repo_context.get('projectStructure', {})
+        file_types = len(project_structure) if isinstance(project_structure, dict) else 0
+        score += min(file_types / 10, 0.1)
+        
+        return min(score, 1.0)
+
+    def _calculate_skill_requirements(self, repo_context: Dict) -> float:
+        """Calculate skill requirements score based on comprehensive skill analysis."""
+        from data_fiter import advanced_skills  # Import the comprehensive advanced skills set
+        
+        skill_manifest = repo_context.get('skill_manifest', {})
+        
+        # Direct competency level assessment if available
+        competency_level = skill_manifest.get('competency_level', '').lower()
+        if 'expert' in competency_level:
+            return 1.0
+        elif 'advanced' in competency_level:
+            return 0.75
+        elif 'intermediate' in competency_level:
+            return 0.5
+        elif 'beginner' in competency_level:
+            return 0.25
+        
+        # Count skills by type
+        technical_skills = len(skill_manifest.get('technical', []))
+        domain_skills = len(skill_manifest.get('domain', []))
+        
+        # Calculate score based on skill counts
+        skill_count_score = min((technical_skills + domain_skills) / 20, 0.6)
+        
+        # Use the comprehensive advanced skills set from data_fiter.py
+        all_skills = skill_manifest.get('technical', []) + skill_manifest.get('domain', [])
+        
+        # Count advanced skills using the expanded set
+        advanced_count = sum(
+            1 for skill in all_skills
+            if any(adv in skill.lower() for adv in advanced_skills)
+        )
+        
+        # Adjust scoring to account for the larger advanced_skills set
+        # Scale to ensure reasonable scoring with the expanded list
+        advanced_score = min(advanced_count / 15, 0.4)  # Adjusted divisor from 10 to 15
+        
+        # Log detected advanced skills for debugging/analysis
+        if advanced_count > 0:
+            detected_skills = [skill for skill in all_skills 
+                            if any(adv in skill.lower() for adv in advanced_skills)]
+            logger.debug(f"Advanced skills detected in repository: {detected_skills[:5]}")
+        
+        return min(skill_count_score + advanced_score, 1.0)
+
+    def _calculate_implementation_complexity(self, repo_context: Dict) -> float:
+        """Calculate implementation complexity score."""
+        # Check for explicit complexity factors in assessment
+        complexity_factors = repo_context.get('assessment', {}).get('complexity_factors', [])
+        if complexity_factors:
+            return min(len(complexity_factors) / 10, 0.8)
+        
+        # Look at components implementation details
+        components = repo_context.get('components', {})
+        if not components:
+            return 0.0
+        
+        component_str = str(components).lower()
+        feature_count = sum(1 for indicator in complexity_indicators if indicator in component_str)
+        
+        # Apply a logarithmic scale to account for the larger list (prevents over-scoring)
+        if feature_count > 0:
+            # Log base 2 scale: 1->0, 2->1, 4->2, 8->3, 16->4, etc.
+            # Then normalize to 0-1 range with a divisor that keeps reasonable scores
+            scaled_score = min(math.log2(feature_count + 1) / 5, 1.0)
+            return scaled_score
+        
+        return 0.0
+
+    def _calculate_deployment_complexity(self, repo_context: Dict) -> float:
+        """Calculate deployment workflow complexity."""
+        workflow = repo_context.get('deployment_workflow', [])
+        
+        if not workflow:
+            return 0.0
+        
+        # Number of deployment steps
+        step_count = len(workflow)
+        step_score = min(step_count / 10, 0.4)
+        
+        # Complexity of steps
+        complex_steps = sum(1 for step in workflow 
+                            if 'complexity' in step and step.get('complexity', '').lower() in ['advanced', 'complex'])
+        complexity_score = min(complex_steps / 5, 0.3)
+        
+        # Duration of deployment
+        try:
+            total_duration = sum(
+                int(step.get('estimated_duration', '0').split('-')[0]) 
+                for step in workflow 
+                if isinstance(step.get('estimated_duration', ''), str) and step.get('estimated_duration', '').split('-')[0].isdigit()
             )
-            
-            score += min(advanced_count, 5)
-            reasoning.append(f"Skills: {skill_complexity} total skills, {advanced_count} advanced skills")
+            duration_score = min(total_duration / 60, 0.3)  # 60 minutes = 0.3
+        except (ValueError, IndexError):
+            duration_score = 0.0
         
-        return score, reasoning, confidence
-    
-    def _calculate_project_difficulty(self, project_identity: Dict) -> Tuple[int, List[str], float]:
-        """Calculate project difficulty score."""
-        score = 0
-        reasoning = []
-        confidence = 0.6
-        
-        project_type = normalize_string(project_identity.get('type', ''))
-        project_scope = normalize_string(project_identity.get('scope', ''))
-        
-        # Project type complexity
-        complex_types = {'full-stack', 'enterprise', 'distributed', 'real-time'}
-        medium_types = {'web application', 'api', 'service'}
-        
-        if any(term in project_type for term in complex_types):
-            score += 5
-            reasoning.append(f"Complex project type: {project_type}")
-        elif any(term in project_type for term in medium_types):
-            score += 3
-        
-        # Project scope complexity
-        complex_scopes = {'large', 'complex', 'enterprise', 'production'}
-        medium_scopes = {'medium', 'moderate'}
-        
-        if any(term in project_scope for term in complex_scopes):
-            score += 5
-            reasoning.append(f"Complex project scope: {project_scope}")
-        elif any(term in project_scope for term in medium_scopes):
-            score += 2
-        
-        return score, reasoning, confidence
-    
-    def _calculate_metrics_difficulty(self, repo: Dict) -> Tuple[int, List[str], float]:
-        """Calculate repository metrics difficulty score."""
-        score = 0
-        reasoning = []
-        confidence = 0.5
-        
-        repo_language = repo.get('language', '')
-        repo_size = repo.get('size', 0)
-        
-        # Size complexity
-        if repo_size > 50000:
-            score += 5
-            reasoning.append(f"Large repository size: {repo_size} KB")
-        elif repo_size > 10000:
-            score += 2
-        
-        # Language complexity
-        complex_languages = {'c', 'c++', 'rust', 'go', 'scala', 'haskell', 'assembly'}
-        if repo_language and repo_language.lower() in complex_languages:
-            score += 3
-            reasoning.append(f"Complex primary language: {repo_language}")
-        
-        return score, reasoning, confidence
-    
-    def get_difficulty_rating(self, repo: Dict) -> str:
-        """
-        Get simple difficulty rating for a repository.
-        
-        Args:
-            repo: Repository dictionary with context
-            
-        Returns:
-            String difficulty rating ('beginner', 'intermediate', 'advanced', 'expert')
-        """
-        difficulty_data = self.calculate_difficulty_score(repo)
-        return difficulty_data['difficulty']
-    
+        return min(step_score + complexity_score + duration_score, 1.0)
 
+    def _calculate_technology_complexity(self, repo_context: Dict) -> float:
+        """Calculate technology stack complexity."""
+        tech_stack = repo_context.get('tech_stack', {})
+        if not tech_stack:
+            return 0.0
+        
+        # Count technologies by category
+        primary = len(tech_stack.get('primary', []))
+        secondary = len(tech_stack.get('secondary', []))
+        libraries = len(tech_stack.get('key_libraries', []))
+        tools = len(tech_stack.get('development_tools', []))
+        
+        # Calculate complexity score
+        base_score = primary * 0.2 + secondary * 0.1 + libraries * 0.05 + tools * 0.05
+        
+        
+        tech_str = str(tech_stack).lower()
+        complex_count = sum(1 for tech in advanced_skills if tech in tech_str)
+        complex_score = min(complex_count / 5, 0.5)
+        
+        return min(base_score + complex_score, 1.0)
 
+    def _calculate_integration_complexity(self, repo_context: Dict) -> float:
+        """Calculate integration complexity score."""
+        components = repo_context.get('components', {})
+        integration_points = components.get('integration_points', [])
+        
+        if not integration_points:
+            return 0.0
+        
+        # Number of integration points
+        point_count = len(integration_points)
+        point_score = min(point_count / 10, 0.6)
+        
+        # Types of integrations (API, database, third-party services)
+        integration_types = set()
+        for point in integration_points:
+            if isinstance(point, dict):
+                integration_types.add(point.get('type', '').lower())
+            elif isinstance(point, str):
+                for type_name in ['api', 'database', 'service', 'messaging', 'event']:
+                    if type_name in point.lower():
+                        integration_types.add(type_name)
+        
+        type_score = min(len(integration_types) / 5, 0.4)
+        
+        return min(point_score + type_score, 1.0)
+
+    def _calculate_repo_metrics(self, repo: Dict) -> float:
+        """Calculate repository metrics score."""
+        # Size-based metrics
+        languages = repo.get('languages', {})
+        total_bytes = sum(languages.values()) if languages else 0
+        size_score = min(total_bytes / 1000000, 0.5)  # 1MB = 0.5 points
+        
+        # Language count
+        language_count = len(languages) if languages else 0
+        language_score = min(language_count / 10, 0.5)
+        
+        return min(size_score + language_score, 1.0)

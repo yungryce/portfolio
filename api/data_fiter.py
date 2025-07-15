@@ -3,6 +3,100 @@
 import re
 from typing import List
 
+
+# Check for advanced skills keywords
+advanced_skills = {
+    # Cloud & DevOps
+    'devops', 'cloud native', 'aws', 'azure', 'gcp', 'terraform', 
+    'kubernetes', 'docker', 'helm', 'gitops', 'ci/cd', 'iac',
+    
+    # Architecture Patterns
+    'microservices', 'serverless', 'event-driven', 'distributed systems',
+    'domain-driven design', 'hexagonal architecture', 'cqrs', 'event sourcing',
+    
+    # Backend Technologies
+    'graphql', 'grpc', 'websockets', 'service mesh', 'api gateway',
+    'oauth', 'jwt', 'openid', 'message broker', 'kafka', 'rabbitmq',
+    
+    # Data Engineering & ML
+    'data pipeline', 'etl', 'spark', 'hadoop', 'airflow', 'machine learning',
+    'neural networks', 'nlp', 'computer vision', 'data warehouse',
+    
+    # Database Advanced Concepts
+    'nosql', 'mongodb', 'cassandra', 'redis', 'elasticsearch', 'neo4j',
+    'database sharding', 'replication', 'data modeling',
+    
+    # Security
+    'security', 'penetration testing', 'oauth2', 'encryption', 'zero trust',
+    'container security', 'threat modeling', 'devsecops',
+    
+    # Frontend Advanced
+    'webassembly', 'pwa', 'microfrontends', 'state management',
+    'ssr', 'graphql client', 'web workers',
+    
+    # System Design
+    'high availability', 'fault tolerance', 'scalability', 'resilience',
+    'chaos engineering', 'load balancing', 'cdn', 'edge computing'
+}
+
+
+complexity_indicators = [
+    # Core fundamentals (from original list)
+    'authentication', 'authorization', 'caching', 'concurrency',
+    'database', 'error handling', 'logging', 'messaging', 'security',
+    'transactions', 'validation',
+    
+    # Concurrency patterns
+    'multithreading', 'thread safety', 'mutex', 'semaphore', 'lock',
+    'deadlock prevention', 'race condition', 'atomic operations', 'synchronization',
+    'async/await', 'coroutines', 'futures', 'promises', 'reactive programming',
+    
+    # Error handling & resilience
+    'circuit breaker', 'retry mechanism', 'backoff strategy', 'fallback',
+    'graceful degradation', 'exception handling', 'defensive programming',
+    'fault isolation', 'error boundary', 'recovery mechanism',
+    
+    # Performance optimization
+    'connection pooling', 'object pooling', 'memory pooling', 'resource pooling',
+    'lazy loading', 'eager loading', 'memoization', 'code optimization',
+    'query optimization', 'indexing strategy', 'query plan', 'execution plan',
+    'jit compilation', 'hot path optimization',
+    
+    # State management
+    'state machine', 'state transition', 'immutable state', 'state persistence', 
+    'global state', 'context management', 'session management', 'lifecycle hooks',
+    'hydration', 'dehydration',
+    
+    # Data processing
+    'stream processing', 'batch processing', 'binary data', 'blob handling',
+    'serialization', 'deserialization', 'compression', 'encryption',
+    'data transformation', 'data validation', 'schema validation',
+    
+    # Integration patterns
+    'webhook handling', 'callback processing', 'polling mechanism', 'long polling',
+    'push notification', 'ipc', 'inter-process communication', 'cross-origin',
+    'idempotency', 'consistency guarantee',
+    
+    # Advanced programming patterns
+    'dependency injection', 'aop', 'aspect-oriented', 'reflection', 'introspection',
+    'metaprogramming', 'code generation', 'plugin system', 'extension mechanism',
+    'hot reload', 'dynamic loading', 'monkey patching',
+    
+    # Security implementation details
+    'input sanitization', 'output encoding', 'csrf protection', 'xss prevention',
+    'sql injection', 'rate limiting', 'throttling', 'acl', 'rbac', 'abac',
+    'permission system',
+    
+    # Testing complexity
+    'mock object', 'test double', 'stub', 'spy', 'test fixture', 'test harness',
+    'property-based testing', 'fuzz testing', 'mutation testing', 'bdd', 'tdd',
+    
+    # Networking complexity
+    'connection management', 'keepalive', 'multiplexing', 'protocol negotiation',
+    'handshaking', 'header compression', 'binary protocol', 'custom protocol',
+    'socket programming', 'network buffer'
+]
+
 # Common file extensions
 file_extensions = {
     # Programming languages
@@ -147,3 +241,5 @@ def extract_language_terms(query: str) -> List[str]:
                 break  # Only add each language once
     
     return found_languages
+
+

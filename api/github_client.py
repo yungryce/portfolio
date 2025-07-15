@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from azure.storage.blob import BlobServiceClient, ContentSettings
 from base64 import b64decode
 from azure.core.exceptions import HttpResponseError, ClientAuthenticationError
+from github_helpers import trim_processed_repo
 
 # Configure logging
 logger = logging.getLogger('portfolio.github_client')
@@ -578,6 +579,9 @@ class GitHubClient:
                     repo['repoContext'] = {}
                 
                 repos_with_context.append(repo)
+              
+                trimmed_repo = trim_processed_repo(repo)
+                repos_with_context.append(trimmed_repo)
                 
             except Exception as e:
                 logger.warning(f"Failed to enhance {repo.get('name', 'unknown')}: {str(e)}")
@@ -585,8 +589,9 @@ class GitHubClient:
                 if 'languages' not in repo and include_languages:
                     repo['languages'] = {}
                 repo['repoContext'] = {}
-                repos_with_context.append(repo)
-    
+                trimmed_repo = trim_processed_repo(repo)
+                repos_with_context.append(trimmed_repo)
+                
         # Cache ONLY the complete enhanced result (raw data)
         self._save_to_cache(cache_key, repos_with_context, ttl=3600)  # 1 hour for enhanced data
     
