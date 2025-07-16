@@ -15,27 +15,56 @@ from ai_helpers import (
     process_language_data,
     
     # Component processing
-    extract_component_info, validate_component_data,
-    
-    # Keyword extraction
-    extract_tech_keywords, extract_skill_keywords, extract_component_keywords,
-    extract_project_keywords, find_matching_terms,
+    extract_component_info,
     
     # Search and scoring
     extract_context_terms, calculate_tech_score, calculate_skill_score,
     calculate_component_score, calculate_project_score, calculate_general_score,
-    calculate_bonus_score,
-    
-    # Difficulty calculation
-    calculate_tech_difficulty, calculate_architecture_difficulty,
-    calculate_skill_difficulty, calculate_project_difficulty,
-    calculate_metrics_difficulty
+    calculate_bonus_score
 )
-from repo_utils import extract_repo_data
+
 
 # Use the existing logger from function_app.py
 logger = logging.getLogger('portfolio.api')
 T = TypeVar('T')
+
+
+def extract_repo_data(repo: Dict, path: str, default: Any = None, as_type: Type[T] = None) -> Union[Any, T]:
+    """
+    Extract data from repository using dot notation path with type conversion.
+    
+    Args:
+        repo: Repository dictionary
+        path: Dot-separated path to the data (e.g., "repoContext.tech_stack.primary")
+        default: Default value if path doesn't exist
+        as_type: Optional type to convert the result to (e.g., int, float, list)
+        
+    Returns:
+        The extracted data or default value
+    """
+    if repo is None:
+        return default
+    
+    current = repo
+    parts = path.split('.')
+    
+    for part in parts:
+        if isinstance(current, dict) and part in current:
+            current = current.get(part)
+        else:
+            return default
+    
+    # Handle type conversion if requested
+    if as_type is not None and current is not None:
+        try:
+            if as_type == bool and isinstance(current, str):
+                return current.lower() in ('true', 'yes', '1')
+            return as_type(current)
+        except (ValueError, TypeError):
+            return default
+    
+    return current if current is not None else default
+
 
 class AIAssistant:
     """
@@ -648,6 +677,7 @@ Use the architecture documentation and project manifests to give comprehensive a
             system_message = system_template.format(context=enhanced_context)
         
         logger.info(f"Request ID: {request_id} - Created system prompt ({len(system_message)} chars)")
+        return "I'm sorry, I couldn't generate a response based on the portfolio information."
         
         # Call Groq API
         try:
