@@ -7,9 +7,10 @@ from datetime import datetime
 
 # Import the GitHub client
 from github_client import GitHubClient
+from ai.helpers import process_language_data
 
 # Import AI assistant functions and class
-from ai_assistant import AIAssistant
+from ai.ai_assistant import AIAssistant
 
 # Import helper functions
 from fa_helpers import (
@@ -96,7 +97,9 @@ def get_all_repositories_metadata(req: func.HttpRequest) -> func.HttpResponse:
         all_repos = gh_client.get_all_repos_metadata(username)
         top_repos = all_repos[:10]  # Take only the first 10
         
+        logger.debug(f"Retrieved {len(all_repos)} repositories, returning top 10")
         logger.info(f"Successfully retrieved {len(top_repos)} repositories")
+        logger.debug(f"Top repositories: {[repo['name'] for repo in top_repos]}")
         return create_success_response(top_repos)
         
     except Exception as e:
@@ -181,9 +184,7 @@ def ai_query(req: func.HttpRequest) -> func.HttpResponse:
         
         # Get all repositories with enhanced caching
         try:
-            logger.info("Retrieving all repositories for search")
             all_repos = gh_client.get_all_repos_with_context(username)
-            logger.info(f"Successfully retrieved {len(all_repos)} repositories")
         except Exception as e:
             logger.error(f"Repository retrieval failed: {str(e)}", exc_info=True)
             return handle_github_error(e, logger)
@@ -197,9 +198,7 @@ def ai_query(req: func.HttpRequest) -> func.HttpResponse:
         
         # Use the complete pipeline method
         try:
-            logger.info("Processing query with AI assistant pipeline")
             ai_response, metadata = ai_assistant.process_query(query.lower(), all_repos)
-
         except Exception as e:
             logger.error(f"AI query processing failed: {str(e)}", exc_info=True)
             return create_error_response(f"AI processing error: {str(e)}", 500)
@@ -255,7 +254,6 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
             return create_error_response(f"Repository '{repo_name}' not found", 404)
         
         # Process language data first for best analysis
-        from ai_helpers import process_language_data
         processed_repo = process_language_data(target_repo)
         
         # Calculate difficulty with enhanced scoring

@@ -12,7 +12,7 @@ from azure.core.exceptions import HttpResponseError, ClientAuthenticationError
 from github_helpers import trim_processed_repo
 
 # Configure logging
-logger = logging.getLogger('portfolio.github_client')
+logger = logging.getLogger('portfolio.api')
 logger.setLevel(logging.INFO)
 
 class GitHubClient:
@@ -134,7 +134,6 @@ class GitHubClient:
                 )
             )
             
-            logger.debug(f"Saved to cache: {cache_key} (TTL: {ttl}s)")
             return True
         except Exception as e:
             logger.warning(f"Error saving to cache for key {cache_key}: {str(e)}")
@@ -172,7 +171,6 @@ class GitHubClient:
         if content:
             try:
                 decoded_content = b64decode(content).decode('utf-8')
-                logger.debug(f"Successfully decoded file content for {path}")
                 return decoded_content
             except Exception as decode_error:
                 logger.warning(f"Failed to decode content for {path}: {str(decode_error)}")
@@ -289,8 +287,6 @@ class GitHubClient:
         
         for attempt in range(retries):
             try:
-                logger.debug(f"Making {method} request to {full_url} (attempt {attempt+1}/{retries})")
-                
                 response = requests.request(
                     method=method,
                     url=full_url,
@@ -341,7 +337,6 @@ class GitHubClient:
                         ttl = cache_ttl or self.cache_ttl
                         self._save_to_cache(cache_key, result, ttl)
                     
-                    logger.debug(f"Successful {method} request to {endpoint}")
                     return result
                 
                 # Handle 404s gracefully
@@ -415,7 +410,6 @@ class GitHubClient:
         username = username or self.username
         endpoint = f"users/{username}/repos"
         params = {'sort': 'updated', 'per_page': per_page}
-        
         # Cache key for the complete aggregated result (all pages + optional languages)
         cache_suffix = "_with_languages" if include_languages else "_basic"
         complete_cache_key = self._generate_cache_key(f"users_{username}_repos_complete{cache_suffix}", {'per_page': per_page})
@@ -550,11 +544,13 @@ class GitHubClient:
         cache_suffix = "_with_languages" if include_languages else "_basic"
         cache_key = f"repos_with_context_{username}{cache_suffix}"
         
+        # Always log execution start with request ID for traceability
+        request_id = f"req-{int(time.time())}"
+        
         # Check cache for complete enhanced result
         cached_data = self._get_from_cache(cache_key)
         if cached_data:
-            logger.info(f"Using cached repository data with context for {username} " +
-                       ("(with languages)" if include_languages else "(without languages)"))
+            logger.info(f"Request ID: {request_id} - Using cached data ({len(cached_data)} repositories)")
             return cached_data
 
         # Get all repositories (this method handles its own caching)
@@ -578,8 +574,6 @@ class GitHubClient:
                 else:
                     repo['repoContext'] = {}
                 
-                repos_with_context.append(repo)
-              
                 trimmed_repo = trim_processed_repo(repo)
                 repos_with_context.append(trimmed_repo)
                 
