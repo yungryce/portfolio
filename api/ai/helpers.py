@@ -515,3 +515,4 @@ def calculate_bonus_score(repo: Dict, search_terms: Dict) -> float:
             pass
     
     return score
+

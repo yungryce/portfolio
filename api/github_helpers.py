@@ -20,10 +20,11 @@ def trim_processed_repo(repo: Dict) -> Dict:
         'id', 'name', 'url', 'description', 'fork', 
         'created_at', 'updated_at', 'pushed_at', 'size',
         'language', 'license', 'allow_forking', 'topics', 
-        'visibility', 'languages', 'repoContext',
+        'visibility', 'languages', 'file_paths',
         'total_language_bytes', 'language_percentages', 
         'languages_sorted', 'relevance_scores',
-        'language_relevance_score', 'matched_query_languages'
+        'language_relevance_score', 'matched_query_languages',
+        'repoContext'
     ]
     
     # Create new dictionary with only desired keys

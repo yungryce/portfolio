@@ -243,3 +243,112 @@ def extract_language_terms(query: str) -> List[str]:
     return found_languages
 
 
+# Add this new dictionary after your deployment_patterns
+
+tool_ecosystems = {
+    'ansible': {
+        'patterns': [
+            r'.*/?(ansible\.cfg)$',                               # Config
+            r'.*/?inventory(\.ya?ml)?$',                          # Inventory
+            r'.*/?(site|requirements)\.ya?ml$',                   # Site, requirements
+            r'.*/?(group|host)_vars/.*\.ya?ml$',                 # Variable files
+            r'.*/?roles/[^/]+/(tasks|defaults|handlers|vars)/.*\.ya?ml$',  # Role structure
+            r'.*/?playbook.*\.ya?ml$'                             # Generic playbook
+        ],
+        'confidence_weight': 0.8,
+        'coverage_weight': 0.9,
+        'related_languages': ['yaml', 'jinja']
+    },
+    'kubernetes': {
+        'patterns': [
+            r'.*/?(deployment|service|ingress|configmap|secret|statefulset|daemonset|job|cronjob|namespace|pod|pv|pvc|rbac|role|rolebinding|serviceaccount)\.ya?ml$',
+            r'.*/?(kustomization|values|chart)\.ya?ml$',
+            r'.*/?(charts|helm|templates)/.*\.ya?ml$'
+        ],
+        'confidence_weight': 0.9,
+        'coverage_weight': 0.8,
+        'related_languages': ['yaml', 'helm']
+    },
+    'terraform': {
+        'patterns': [
+            r'.*/?.*\.tf$',
+            r'.*/?.*\.tfvars$',
+            r'.*/?(terraform\.tfstate|\.tfplan)$',
+            r'.*/?(main|provider|variables|outputs|backend)\.tf$',
+            r'.*/?modules/.*/.*\.tf$'
+        ],
+        'confidence_weight': 0.95,
+        'coverage_weight': 0.9,
+        'related_languages': ['hcl', 'json']
+    },
+    'github_actions': {
+        'patterns': [
+            r'.*\.github/workflows/.*\.ya?ml$',
+            r'.*\.github/actions/.*\.ya?ml$'
+        ],
+        'confidence_weight': 1.0,
+        'coverage_weight': 0.8,
+        'related_languages': ['yaml', 'javascript', 'typescript']
+    },
+    'azure_pipelines': {
+        'patterns': [
+            r'.*/?(azure-pipelines|pipeline)\.ya?ml$',
+            r'.*/?azure-pipelines/.*\.ya?ml$'
+        ],
+        'confidence_weight': 0.8,
+        'coverage_weight': 0.7,
+        'related_languages': ['yaml']
+    },
+    'azure_resource_manager': {
+        'patterns': [
+            r'.*/?(azuredeploy|template|parameters)\.json$',
+            r'.*/?.*\.bicep$'
+        ],
+        'confidence_weight': 0.8,
+        'coverage_weight': 0.6,
+        'related_languages': ['json', 'bicep']
+    },
+    'azure_functions': {
+        'patterns': [
+            r'.*/?(host|function|proxies|local\.settings)\.json$'
+        ],
+        'confidence_weight': 0.6,
+        'coverage_weight': 0.5,
+        'related_languages': ['json', 'python', 'javascript', 'typescript', 'csharp', 'java']
+    },
+    'docker': {
+        'patterns': [
+            r'.*/?Dockerfile$',
+            r'.*/?docker-compose\.ya?ml$',
+            r'.*/?\.dockerignore$',
+            r'.*/?docker/.*'
+        ],
+        'confidence_weight': 0.95,
+        'coverage_weight': 0.7,
+        'related_languages': ['dockerfile', 'yaml']
+    },
+    'circleci': {
+        'patterns': [
+            r'.*\.circleci/config\.ya?ml$'
+        ],
+        'confidence_weight': 1.0,
+        'coverage_weight': 0.5,
+        'related_languages': ['yaml']
+    },
+    'travis': {
+        'patterns': [
+            r'.*/?\.travis\.ya?ml$'
+        ],
+        'confidence_weight': 1.0,
+        'coverage_weight': 0.4,
+        'related_languages': ['yaml']
+    },
+    'jenkins': {
+        'patterns': [
+            r'.*/?Jenkinsfile$'
+        ],
+        'confidence_weight': 1.0,
+        'coverage_weight': 0.6,
+        'related_languages': ['groovy']
+    }
+}

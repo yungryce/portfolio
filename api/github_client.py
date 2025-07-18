@@ -476,27 +476,30 @@ class GitHubClient:
         username = username or self.username
         if not repo:
             raise ValueError("Repository name is required")
-        if not path:
-            raise ValueError("File path is required")
-            
-        endpoint = f"repos/{username}/{repo}/contents/{path}"
+        # Empty path is valid and represents the repository root
+        path_segment = path if path else ""
+
+        endpoint = f"repos/{username}/{repo}/contents/{path_segment}"
 
         try:
             # Single API call to get file/directory metadata (cached for 1 hour)
             file_data = self.make_request('GET', endpoint, cache_ttl=3600)
             
             if not file_data:
-                logger.debug(f"File or directory not found: {username}/{repo}/{path}")
+                logger.debug(f"File or directory not found: {username}/{repo}/{path_segment}")
                 return None
 
             # Handle single file - return raw content only
             if isinstance(file_data, dict) and file_data.get('type') == 'file':
                 return self._decode_file_content(file_data, path, endpoint)
             
-            # Handle directory - return dict of container files
+            # Handle directory - return raw list for root directory or process for subdirectories
             elif isinstance(file_data, list):
-                logger.info(f"Path {path} is a directory, checking for container-level files")
-                return self._process_directory_files(file_data, path, username, repo)
+                if not path or path == "" or path == "/":
+                    return file_data
+                else:
+                    logger.info(f"Path {path} is a directory, checking for container-level files")
+                    return self._process_directory_files(file_data, path, username, repo)
             
             # Handle edge cases
             elif isinstance(file_data, dict) and file_data.get('type') == 'dir':
@@ -508,7 +511,7 @@ class GitHubClient:
             return self.make_request('GET', endpoint, accept_raw=True, cache_ttl=3600)
             
         except Exception as e:
-            logger.error(f"Error fetching file content for {username}/{repo}/{path}: {str(e)}")
+            logger.error(f"Error fetching file content for {username}/{repo}/{path_segment}: {str(e)}")
             return None
 
     def get_container_files(self, username=None, repo=None, container_path=""):
@@ -573,6 +576,24 @@ class GitHubClient:
                         repo['repoContext'] = {}
                 else:
                     repo['repoContext'] = {}
+                
+                if 'contents_url' in repo:
+                    try:
+                        # Get root directory listing (single API call, cached)
+                        root_files = self.get_file_content(username, repo_name, "")
+
+                        if isinstance(root_files, list):
+                            # Extract just the file paths for efficiency
+                            file_paths = [item.get('path') for item in root_files 
+                                        if isinstance(item, dict) and 'path' in item]
+                            repo['file_paths'] = file_paths
+                            
+                        else:
+                            logger.warning(f"Root files for {repo_name} is not a list: {type(root_files)}")
+                    except Exception as e:
+                        logger.warning(f"Failed to get file listing for {repo_name}: {str(e)}")
+                else:
+                    logger.warning(f"No contents_url found for {repo_name}, unable to fetch file listing")
                 
                 trimmed_repo = trim_processed_repo(repo)
                 repos_with_context.append(trimmed_repo)

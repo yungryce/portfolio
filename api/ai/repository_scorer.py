@@ -1,5 +1,6 @@
 import logging
 import math
+import re
 from typing import Any, Dict, List, Tuple, Type, TypeVar
 from data_filter import extract_language_terms, advanced_skills, complexity_indicators
 from ai.helpers import (
@@ -557,9 +558,105 @@ class RepositoryScorer:
         return 0.0
 
     def _calculate_deployment_complexity(self, repo: Dict) -> float:
-        """Calculate deployment workflow complexity."""
-        workflow = extract_repo_data(repo, 'repoContext.deployment_workflow', [])
+        """Calculate deployment complexity based on presence of deployment files."""
+                
+        # 1. Check if we have file listing in the repo object itself
+        files = extract_repo_data(repo, 'file_paths', [])
+        if files:
+            return self._score_deployment_files_from_listing(files)
+        else:
+            # 1. First check if deployment workflow info already exists in repo context
+            workflow = extract_repo_data(repo, 'repoContext.deployment_workflow', [])
+            if workflow:
+                # Use existing workflow data for scoring
+                return self._score_deployment_workflow(workflow)
+            
+            # 2. Next check if we already have files information in repo context
+            files_info = extract_repo_data(repo, 'repoContext.files.key_files', [])
+            if files_info:
+                return self._score_deployment_files_from_context(files_info)
         
+        return 0.0
+
+    def _score_deployment_files_from_listing(self, files):
+        """Score deployment complexity based on file listing."""
+        if not files:
+            logger.debug("No files provided for deployment complexity scoring")
+            return 0.0
+        
+        # Handle both file path strings and raw directory listings
+        file_paths = []
+        if isinstance(files, list):
+            # If we have a list of dictionaries (raw GitHub API response)
+            if files and isinstance(files[0], dict):
+                file_paths = [item.get('path') for item in files if isinstance(item, dict) and 'path' in item]
+            # If we have a list of strings (already processed paths)
+            else:
+                file_paths = [f for f in files if isinstance(f, str)]
+        
+        # Import deployment patterns
+        from data_filter import tool_ecosystems
+        
+        # Track matches by ecosystem
+        ecosystem_matches = {}
+        
+        # Match files against patterns for each ecosystem
+        for filepath in file_paths:
+            for ecosystem_name, ecosystem_data in tool_ecosystems.items():
+                patterns = ecosystem_data.get('patterns', [])
+                
+                for pattern in patterns:
+                    if re.search(pattern, filepath, re.IGNORECASE):
+                        # Add to ecosystem matches
+                        if ecosystem_name not in ecosystem_matches:
+                            ecosystem_matches[ecosystem_name] = {
+                                'files': [],
+                                'confidence_weight': ecosystem_data.get('confidence_weight', 0.5),
+                                'coverage_weight': ecosystem_data.get('coverage_weight', 0.5)
+                            }
+                        
+                        ecosystem_matches[ecosystem_name]['files'].append(filepath)
+                        logger.debug(f"Matched {ecosystem_name} file: {filepath}")
+                        break  # Only count each file once per ecosystem
+        
+        # Calculate ecosystem-based scores
+        if not ecosystem_matches:
+            logger.debug("No tool ecosystems detected in file listing")
+            return 0.0
+        
+        # Calculate score based on:
+        # 1. Number of distinct ecosystems detected
+        ecosystem_count_score = min(len(ecosystem_matches) * 0.15, 0.45)  # Up to 0.45 for 3+ ecosystems
+        
+        # 2. Highest confidence ecosystem
+        max_confidence = max([data.get('confidence_weight', 0) for data in ecosystem_matches.values()])
+        
+        # 3. Coverage (number of files) for top ecosystems
+        coverage_scores = []
+        for ecosystem_name, data in ecosystem_matches.items():
+            file_count = len(data['files'])
+            coverage_weight = data.get('coverage_weight', 0.5)
+            ecosystem_coverage = min(file_count / 5, 1.0) * coverage_weight
+            coverage_scores.append(ecosystem_coverage)
+        
+        # Take average of top 2 coverage scores if available
+        top_coverage_score = sum(sorted(coverage_scores, reverse=True)[:2]) / min(len(coverage_scores), 2) if coverage_scores else 0
+        top_coverage_contribution = top_coverage_score * 0.35  # Up to 0.35 for coverage
+        
+        # Total score calculation
+        total_score = min(ecosystem_count_score + max_confidence * 0.2 + top_coverage_contribution, 1.0)
+        
+        logger.debug(f"Deployment score: {total_score:.2f} (ecosystems={len(ecosystem_matches)}, " 
+                    f"max_confidence={max_confidence:.2f}, top_coverage={top_coverage_contribution:.2f})")
+        
+        # Log detected ecosystems for visibility
+        for ecosystem, data in ecosystem_matches.items():
+            logger.debug(f"  - {ecosystem}: {len(data['files'])} files, weight={data['confidence_weight']}")
+        
+        return total_score
+
+    def _score_deployment_workflow(self, workflow: List[Dict]) -> float:
+        """Score deployment complexity based on workflow details."""
         if not workflow:
             return 0.0
         
@@ -584,6 +681,21 @@ class RepositoryScorer:
             duration_score = 0.0
         
         return min(step_score + complexity_score + duration_score, 1.0)
+
+    def _score_deployment_files_from_context(self, files_info: List[Dict]) -> float:
+        """Score deployment complexity based on files information in repo context."""
+        if not files_info:
+            return 0.0
+        
+        # Heuristic scoring based on file types and counts
+        file_types = set()
+        for file in files_info:
+            file_type = extract_repo_data(file, 'type', '').lower()
+            if file_type:
+                file_types.add(file_type)
+        
+        # Score based on number of different file types
+        return min(len(file_types) / 5, 1.0)
 
     def _calculate_technology_complexity(self, repo: Dict) -> float:
         """Calculate technology stack complexity."""
