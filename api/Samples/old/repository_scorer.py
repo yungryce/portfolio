@@ -3,7 +3,7 @@ import math
 import re
 from typing import Any, Dict, List, Tuple, Type, TypeVar
 from data_filter import extract_language_terms, advanced_skills, complexity_indicators
-from ai.helpers import (
+from .helpers import (
     # Language processing
     calculate_language_score, get_language_matches,
     process_language_data,
@@ -103,7 +103,7 @@ class RepositoryScorer:
             if 'total_relevance_score' in processed_repo:
                 processed_repo['total_relevance_score'] += difficulty_boost
                 
-                # Note the difficulty boost in the scores
+                # Note the difficul.repo-context.json:y boost in the scores
                 if 'relevance_scores' in processed_repo:
                     processed_repo['relevance_scores']['difficulty_boost'] = difficulty_boost
             

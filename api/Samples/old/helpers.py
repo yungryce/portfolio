@@ -1,19 +1,24 @@
-import re
+import tiktoken
 import logging
-from typing import Dict, List, Any, Tuple, Type, TypeVar
+import re
+from data_filter import technical_terms_structured, extract_language_terms
+from typing import Dict, List, Any, Tuple, Optional
 from datetime import datetime
 
 logger = logging.getLogger('portfolio.api')
-T = TypeVar('T')
 
 # ==============================================================================
 # TOKEN AND TEXT PROCESSING
 # ==============================================================================
 
 def count_tokens(text: str, model: str = "gpt-3.5-turbo") -> int:
-    """Count tokens in text using simple estimation (no tiktoken dependency)."""
-    # Simple estimation: ~4 characters per token for most models
-    return len(text) // 4
+    """Count tokens in text using tiktoken."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+        return len(encoding.encode(text))
+    except Exception:
+        # Fallback to rough estimation
+        return len(text) // 4
 
 def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
     """Truncate text to maximum length with suffix."""
@@ -116,17 +121,30 @@ def calculate_language_score(repo_languages: Dict[str, int], query_languages: Li
     for query_lang in query_languages:
         query_lang_lower = query_lang.lower()
         
+        # Direct language match (highest priority)
         for repo_lang, bytes_count in repo_languages.items():
-            repo_lang_lower = repo_lang.lower()
-            
-            # Direct match
-            if query_lang_lower == repo_lang_lower:
-                percentage = (bytes_count / total_bytes * 100) if total_bytes > 0 else 0
-                score += 10.0 + (percentage * 0.1)  # Base score + usage bonus
-            # Partial match
-            elif query_lang_lower in repo_lang_lower or repo_lang_lower in query_lang_lower:
-                percentage = (bytes_count / total_bytes * 100) if total_bytes > 0 else 0
-                score += 5.0 + (percentage * 0.05)  # Lower base score + usage bonus
+            if query_lang_lower == repo_lang.lower():
+                # Score based on percentage of codebase
+                if total_bytes > 0:
+                    percentage = (bytes_count / total_bytes) * 100
+                    # Higher score for languages that make up more of the codebase
+                    lang_score = min(percentage / 5, 20)  # Max 20 points per direct match
+                    score += lang_score
+                else:
+                    score += 10  # Default score if no byte data
+                break
+        
+        # Partial language match (lower priority)
+        else:
+            for repo_lang, bytes_count in repo_languages.items():
+                if query_lang_lower in repo_lang.lower() or repo_lang.lower() in query_lang_lower:
+                    if total_bytes > 0:
+                        percentage = (bytes_count / total_bytes) * 100
+                        lang_score = min(percentage / 10, 5)  # Max 5 points for partial match
+                        score += lang_score
+                    else:
+                        score += 3  # Reduced score for partial matches
+                    break
 
     return score
 
@@ -149,28 +167,49 @@ def get_language_matches(repo_languages: Dict[str, int], query_languages: List[s
     for query_lang in query_languages:
         query_lang_lower = query_lang.lower()
         
+        # Check for direct matches first
         for repo_lang, bytes_count in repo_languages.items():
-            repo_lang_lower = repo_lang.lower()
-            
-            # Check for matches
-            if query_lang_lower == repo_lang_lower:
+            if query_lang_lower == repo_lang.lower():
+                # Add enhanced confidence based on relevance score
+                confidence = "high"
+                if relevance_scores:
+                    if language_relevance > 10:
+                        confidence = "very high"
+                    elif language_relevance > 5:
+                        confidence = "high"
+                    else:
+                        confidence = "medium"
+                
                 matches.append({
                     'query_language': query_lang,
                     'repo_language': repo_lang,
-                    'bytes_count': bytes_count,
-                    'match_type': 'exact',
-                    'confidence': 'high',
-                    'relevance_score': language_relevance
+                    'match_type': 'direct',
+                    'bytes': bytes_count,
+                    'confidence': confidence
                 })
-            elif query_lang_lower in repo_lang_lower or repo_lang_lower in query_lang_lower:
-                matches.append({
-                    'query_language': query_lang,
-                    'repo_language': repo_lang,
-                    'bytes_count': bytes_count,
-                    'match_type': 'partial',
-                    'confidence': 'medium',
-                    'relevance_score': language_relevance * 0.7
-                })
+                break
+        else:
+            # Check for partial matches
+            for repo_lang, bytes_count in repo_languages.items():
+                if query_lang_lower in repo_lang.lower() or repo_lang.lower() in query_lang_lower:
+                    # Add enhanced confidence based on relevance score
+                    confidence = "medium"
+                    if relevance_scores:
+                        if language_relevance > 8:
+                            confidence = "high"
+                        elif language_relevance > 3:
+                            confidence = "medium"
+                        else:
+                            confidence = "low"
+                    
+                    matches.append({
+                        'query_language': query_lang,
+                        'repo_language': repo_lang,
+                        'match_type': 'partial',
+                        'bytes': bytes_count,
+                        'confidence': confidence
+                    })
+                    break
     
     return matches
 
@@ -198,51 +237,6 @@ def safe_get_nested_value(data: Dict, path: str, default: Any = None) -> Any:
             return default
     
     return current
-
-
-# ==============================================================================
-# Extracting Data from Repositories
-# ==============================================================================
-
-
-def extract_repo_data(repo: Dict, path: str, default: any = None, as_type: type = None) -> any:
-    """
-    Extract data from repository using dot notation path with type conversion.
-    
-    Args:
-        repo: Repository dictionary
-        path: Dot-separated path to the data (e.g., "repoContext.tech_stack.primary")
-        default: Default value if path doesn't exist
-        as_type: Optional type to convert the result to (e.g., int, float, list)
-        
-    Returns:
-        The extracted data or default value
-    """
-    if repo is None:
-        return default
-    
-    current = repo
-    parts = path.split('.')
-    
-    for part in parts:
-        if isinstance(current, dict) and part in current:
-            current = current.get(part)
-        else:
-            return default
-    
-    # Handle type conversion if requested
-    if as_type is not None and current is not None:
-        try:
-            if as_type == bool and isinstance(current, str):
-                return current.lower() in ('true', 'yes', '1')
-            return as_type(current)
-        except (ValueError, TypeError):
-            return default
-    
-    return current if current is not None else default
-
-
-
 
 # ==============================================================================
 # SEARCH TERM EXTRACTION
@@ -357,238 +351,168 @@ def _extract_project_keywords(project_identity: Dict) -> set:
     return keywords
 
 # ==============================================================================
-# SCORING FUNCTIONS
+# SCORING FUNCTIONS (moved from original implementation)
 # ==============================================================================
 
 def calculate_tech_score(tech_stack: Dict, search_terms: Dict) -> float:
     """Calculate technology stack relevance score."""
-    if not tech_stack or not search_terms:
-        return 0.0
-    
     score = 0.0
-    tech_terms = search_terms.get('tech', [])
     
-    # Check primary technologies (higher weight)
-    primary_tech = tech_stack.get('primary', [])
-    for tech in primary_tech:
-        for term in tech_terms:
-            if term.lower() in tech.lower():
-                score += 5.0
-    
-    # Check secondary technologies
-    secondary_tech = tech_stack.get('secondary', [])
-    for tech in secondary_tech:
-        for term in tech_terms:
-            if term.lower() in tech.lower():
+    # Primary tech stack scoring
+    if 'primary' in tech_stack:
+        primary_tech = [tech.lower() for tech in tech_stack['primary']]
+        for term in search_terms.get('tech', []):
+            if any(term in tech for tech in primary_tech):
                 score += 3.0
     
-    # Check libraries and tools
-    for key in ['key_libraries', 'development_tools']:
-        items = tech_stack.get(key, [])
-        for item in items:
-            for term in tech_terms:
-                if term.lower() in item.lower():
-                    score += 2.0
+    # Secondary tech stack scoring
+    if 'secondary' in tech_stack:
+        secondary_tech = [tech.lower() for tech in tech_stack['secondary']]
+        for term in search_terms.get('tech', []):
+            if any(term in tech for tech in secondary_tech):
+                score += 2.0
+    
+    # Key libraries scoring
+    if 'key_libraries' in tech_stack:
+        key_libraries = [lib.lower() for lib in tech_stack['key_libraries']]
+        for term in search_terms.get('tech', []):
+            if any(term in lib for lib in key_libraries):
+                score += 2.5
     
     return score
 
 def calculate_skill_score(skill_manifest: Dict, search_terms: Dict) -> float:
     """Calculate skill manifest relevance score."""
-    if not skill_manifest or not search_terms:
-        return 0.0
-    
     score = 0.0
-    skill_terms = search_terms.get('skills', [])
     
-    # Check technical skills
-    technical_skills = skill_manifest.get('technical', [])
-    for skill in technical_skills:
-        for term in skill_terms:
-            if term.lower() in skill.lower():
-                score += 4.0
+    # Technical skills scoring
+    if 'technical' in skill_manifest:
+        technical_skills = [skill.lower() for skill in skill_manifest['technical']]
+        for term in search_terms.get('skills', []):
+            if any(term in skill for skill in technical_skills):
+                score += 1.8
     
-    # Check domain skills
-    domain_skills = skill_manifest.get('domain', [])
-    for skill in domain_skills:
-        for term in skill_terms:
-            if term.lower() in skill.lower():
-                score += 3.0
+    # Domain skills scoring
+    if 'domain' in skill_manifest:
+        domain_skills = [skill.lower() for skill in skill_manifest['domain']]
+        for term in search_terms.get('skills', []):
+            if any(term in skill for skill in domain_skills):
+                score += 1.5
     
     return score
 
 def calculate_component_score(components: Dict, search_terms: Dict) -> float:
     """Calculate component relevance score."""
-    if not components or not search_terms:
-        return 0.0
-    
     score = 0.0
-    component_terms = search_terms.get('components', [])
     
     for comp_name, comp_data in components.items():
-        # Check component name
-        for term in component_terms:
-            if term.lower() in comp_name.lower():
-                score += 3.0
-        
-        # Check component details
         comp_items = extract_component_info(comp_data)
+        
         for item in comp_items:
-            for field in ['type', 'description']:
-                value = item.get(field, '')
-                if value:
-                    for term in component_terms:
-                        if term.lower() in value.lower():
-                            score += 2.0
+            comp_type = normalize_string(item.get('type', ''))
+            comp_desc = normalize_string(item.get('description', ''))
+            comp_name_norm = normalize_string(comp_name)
+            
+            for term in search_terms.get('components', []):
+                if (term in comp_type or 
+                    term in comp_desc or 
+                    term in comp_name_norm):
+                    score += 1.2
     
     return score
 
 def calculate_project_score(project_identity: Dict, search_terms: Dict) -> float:
     """Calculate project identity relevance score."""
-    if not project_identity or not search_terms:
-        return 0.0
-    
     score = 0.0
-    project_terms = search_terms.get('project', [])
     
-    # Check project type and scope
-    for key in ['type', 'scope']:
-        value = project_identity.get(key, '')
-        if value:
-            for term in project_terms:
-                if term.lower() in value.lower():
-                    score += 4.0
+    project_name = normalize_string(project_identity.get('name', ''))
+    project_type = normalize_string(project_identity.get('type', ''))
+    project_desc = normalize_string(project_identity.get('description', ''))
     
-    # Check project name and description
-    for key in ['name', 'description']:
-        value = project_identity.get(key, '')
-        if value:
-            for term in project_terms:
-                if term.lower() in value.lower():
-                    score += 3.0
+    for term in search_terms.get('project', []):
+        if (term in project_name or 
+            term in project_type or 
+            term in project_desc):
+            score += 1.0
     
     return score
 
 def calculate_general_score(repo: Dict, search_terms: Dict) -> float:
-    """Calculate general repository relevance score."""
-    if not search_terms:
-        return 0.0
-    
+    """Calculate general terms relevance score."""
     score = 0.0
-    general_terms = search_terms.get('general', [])
     
-    # Check repository name and description
-    for field in ['name', 'description']:
-        value = repo.get(field, '')
-        if value:
-            for term in general_terms:
-                if term.lower() in value.lower():
-                    score += 2.0
+    repo_name = normalize_string(repo.get('name', ''))
+    repo_description = normalize_string(repo.get('description', ''))
+    repo_language = normalize_string(repo.get('language', ''))
+    repo_topics = repo.get('topics', [])
     
-    # Check topics
-    topics = repo.get('topics', [])
-    for topic in topics:
-        for term in general_terms:
-            if term.lower() in topic.lower():
-                score += 1.5
+    for term in search_terms.get('general', []):
+        if (term in repo_name or 
+            term in repo_description or 
+            term in repo_language or 
+            any(term in normalize_string(topic) for topic in repo_topics)):
+            score += 0.8
     
     return score
 
 def calculate_bonus_score(repo: Dict, search_terms: Dict) -> float:
-    """Calculate bonus points for special characteristics."""
+    """Calculate comprehensive bonus score using repository relevance scores."""
     score = 0.0
+    repo_context = repo.get('repoContext', {})
+    relevance_scores = repo.get('relevance_scores', {})
     
-    # Bonus for recent activity
-    updated_at = repo.get('updated_at', '')
-    if updated_at:
+    # Context completeness bonuses
+    if repo_context:
+        tech_stack = repo_context.get('tech_stack', {})
+        skill_manifest = repo_context.get('skill_manifest', {})
+        components = repo_context.get('components', {})
+        project_identity = repo_context.get('project_identity', {})
+        
+        if tech_stack.get('primary'):
+            score += 0.5
+        if skill_manifest.get('technical'):
+            score += 0.3
+        if components:
+            score += 0.2
+        if project_identity.get('description'):
+            score += 0.2
+    
+    # Enhanced scoring based on relevance_scores
+    if relevance_scores:
+        # Cross-category scoring
+        non_zero_categories = sum(1 for cat_score in relevance_scores.values() if cat_score > 0)
+        if non_zero_categories >= 3:
+            score += 0.8
+        elif non_zero_categories == 2:
+            score += 0.4
+        
+        # High-relevance bonus
+        high_scores = sum(1 for cat_score in relevance_scores.values() if cat_score > 5.0)
+        if high_scores >= 2:
+            score += 1.0
+        elif high_scores == 1:
+            score += 0.5
+        
+        # Language-specific scoring
+        language_score = relevance_scores.get('language', 0)
+        if language_score > 10:
+            score += 0.9
+        elif language_score > 5:
+            score += 0.6
+        elif language_score > 0:
+            score += 0.3
+    
+    # Recency bonus
+    if repo.get('updated_at'):
         try:
-            from datetime import datetime
-            updated_date = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
-            now = datetime.now().replace(tzinfo=updated_date.tzinfo)
-            days_since_update = (now - updated_date).days
-            
-            # Bonus for recently updated repos
-            if days_since_update < 30:
-                score += 2.0
-            elif days_since_update < 90:
-                score += 1.0
+            updated_date = datetime.fromisoformat(repo['updated_at'].replace('Z', '+00:00'))
+            days_since_update = (datetime.now().replace(tzinfo=updated_date.tzinfo) - updated_date).days
+            if days_since_update < 90:
+                score += 0.7
+            elif days_since_update < 365:
+                score += 0.4
         except:
             pass
     
-    # Bonus for popular repositories
-    stars = repo.get('stargazers_count', 0)
-    if stars > 10:
-        score += 1.0
-    elif stars > 5:
-        score += 0.5
-    
-    # Bonus for detailed documentation
-    if repo.get('has_readme'):
-        score += 0.5
-    
     return score
 
-# ==============================================================================
-# UTILITY FUNCTIONS
-# ==============================================================================
-
-def get_language_distribution(repositories: List[Dict]) -> Dict[str, float]:
-    """Get language distribution across all repositories."""
-    language_totals = {}
-    total_bytes = 0
-    
-    for repo in repositories:
-        languages = repo.get('languages', {})
-        for lang, bytes_count in languages.items():
-            language_totals[lang] = language_totals.get(lang, 0) + bytes_count
-            total_bytes += bytes_count
-    
-    if total_bytes == 0:
-        return {}
-    
-    return {
-        lang: round((bytes_count / total_bytes) * 100, 2)
-        for lang, bytes_count in language_totals.items()
-    }
-
-def get_unique_technologies(repositories: List[Dict]) -> List[str]:
-    """Get unique technologies across all repositories."""
-    technologies = set()
-    
-    for repo in repositories:
-        repo_context = repo.get('repoContext', {})
-        tech_stack = repo_context.get('tech_stack', {})
-        
-        for key in ['primary', 'secondary', 'key_libraries', 'development_tools']:
-            items = tech_stack.get(key, [])
-            technologies.update(items)
-    
-    return sorted(list(technologies))
-
-def get_combined_skills(repositories: List[Dict]) -> List[str]:
-    """Get combined skills across all repositories."""
-    skills = set()
-    
-    for repo in repositories:
-        repo_context = repo.get('repoContext', {})
-        skill_manifest = repo_context.get('skill_manifest', {})
-        
-        for key in ['technical', 'domain']:
-            items = skill_manifest.get(key, [])
-            skills.update(items)
-    
-    return sorted(list(skills))
-
-def group_repos_by_type(repositories: List[Dict]) -> Dict[str, List[Dict]]:
-    """Group repositories by project type."""
-    grouped = {}
-    
-    for repo in repositories:
-        repo_context = repo.get('repoContext', {})
-        project_identity = repo_context.get('project_identity', {})
-        project_type = project_identity.get('type', 'Unknown')
-        
-        if project_type not in grouped:
-            grouped[project_type] = []
-        grouped[project_type].append(repo)
-    
-    return grouped

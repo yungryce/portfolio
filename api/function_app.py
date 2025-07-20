@@ -4,22 +4,13 @@ import os
 import time
 import azure.functions as func
 from datetime import datetime
+from fa_helpers import create_success_response, create_error_response, validate_github_params
 
-# Import the GitHub client
-from github_client import GitHubClient
-from ai.helpers import process_language_data
-
-# Import AI assistant functions and class
-from ai.ai_assistant import AIAssistant
-
-# Import helper functions
-from fa_helpers import (
-    format_file_response,
-    handle_github_error,
-    validate_github_params,
-    create_error_response,
-    create_success_response
-)
+# Updated imports - use individual managers instead of GitHubClient
+from github.github_api import GitHubAPI
+from github.cache_client import GitHubCache
+from github.github_file_manager import GitHubFileManager
+from github.github_repo_manager import GitHubRepoManager
 
 # Configure logging
 LOG_FILE_PATH = os.getenv("API_LOG_FILE", "api_function_app.log")
@@ -37,187 +28,202 @@ file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
 app = func.FunctionApp()
+logger.info("Function app initialized")
 
 
-@app.route(route="github/repos/{username}/{repo}", auth_level=func.AuthLevel.ANONYMOUS)
-def get_repository_metadata(req: func.HttpRequest) -> func.HttpResponse:
-    # Get parameters from route
-    username = req.route_params.get('username')
-    repo = req.route_params.get('repo')
-    
-    logger.info(f"Processing request for specific GitHub repo: {username}/{repo}")
-    
-    # Validate parameters using helper
-    validation_error = validate_github_params(username, repo)
-    if validation_error:
-        return validation_error
-    
-    # Get token from environment
+def _get_github_managers(username=None):
+    """Get GitHub managers initialized with proper dependencies."""
     github_token = os.getenv('GITHUB_TOKEN')
     
-    if not github_token:
-        logger.error('GitHub token not configured in environment variables')
-        return create_error_response("GitHub token not configured", 500)
+    # Initialize components in dependency order
+    api = GitHubAPI(token=github_token, username=username)
+    cache = GitHubCache(use_cache=True)
+    file_manager = GitHubFileManager(api, cache)
+    repo_manager = GitHubRepoManager(api, cache, file_manager)
     
-    # Create GitHub client
-    gh_client = GitHubClient(token=github_token, username=username)
-    
+    return api, cache, file_manager, repo_manager
+
+@app.route(route="github/repos/{username}", methods=["GET"])
+def get_user_repos(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        # Get repository details
-        repo_details = gh_client.get_repo_metadata(username, repo, include_languages=True)
+        username = req.route_params.get('username')
+        if not username:
+            return create_error_response("Username is required", 400)
         
-        if not repo_details:
-            logger.warning(f"Repository not found: {username}/{repo}")
-            return create_error_response("Repository not found", 404)
+        # Use repo manager directly
+        _, _, _, repo_manager = _get_github_managers(username)
+        repos = repo_manager.get_all_repos_metadata(username=username, include_languages=True)
         
-        return create_success_response(repo_details)
-        
+        return create_success_response(repos)
     except Exception as e:
-        logger.error(f"Error fetching repository details: {str(e)}", exc_info=True)
-        return handle_github_error(e, logger)
+        logger.error(f"Error fetching repositories for {username}: {str(e)}")
+        return create_error_response(f"Failed to fetch repositories: {str(e)}", 500)
 
-
-@app.route(route="github/repos", auth_level=func.AuthLevel.ANONYMOUS)
-def get_all_repositories_metadata(req: func.HttpRequest) -> func.HttpResponse:
-    logger.info('Processing request for GitHub repos listing')
-    
-    # Get token from environment
-    github_token = os.getenv('GITHUB_TOKEN')
-    username = 'yungryce'  # Your GitHub username
-    
-    if not github_token:
-        logger.error('GitHub token not configured in environment variables')
-        return create_error_response("GitHub token not configured", 500)
-    
-    # Create GitHub client
-    gh_client = GitHubClient(token=github_token, username=username)
-    
+@app.route(route="github/repos/{username}/{repo}", methods=["GET"])
+def get_single_repo(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        # Get the repositories
-        all_repos = gh_client.get_all_repos_metadata(username)
-        top_repos = all_repos[:10]  # Take only the first 10
+        username = req.route_params.get('username')
+        repo = req.route_params.get('repo')
         
-        logger.debug(f"Retrieved {len(all_repos)} repositories, returning top 10")
-        logger.info(f"Successfully retrieved {len(top_repos)} repositories")
-        logger.debug(f"Top repositories: {[repo['name'] for repo in top_repos]}")
-        return create_success_response(top_repos)
+        if not username or not repo:
+            return create_error_response("Username and repository name are required", 400)
         
+        # Use repo manager directly
+        _, _, _, repo_manager = _get_github_managers(username)
+        repo_data = repo_manager.get_repo_metadata(username=username, repo=repo, include_languages=True)
+        
+        if not repo_data:
+            return create_error_response(f"Repository {username}/{repo} not found", 404)
+        
+        return create_success_response(repo_data)
     except Exception as e:
-        logger.error(f"Error fetching GitHub repositories: {str(e)}", exc_info=True)
-        return handle_github_error(e, logger)
+        logger.error(f"Error fetching repository {username}/{repo}: {str(e)}")
+        return create_error_response(f"Failed to fetch repository: {str(e)}", 500)
 
-
-@app.route(route="github/repos/{username}/{repo}/contents/{path:regex(.+)}", auth_level=func.AuthLevel.ANONYMOUS)
-def get_repository_file_content(req: func.HttpRequest) -> func.HttpResponse:
-    username = req.route_params.get('username')
-    repo = req.route_params.get('repo')
-    file_path = req.route_params.get('path')
-    
-    logger.info(f"Processing file request: {username}/{repo}/{file_path}")
-    
-    # Validate parameters using helper
-    validation_error = validate_github_params(username, repo, file_path)
-    if validation_error:
-        return validation_error
-        
-    # Get GitHub token
-    github_token = os.getenv('GITHUB_TOKEN')
-    if not github_token:
-        logger.error("GitHub token not configured")
-        return create_error_response("GitHub token not configured", 500)
-    
+@app.route(route="github/repos/{username}/{repo}/files", methods=["GET"])
+def get_repo_files(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        # Create GitHub client with optimized caching
-        gh_client = GitHubClient(token=github_token, username=username)
+        username = req.route_params.get('username')
+        repo = req.route_params.get('repo')
+        path = req.params.get('path', '')
         
-        # Fetch file content (returns raw content or dict for directories)
-        file_content = gh_client.get_file_content(username, repo, file_path)
-        logger.debug(f"Fetched file content for {file_path} in {username}/{repo}")
+        if not username or not repo:
+            return create_error_response("Username and repository name are required", 400)
         
-        if not file_content:
-            logger.info(f"File not found: {username}/{repo}/{file_path}")
-            return create_error_response(
-                f"File '{file_path}' not found in repository '{username}/{repo}'", 
-                404
-            )
+        # Use file manager directly
+        _, _, file_manager, _ = _get_github_managers(username)
+        files = file_manager.get_file_content(username=username, repo=repo, path=path)
         
-        # Handle directory response (dict of container files)
-        if isinstance(file_content, dict):
-            logger.info(f"Returning directory listing with {len(file_content)} files")
-            return create_success_response(file_content)
-        
-        # Handle single file content - use helper function with logger context
-        logger.debug(f"Formatting single file response for {file_path}")
-        return format_file_response(file_content, file_path, logger)
-        
+        return create_success_response(files)
     except Exception as e:
-        logger.error(f"Error fetching file {file_path} from {username}/{repo}: {str(e)}", exc_info=True)
-        return handle_github_error(e, logger)
+        logger.error(f"Error fetching files for {username}/{repo}: {str(e)}")
+        return create_error_response(f"Failed to fetch files: {str(e)}", 500)
 
+@app.route(route="github/repos/{username}/with-context", methods=["GET"])
+def get_user_repos_with_context(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        username = req.route_params.get('username')
+        if not username:
+            return create_error_response("Username is required", 400)
+        
+        # Use repo manager directly
+        _, _, _, repo_manager = _get_github_managers(username)
+        repos = repo_manager.get_all_repos_with_context(username=username, include_languages=True)
+        
+        return create_success_response(repos)
+    except Exception as e:
+        logger.error(f"Error fetching repositories with context for {username}: {str(e)}")
+        return create_error_response(f"Failed to fetch repositories with context: {str(e)}", 500)
 
-@app.route(route="ai", auth_level=func.AuthLevel.ANONYMOUS, methods=["POST", "OPTIONS"])
-def ai_query(req: func.HttpRequest) -> func.HttpResponse:
-    logger.info('Processing portfolio query with AI assistance')
-    start_time = time.time()
+@app.timer_trigger(schedule="0 0 * * * *", arg_name="myTimer", run_on_startup=False,
+                   use_monitor=True) 
+def cache_cleanup_timer(myTimer: func.TimerRequest) -> None:
+    """
+    Timer trigger that runs every hour to clean up expired cache blobs.
+    Schedule: "0 0 * * * *" means at minute 0 of every hour.
+    """
+    logger.info('Cache cleanup timer triggered')
+    
+    if myTimer.past_due:
+        logger.warning('Cache cleanup timer is running late')
     
     try:
-        # Parse request body
-        req_body = req.get_json()
-        query = req_body.get('query')
-        
-        if not query:
-            logger.warning('Portfolio query request missing query parameter')
-            return create_error_response("Missing query parameter", 400)
-        
-        logger.info(f"Portfolio query received: {query[:100]}...")
-        
-        # Get GitHub token from environment
+        # Get GitHub token
         github_token = os.getenv('GITHUB_TOKEN')
         username = 'yungryce'
         
         if not github_token:
-            logger.error('GitHub token not configured in environment variables')
-            return create_error_response("GitHub token not configured", 500)
+            logger.error('GitHub token not configured, skipping cache cleanup')
+            return
         
-        # Create GitHub client
-        gh_client = GitHubClient(token=github_token, username=username)
+        # Initialize managers
+        _, cache, _, _ = _get_github_managers(username)
         
-        # Get all repositories with enhanced caching
-        try:
-            all_repos = gh_client.get_all_repos_with_context(username)
-        except Exception as e:
-            logger.error(f"Repository retrieval failed: {str(e)}", exc_info=True)
-            return handle_github_error(e, logger)
-
-        # Create AI Assistant instance
-        try:
-            ai_assistant = AIAssistant(github_token=github_token, username=username)
-        except Exception as e:
-            logger.error(f"AI Assistant initialization failed: {str(e)}", exc_info=True)
-            return create_error_response(f"AI Assistant initialization error: {str(e)}", 500)
+        # Get cache statistics before cleanup
+        stats_before = cache.get_cache_statistics()
+        logger.info(f"Cache stats before cleanup: {stats_before}")
         
-        # Use the complete pipeline method
-        try:
-            ai_response, metadata = ai_assistant.process_query(query.lower(), all_repos)
-        except Exception as e:
-            logger.error(f"AI query processing failed: {str(e)}", exc_info=True)
-            return create_error_response(f"AI processing error: {str(e)}", 500)
+        # Perform cache cleanup
+        cleanup_results = cache.cleanup_expired_cache(
+            batch_size=100,
+            dry_run=False  # Set to True for testing
+        )
         
-        # Return the AI response with enhanced metadata
-        result = {
-            "response": ai_response,
-            "metadata": metadata
-        }
+        # Get cache statistics after cleanup
+        stats_after = cache.get_cache_statistics()
         
-        logger.info("Portfolio query processed successfully")
-        processing_time = time.time() - start_time
-        return create_success_response(result, round(processing_time, 2)
-)
+        # Log cleanup results
+        logger.info(f"Cache cleanup completed: {cleanup_results}")
+        logger.info(f"Cache stats after cleanup: {stats_after}")
+        
+        # Log summary
+        if cleanup_results['status'] == 'completed':
+            logger.info(f"Successfully cleaned up {cleanup_results['deleted_count']} expired cache entries")
+            
+            # Log space savings
+            if 'total_size_mb' in stats_before and 'total_size_mb' in stats_after:
+                space_saved = stats_before['total_size_mb'] - stats_after['total_size_mb']
+                if space_saved > 0:
+                    logger.info(f"Cache cleanup freed {space_saved:.2f} MB of storage")
+        else:
+            logger.warning(f"Cache cleanup failed or skipped: {cleanup_results}")
             
     except Exception as e:
-        logger.error(f"Error processing portfolio query: {str(e)}", exc_info=True)
-        return create_error_response(f"Internal server error: {str(e)}", 500)
+        logger.error(f"Cache cleanup timer failed: {str(e)}", exc_info=True)
 
+@app.route(route="github/cache/cleanup", methods=["POST"])
+def cleanup_cache(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        # Parse request body for cleanup options
+        body = req.get_json() or {}
+        dry_run = body.get('dry_run', False)
+        batch_size = body.get('batch_size', 100)
+        
+        # Use cache manager directly
+        _, cache, _, _ = _get_github_managers()
+        result = cache.cleanup_expired_cache(batch_size=batch_size, dry_run=dry_run)
+        
+        return create_success_response(result)
+    except Exception as e:
+        logger.error(f"Error during cache cleanup: {str(e)}")
+        return create_error_response(f"Cache cleanup failed: {str(e)}", 500)
+
+@app.route(route="github/cache/stats", methods=["GET"])
+def get_cache_stats(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        # Use cache manager directly
+        _, cache, _, _ = _get_github_managers()
+        stats = cache.get_cache_statistics()
+        
+        return create_success_response(stats)
+    except Exception as e:
+        logger.error(f"Error fetching cache statistics: {str(e)}")
+        return create_error_response(f"Failed to fetch cache statistics: {str(e)}", 500)
+
+@app.route(route="portfolio/query", methods=["POST"])
+def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        # Parse request body
+        request_body = req.get_json()
+        if not request_body or 'query' not in request_body:
+            return create_error_response("Request body must contain 'query' field", 400)
+        
+        query = request_body['query']
+        username = request_body.get('username', 'yungryce')
+        
+        # Initialize AI assistant with updated managers
+        _, _, _, repo_manager = _get_github_managers(username)
+        
+        from ai.ai_assistant import AIAssistant
+        ai_assistant = AIAssistant(username=username, repo_manager=repo_manager)
+        
+        # Process the query
+        response = ai_assistant.process_query(query)
+        
+        return create_success_response(response)
+    except Exception as e:
+        logger.error(f"Error processing portfolio query: {str(e)}")
+        return create_error_response(f"Failed to process query: {str(e)}", 500)
 
 @app.route(route="repository/{repo}/difficulty", auth_level=func.AuthLevel.ANONYMOUS, methods=["GET"])
 def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
@@ -228,7 +234,7 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
         repo_name = req.route_params.get('repo')
         if not repo_name:
             return create_error_response("Missing repository name in URL path", 400)
-        
+        l
         # Get GitHub token
         github_token = os.getenv('GITHUB_TOKEN')
         username = 'yungryce'
@@ -236,12 +242,15 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
         if not github_token:
             return create_error_response("GitHub token not configured", 500)
         
-        # Create AI Assistant
-        ai_assistant = AIAssistant(github_token=github_token, username=username)
+        # Initialize managers
+        _, _, _, repo_manager = _get_github_managers(username)
+        
+        # Create AI Assistant with repo manager
+        from ai.ai_assistant import AIAssistant
+        ai_assistant = AIAssistant(username=username, repo_manager=repo_manager)
         
         # Get repository with context
-        gh_client = GitHubClient(token=github_token, username=username)
-        repos_with_context = gh_client.get_all_repos_with_context(username)
+        repos_with_context = repo_manager.get_all_repos_with_context(username)
         
         # Find the specific repository
         target_repo = None
@@ -254,6 +263,7 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
             return create_error_response(f"Repository '{repo_name}' not found", 404)
         
         # Process language data first for best analysis
+        from ai.helpers_old import process_language_data
         processed_repo = process_language_data(target_repo)
         
         # Calculate difficulty with enhanced scoring
@@ -290,143 +300,6 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
         return create_error_response(f"Internal server error: {str(e)}", 500)
 
 
-@app.timer_trigger(schedule="0 0 * * * *", arg_name="myTimer", run_on_startup=False,
-                   use_monitor=True) 
-def cache_cleanup_timer(myTimer: func.TimerRequest) -> None:
-    """
-    Timer trigger that runs every hour to clean up expired cache blobs.
-    Schedule: "0 0 * * * *" means at minute 0 of every hour.
-    """
-    logger.info('Cache cleanup timer triggered')
-    
-    if myTimer.past_due:
-        logger.warning('Cache cleanup timer is running late')
-    
-    try:
-        # Get GitHub token
-        github_token = os.getenv('GITHUB_TOKEN')
-        username = 'yungryce'
-        
-        if not github_token:
-            logger.error('GitHub token not configured, skipping cache cleanup')
-            return
-        
-        # Create GitHub client
-        gh_client = GitHubClient(token=github_token, username=username)
-        
-        # Get cache statistics before cleanup
-        stats_before = gh_client.get_cache_statistics()
-        logger.info(f"Cache stats before cleanup: {stats_before}")
-        
-        # Perform cache cleanup
-        cleanup_results = gh_client.cleanup_expired_cache(
-            batch_size=100,
-            dry_run=False  # Set to True for testing
-        )
-        
-        # Get cache statistics after cleanup
-        stats_after = gh_client.get_cache_statistics()
-        
-        # Log cleanup results
-        logger.info(f"Cache cleanup completed: {cleanup_results}")
-        logger.info(f"Cache stats after cleanup: {stats_after}")
-        
-        # Log summary
-        if cleanup_results['status'] == 'completed':
-            logger.info(f"Successfully cleaned up {cleanup_results['deleted_count']} expired cache entries")
-            
-            # Log space savings
-            if 'total_size_mb' in stats_before and 'total_size_mb' in stats_after:
-                space_saved = stats_before['total_size_mb'] - stats_after['total_size_mb']
-                if space_saved > 0:
-                    logger.info(f"Cache cleanup freed {space_saved:.2f} MB of storage")
-        else:
-            logger.warning(f"Cache cleanup failed or skipped: {cleanup_results}")
-            
-    except Exception as e:
-        logger.error(f"Cache cleanup timer failed: {str(e)}", exc_info=True)
-
-
-@app.route(route="cache/stats", auth_level=func.AuthLevel.ANONYMOUS, methods=["GET"])
-def get_cache_stats(req: func.HttpRequest) -> func.HttpResponse:
-    """Get current cache statistics"""
-    logger.info('Processing cache statistics request')
-    
-    try:
-        # Get GitHub token
-        github_token = os.getenv('GITHUB_TOKEN')
-        username = 'yungryce'
-        
-        if not github_token:
-            return create_error_response("GitHub token not configured", 500)
-        
-        # Create GitHub client
-        gh_client = GitHubClient(token=github_token, username=username)
-        
-        # Get cache statistics
-        stats = gh_client.get_cache_statistics()
-        
-        return create_success_response(stats)
-        
-    except Exception as e:
-        logger.error(f"Error getting cache statistics: {str(e)}", exc_info=True)
-        return create_error_response(f"Internal server error: {str(e)}", 500)
-
-
-@app.route(route="cache/cleanup", auth_level=func.AuthLevel.ANONYMOUS, methods=["POST"])
-def manual_cache_cleanup(req: func.HttpRequest) -> func.HttpResponse:
-    """Manually trigger cache cleanup"""
-    logger.info('Processing manual cache cleanup request')
-    
-    try:
-        # Parse request parameters
-        req_body = req.get_json() or {}
-        dry_run = req_body.get('dry_run', False)
-        batch_size = req_body.get('batch_size', 100)
-        
-        # Get GitHub token
-        github_token = os.getenv('GITHUB_TOKEN')
-        username = 'yungryce'
-        
-        if not github_token:
-            return create_error_response("GitHub token not configured", 500)
-        
-        # Create GitHub client
-        gh_client = GitHubClient(token=github_token, username=username)
-        
-        # Get cache statistics before cleanup
-        stats_before = gh_client.get_cache_statistics()
-        
-        # Perform cache cleanup
-        cleanup_results = gh_client.cleanup_expired_cache(
-            batch_size=batch_size,
-            dry_run=dry_run
-        )
-        
-        # Get cache statistics after cleanup
-        stats_after = gh_client.get_cache_statistics()
-        
-        # Return comprehensive results
-        result = {
-            "cleanup_results": cleanup_results,
-            "stats_before": stats_before,
-            "stats_after": stats_after,
-            "space_saved_mb": 0
-        }
-        
-        # Calculate space savings
-        if 'total_size_mb' in stats_before and 'total_size_mb' in stats_after:
-            result["space_saved_mb"] = round(
-                stats_before['total_size_mb'] - stats_after['total_size_mb'], 2
-            )
-        
-        logger.info(f"Manual cache cleanup completed: {cleanup_results}")
-        return create_success_response(result)
-        
-    except Exception as e:
-        logger.error(f"Error during manual cache cleanup: {str(e)}", exc_info=True)
-        return create_error_response(f"Internal server error: {str(e)}", 500)
-
 
 # Add a health check endpoint
 @app.route(route="health", auth_level=func.AuthLevel.ANONYMOUS)
@@ -438,16 +311,15 @@ def health_check(req: func.HttpRequest) -> func.HttpResponse:
     github_token = os.getenv('GITHUB_TOKEN')
     if github_token:
         try:
-            # Create GitHub client with short cache TTL
-            gh_client = GitHubClient(token=github_token, username='yungryce')
-            gh_client.cache_ttl = 60  # 1 minute cache
+            # Initialize managers
+            api, cache, _, _ = _get_github_managers('yungryce')
             
             # Test GitHub API connectivity
-            rate_limit = gh_client.make_request('GET', 'rate_limit')
+            rate_limit = api.make_request('GET', 'rate_limit')
             github_status = "connected" if rate_limit else "error"
             
             # Get cache statistics
-            cache_stats = gh_client.get_cache_statistics()
+            cache_stats = cache.get_cache_statistics()
             
         except Exception as e:
             logger.error(f"GitHub connectivity test failed: {str(e)}")

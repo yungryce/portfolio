@@ -1,0 +1,23 @@
+i found a bug caused during run with copilot instructions. while refactoring #file:ai module, I missed providing vital context
+
+I did not provide context for the .repo-context.json file and other documentation files which woud be passed to ai model verbatim such as the README.md and the SKILLS-INDEX.md and ARCHITECHURE.md
+
+These files were built with instructions /home/juk/DEV/portfolio/api/Private/doc-schema
+Samples from repo azure_vmss_custer:
+#file:SKILLS-INDEX.md #file:.repo-context.json #file:README.md #file:ARCHITECHURE.md
+
+.repo-context.json: This is very important file for repo context extraction scoring
+#sym:process_query #sym:extract_context_terms search_terms(), #sym:get_difficulty_score
+
+README.md and SKILLS-INDEX.md: would be passed with processed repos based to ai with all other generated context
+
+ARCHITECHURE.md: wil not be undergo any processing and to be returned as part of metadata for each repo to frontend
+
+Key files as previousely used are kept in /home/juk/DEV/portfolio/api/Private/old for reference
+
+#file:context_builder.py #file:ai_query_processor.py #file:repository_scorer.py though impresively refactored for ai generation context is a misimplementation
+
+Review old implementations, schema files used to build sample files and sample files themselves
+Review how old implementation uses for .repo-context.json especia.repo-context.json:
+review #file:copilot-instructions.md to understand the
+

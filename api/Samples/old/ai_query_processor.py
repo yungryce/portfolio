@@ -3,7 +3,7 @@ import time
 import os
 from typing import Dict, Tuple
 from openai import OpenAI
-from ai.helpers import count_tokens, truncate_text, get_language_matches, get_language_matches
+from .helpers import count_tokens, truncate_text, get_language_matches, get_language_matches
 
 # Use the existing logger from function_app.py
 logger = logging.getLogger('portfolio.api')

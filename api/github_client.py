@@ -1,33 +1,60 @@
 import json
 import logging
 import os
-import re
 import requests
 import hashlib
 import time
 from datetime import datetime, timedelta
+
 from azure.storage.blob import BlobServiceClient, ContentSettings
 from base64 import b64decode
 from azure.core.exceptions import HttpResponseError, ClientAuthenticationError
+import re
 from github_helpers import trim_processed_repo
 
-# Configure logging
-logger = logging.getLogger('portfolio.api')
-logger.setLevel(logging.INFO)
+
+from .rename.cache_client import GitHubCache
+from .rename.github_api import GitHubAPI
+from .rename.github_file_manager import GitHubFileManager
+from .rename.github_repo_manager import GitHubRepoManager
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+from azure.core.exceptions import HttpResponseError, ClientAuthenticationError
+
 
 class GitHubClient:
-    """Streamlined GitHub client focused on efficient file fetching with caching."""
-    
+    """
+    Facade for GitHub operations, providing a unified interface for API, caching, file, and repo management.
+    """
     def __init__(self, token=None, username=None, use_cache=True):
-        """Initialize the GitHub client with authentication."""
-        self.token = token or os.getenv('GITHUB_TOKEN')
-        self.username = username or 'yungryce'
-        self.headers = {'Authorization': f'token {self.token}'} if self.token else {}
-        self.use_cache = use_cache
-        self.cache_ttl = 3600  # Default cache TTL: 1 hour
-        
-        # Initialize Azure Blob Storage for caching
-        self._init_cache()
+        self.api = GitHubAPI(token=token, username=username)
+        self.cache = GitHubCache(use_cache=use_cache)
+        self.file_manager = GitHubFileManager(self.api, self.cache)
+        self.repo_manager = GitHubRepoManager(self.api, self.cache, self.file_manager)
+
+    # Example pass-through methods for backward compatibility
+    def get_repo_metadata(self, *args, **kwargs):
+        return self.repo_manager.get_repo_metadata(*args, **kwargs)
+
+    def get_all_repos_metadata(self, *args, **kwargs):
+        return self.repo_manager.get_all_repos_metadata(*args, **kwargs)
+
+    def get_file_content(self, *args, **kwargs):
+        return self.file_manager.get_file_content(*args, **kwargs)
+
+    def get_container_files(self, *args, **kwargs):
+        return self.file_manager.get_container_files(*args, **kwargs)
+
+    def get_all_repos_with_context(self, *args, **kwargs):
+        return self.repo_manager.get_all_repos_with_context(*args, **kwargs)
+
+    def cleanup_expired_cache(self, *args, **kwargs):
+        return self.cache.cleanup_expired_cache(*args, **kwargs)
+
+    def get_cache_statistics(self, *args, **kwargs):
+        return self.cache.get_cache_statistics(*args, **kwargs)
 
     def _init_cache(self):
         """Initialize Azure Blob Storage cache with robust error handling."""

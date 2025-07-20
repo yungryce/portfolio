@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, List, Optional
 from github_client import GitHubClient
-from ai.helpers import (
+from .helpers import (
     truncate_text,
     extract_component_info
 )

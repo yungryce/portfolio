@@ -1,126 +1,161 @@
 import logging
 import os
-from typing import Dict, List, Optional, Tuple
-from github_client import GitHubClient
+from typing import Dict, List, Optional, Any
+from ..Private.new.repository_scorer import RepositoryScorer
+from ..Private.new.context_builder import ContextBuilder
+from ..Private.new.ai_query_processor import AIQueryProcessor
 from data_filter import extract_language_terms
-from ai.helpers import extract_context_terms
-from ai.repository_scorer import RepositoryScorer
-from ai.context_builder import ContextBuilder
-from ai.ai_query_processor import AIQueryProcessor
-# Use the existing logger from function_app.py
-logger = logging.getLogger('portfolio.api')
+from .helpers import extract_context_terms
+from data_filter import extract_language_terms
 
+logger = logging.getLogger('portfolio.api')
 
 class AIAssistant:
     """
-    Coordinating AI Assistant class for portfolio query processing.
+    Main AI coordinator for portfolio queries.
     Orchestrates repository scoring, context building, and AI query processing.
     """
     
-    def __init__(self, github_token: str = None, username: str = 'yungryce'):
+    def __init__(self, username: str = 'yungryce', repo_manager=None):
         """
-        Initialize the AI Assistant with GitHub client and specialized components.
+        Initialize the AI Assistant with repository manager and specialized components.
         
         Args:
-            github_token: GitHub API token for repository access
             username: GitHub username for repository queries
+            repo_manager: GitHub repository manager for data access
         """
-        self.github_token = github_token or os.getenv('GITHUB_TOKEN')
+        logger.info(f"Initializing AI Assistant for user: {username}")
         self.username = username
+        self.repo_manager = repo_manager
         self.groq_api_key = os.getenv("GROQ_API_KEY")
-        
-        # Initialize GitHub client
-        self.gh_client = self._initialize_github_client()
         
         # Initialize specialized components
         self.repository_scorer = RepositoryScorer()
-        self.context_builder = ContextBuilder(self.gh_client, self.username)
+        self.context_builder = ContextBuilder(repo_manager=repo_manager, username=username)
         self.ai_query_processor = AIQueryProcessor(self.groq_api_key)
         
+        # Initialize GitHub components if not provided
+        if not self.repo_manager:
+            from github.github_api import GitHubAPI
+            from github.cache_client import GitHubCache
+            from github.github_file_manager import GitHubFileManager
+            from github.github_repo_manager import GitHubRepoManager
+            
+            github_token = os.getenv('GITHUB_TOKEN')
+            api = GitHubAPI(token=github_token, username=username)
+            cache = GitHubCache(use_cache=True)
+            file_manager = GitHubFileManager(api, cache)
+            self.repo_manager = GitHubRepoManager(api, cache, file_manager)
+        
         logger.info(f"AI Assistant initialized for user: {self.username}")
-    
-    def _initialize_github_client(self) -> Optional[GitHubClient]:
-        """Initialize GitHub client with error handling."""
-        if self.github_token:
-            return GitHubClient(token=self.github_token, username=self.username)
-        else:
-            logger.warning("GitHub token not configured - file fetching disabled")
-            return None
-    
-    def process_query(self, query: str, repositories: List[Dict]) -> Tuple[str, Dict]:
+
+    def process_query(self, query: str, max_repos: int = 5) -> Dict[str, Any]:
         """
-        Process a query using the complete AI assistant pipeline.
+        Process a portfolio query through the AI pipeline.
         
         Args:
-            query: User query string
-            repositories: List of repository dictionaries with context
+            query: The user's question
+            max_repos: Maximum number of repositories to include in context
             
         Returns:
-            Tuple of (AI response, metadata dictionary)
+            Dict containing the AI response and metadata
         """
-        logger.info(f"Processing query: {query[:100]}...")
-        
-        # Stage 1: Extract search terms and language terms
-        search_terms = extract_context_terms(query, repositories)
-        language_terms = extract_language_terms(query)
-        search_terms['languages'] = language_terms
-
-        # Log extracted terms for better debugging
-        logger.info(f"Extracted terms - Tech: {len(search_terms.get('tech', []))}, " 
-                f"Skills: {len(search_terms.get('skills', []))}, "
-                f"Languages: {len(language_terms)}")
-
-        RELEVANCE_THRESHOLD = 3.4
-        fallback_used = False
-
-        # Check if query has any technical meaning (including skills)
-        has_technical_content = bool(
-            language_terms or 
-            search_terms.get('tech') or 
-            search_terms.get('skills') or 
-            search_terms.get('components') or 
-            search_terms.get('project')
-        )
-
-        if not has_technical_content:
-            # Stage 2A: Query lacks specificity, use fallback repositories
-            logger.info("Query lacks technical specificity, using fallback strategy")
-            fallback_used = True
-            relevant_repos = self.repository_scorer.get_fallback_repositories(repositories, 5)
-        else:
-            # Stage 2B: Score and filter repositories
-            logger.info("Query has technical content, scoring repositories")
-            all_scored_repos = self.repository_scorer.process_repositories_with_scoring(
-                repositories, search_terms, limit=10
-            )
-
-            # Filter repositories by threshold and use fallback if needed
-            relevant_repos = [repo for repo in all_scored_repos if repo.get('total_relevance_score', 0) >= RELEVANCE_THRESHOLD]
+        try:
+            logger.info(f"Processing query: {query[:100]}...")
             
-            if not relevant_repos:
-                logger.info(f"No repositories meet the relevance threshold of {RELEVANCE_THRESHOLD}, using fallback")
+            # Step 1: Get all repositories with context
+            repositories = self.repo_manager.get_all_repos_with_context(
+                username=self.username, 
+                include_languages=True
+            )
+            
+            if not repositories:
+                return {
+                    "response": f"I don't have access to any repositories for {self.username}. Please check the GitHub token and permissions.",
+                    "repositories_used": [],
+                    "total_repositories": 0,
+                    "query": query
+                }
+            
+            # Step 2: Extract search terms from the query
+            context_terms = extract_context_terms(query, repositories)
+            language_terms = extract_language_terms(query)
+            search_terms = {
+                'context_terms': context_terms,
+                'language_terms': language_terms
+            }
+            
+            logger.info(f"Extracted search terms: {search_terms}")
+            
+            # Step 3: Score and rank repositories
+            scored_repos = self.repository_scorer.score_repositories(repositories, search_terms)
+            
+            # Step 4: Select top repositories using fallback logic
+            RELEVANCE_THRESHOLD = 3.4
+            fallback_used = False
+            
+            # Check if query has any technical meaning
+            has_technical_content = bool(
+                language_terms or 
+                context_terms.get('tech') or 
+                context_terms.get('skills') or 
+                context_terms.get('components') or 
+                context_terms.get('project')
+            )
+            
+            if not has_technical_content:
+                logger.info("Query lacks technical specificity, using fallback strategy")
                 fallback_used = True
-                relevant_repos = self.repository_scorer.get_fallback_repositories(repositories, 5)
-        
-        # Log repository scores for the top results
-        if logger.isEnabledFor(logging.DEBUG):
-            for i, repo in enumerate(relevant_repos[:5]):
-                logger.debug(f"Final result {i+1}: {repo.get('name')} - "
-                            f"Score: {repo.get('total_relevance_score', 0)}")
-        
-        logger.info(f"Using {len(relevant_repos)} repositories for context building")
+                top_repos = self.repository_scorer.get_fallback_repositories(repositories, max_repos)
+            else:
+                # Filter repositories by threshold
+                relevant_repos = [repo for repo in scored_repos if repo.get('total_relevance_score', 0) >= RELEVANCE_THRESHOLD]
+                
+                if not relevant_repos:
+                    logger.info(f"No repositories meet the relevance threshold of {RELEVANCE_THRESHOLD}, using fallback")
+                    fallback_used = True
+                    top_repos = self.repository_scorer.get_fallback_repositories(repositories, max_repos)
+                else:
+                    top_repos = relevant_repos[:max_repos]
+            
+            logger.info(f"Selected top {len(top_repos)} repositories for context")
+            
+            # Step 5: Build context from top repositories
+            context = self.context_builder.build_enhanced_context(top_repos)
+            
+            # Step 6: Process query with AI
+            ai_response = self.ai_query_processor.query_ai_with_context(context, query, fallback_used)
+            
+            # Prepare response
+            response = {
+                "response": ai_response,
+                "repositories_used": [
+                    {
+                        "name": repo.get('name'),
+                        "relevance_score": repo.get('total_relevance_score', 0),
+                        "languages": list(repo.get('languages', {}).keys())
+                    }
+                    for repo in top_repos
+                ],
+                "total_repositories": len(repositories),
+                "search_terms": search_terms,
+                "fallback_used": fallback_used,
+                "query": query
+            }
+            
+            logger.info(f"Successfully processed query using {len(top_repos)} repositories")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in AI processing pipeline: {str(e)}", exc_info=True)
+            return {
+                "response": f"I encountered an error while processing your query: {str(e)}",
+                "repositories_used": [],
+                "total_repositories": 0,
+                "query": query,
+                "error": str(e)
+            }
 
-        # Stage 3: Build enhanced context
-        enhanced_context = self.context_builder.build_enhanced_context(relevant_repos)
-        
-        # Stage 4: Process AI query with metadata
-        ai_response, metadata = self.ai_query_processor.process_query_with_metadata(
-            query, enhanced_context, fallback_used, repositories, relevant_repos, 
-            search_terms, language_terms
-        )
-        
-        return ai_response, metadata
-    
     def calculate_difficulty_score(self, repo: Dict) -> Dict:
         """
         Calculate difficulty score for a repository using the repository scorer.
@@ -132,7 +167,7 @@ class AIAssistant:
             Dictionary with difficulty analysis
         """
         return self.repository_scorer.calculate_difficulty_score(repo)
-    
+
     def get_difficulty_score(self, repo: Dict) -> Dict:
         """
         Get difficulty score with caching using the repository scorer.
@@ -144,7 +179,7 @@ class AIAssistant:
             Dictionary with difficulty analysis
         """
         return self.repository_scorer.get_difficulty_score(repo)
-    
+
     def validate_configuration(self) -> Dict[str, bool]:
         """
         Validate the configuration of all components.
@@ -152,63 +187,31 @@ class AIAssistant:
         Returns:
             Dictionary with validation results for each component
         """
-        return {
-            "github_client": self.gh_client is not None,
-            "repository_scorer": self.repository_scorer is not None,
-            "context_builder": self.context_builder is not None,
-            "ai_query_processor": self.ai_query_processor.validate_api_configuration(),
-            "overall_ready": all([
-                self.repository_scorer is not None,
-                self.context_builder is not None,
-                self.ai_query_processor.validate_api_configuration()
-            ])
+        results = {
+            'github_token': bool(os.getenv('GITHUB_TOKEN')),
+            'groq_api_key': bool(self.groq_api_key),
+            'repo_manager': bool(self.repo_manager),
+            'repository_scorer': bool(self.repository_scorer),
+            'context_builder': bool(self.context_builder),
+            'ai_query_processor': bool(self.ai_query_processor)
         }
-    
+        
+        logger.info(f"Configuration validation: {results}")
+        return results
+
     def get_system_status(self) -> Dict:
         """
-        Get comprehensive system status information.
+        Get comprehensive system status.
         
         Returns:
-            Dictionary with system status details
+            Dictionary with system status information
         """
-        return {
-            "components": {
-                "github_client": "configured" if self.gh_client else "not_configured",
-                "repository_scorer": "initialized",
-                "context_builder": "initialized",
-                "ai_query_processor": self.ai_query_processor.get_api_status()
-            },
-            "configuration": self.validate_configuration(),
-            "username": self.username,
-            "github_token_configured": bool(self.github_token)
+        status = {
+            'configuration': self.validate_configuration(),
+            'ai_api_status': self.ai_query_processor.get_api_status() if self.ai_query_processor else None,
+            'username': self.username,
+            'initialized': True
         }
-    
-    # Legacy method compatibility (if needed)
-    def query_ai_with_context(self, query: str, enhanced_context: str, fallback_used: bool = False) -> str:
-        """
-        Legacy compatibility method for direct AI querying.
         
-        Args:
-            query: User query string
-            enhanced_context: Built context from repositories
-            fallback_used: Whether fallback repositories were used
-            
-        Returns:
-            AI response string
-        """
-        logger.warning("Using legacy query_ai_with_context method. Consider using process_query instead.")
-        return self.ai_query_processor.query_ai_with_context(query, enhanced_context, fallback_used)
-    
-    def build_enhanced_context(self, repositories: List[Dict], max_chars: int = None) -> str:
-        """
-        Legacy compatibility method for context building.
-        
-        Args:
-            repositories: List of repository dictionaries
-            max_chars: Maximum characters for context
-            
-        Returns:
-            Enhanced context string
-        """
-        logger.warning("Using legacy build_enhanced_context method. Consider using ContextBuilder directly.")
-        return self.context_builder.build_enhanced_context(repositories, max_chars)
+        logger.info(f"System status: {status}")
+        return status

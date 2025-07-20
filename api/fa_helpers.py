@@ -5,6 +5,58 @@ from typing import Optional, Dict, List, Any
 from datetime import datetime
 
 
+def create_success_response(data: dict, cache_control: str = "public, max-age=900") -> func.HttpResponse:
+    """Create standardized success response with caching."""
+    
+    return func.HttpResponse(
+        json.dumps(data, indent=2),
+        status_code=200,
+        mimetype="application/json",
+        headers={
+            "Cache-Control": cache_control,
+            "Content-Type": "application/json; charset=utf-8"
+        }
+    )
+
+def create_error_response(message: str, status_code: int = 500, details: str = None) -> func.HttpResponse:
+    """Create standardized error response."""
+    
+    response_data = {"error": message}
+    if details:
+        response_data["details"] = details
+    
+    return func.HttpResponse(
+        json.dumps(response_data),
+        status_code=status_code,
+        mimetype="application/json"
+    )
+
+def validate_github_params(username: str, repo: str, file_path: str = None) -> func.HttpResponse:
+    """Validate GitHub API parameters and return error response if invalid."""
+    
+    if not username or not username.strip():
+        return func.HttpResponse(
+            json.dumps({"error": "Missing or invalid username parameter"}),
+            status_code=400,
+            mimetype="application/json"
+        )
+    
+    if not repo or not repo.strip():
+        return func.HttpResponse(
+            json.dumps({"error": "Missing or invalid repository parameter"}),
+            status_code=400,
+            mimetype="application/json"
+        )
+    
+    if file_path is not None and not file_path.strip():
+        return func.HttpResponse(
+            json.dumps({"error": "Missing or invalid file path parameter"}),
+            status_code=400,
+            mimetype="application/json"
+        )
+    
+    return None  # No validation errors
+
 def format_file_response(file_content: str, file_path: str, logger: Optional[logging.Logger] = None) -> func.HttpResponse:
     """Format file content based on file extension with proper HTTP headers."""
     
@@ -123,57 +175,3 @@ def handle_github_error(error: Exception, logger: Optional[logging.Logger] = Non
         mimetype="application/json"
     )
 
-
-def validate_github_params(username: str, repo: str, file_path: str = None) -> func.HttpResponse:
-    """Validate GitHub API parameters and return error response if invalid."""
-    
-    if not username or not username.strip():
-        return func.HttpResponse(
-            json.dumps({"error": "Missing or invalid username parameter"}),
-            status_code=400,
-            mimetype="application/json"
-        )
-    
-    if not repo or not repo.strip():
-        return func.HttpResponse(
-            json.dumps({"error": "Missing or invalid repository parameter"}),
-            status_code=400,
-            mimetype="application/json"
-        )
-    
-    if file_path is not None and not file_path.strip():
-        return func.HttpResponse(
-            json.dumps({"error": "Missing or invalid file path parameter"}),
-            status_code=400,
-            mimetype="application/json"
-        )
-    
-    return None  # No validation errors
-
-
-def create_error_response(message: str, status_code: int = 500, details: str = None) -> func.HttpResponse:
-    """Create standardized error response."""
-    
-    response_data = {"error": message}
-    if details:
-        response_data["details"] = details
-    
-    return func.HttpResponse(
-        json.dumps(response_data),
-        status_code=status_code,
-        mimetype="application/json"
-    )
-
-
-def create_success_response(data: dict, cache_control: str = "public, max-age=900") -> func.HttpResponse:
-    """Create standardized success response with caching."""
-    
-    return func.HttpResponse(
-        json.dumps(data, indent=2),
-        status_code=200,
-        mimetype="application/json",
-        headers={
-            "Cache-Control": cache_control,
-            "Content-Type": "application/json; charset=utf-8"
-        }
-    )
