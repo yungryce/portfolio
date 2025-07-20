@@ -21,3 +21,18 @@ Review old implementations, schema files used to build sample files and sample f
 Review how old implementation uses for .repo-context.json especia.repo-context.json:
 review #file:copilot-instructions.md to understand the
 
+Current #file:copilot-instructions.md and #file:copilot-instructions.md uses a complicated architechure
+
+Goal: Retrieve a context file in json stored at the root of every repo on github, retrieve its data fields and tokenises, compare user's query with repository languages and context data content, complicated repository scoring and difficulty assessment
+
+
+Compare repository languages against languages.yml
+with spacy, directly compare user query with tokenized repoContext and 
+
+take users query and compare directly with tokenized 
+
+retrieve all programming and data fields from https://github.com/github-linguist/linguist/lib/linguist/languages.yml file for each language
+retrieve all file names in a repository including those nested directories
+retrieve all file types in a repository
+retrieve relevant repo languages from repo metadata and score (languages have higher than data)
+Extra implementation that handles grouping languages with weights e.g devops, fullstack, educational, open source or any other similarities that can be used to group languages. should be very extensible
