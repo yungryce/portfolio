@@ -200,7 +200,7 @@ def get_cache_stats(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Error fetching cache statistics: {str(e)}")
         return create_error_response(f"Failed to fetch cache statistics: {str(e)}", 500)
 
-@app.route(route="portfolio/query", methods=["POST"])
+@app.route(route="ai", methods=["POST"])
 def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Parse request body
@@ -213,7 +213,6 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         
         # Initialize AI assistant with updated managers
         _, _, _, repo_manager = _get_github_managers(username)
-        
         from ai.ai_assistant import AIAssistant
         ai_assistant = AIAssistant(username=username, repo_manager=repo_manager)
         

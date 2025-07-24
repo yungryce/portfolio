@@ -3,8 +3,19 @@
 # Manually managing azure-functions-worker may cause unexpected issues
 
 azure-functions
-requests
-openai
 azure-storage-blob
 azure-monitor-opentelemetry
+requests
+numpy<2
+openai
+pyyaml
 tiktoken
+
+# Pin the CPU-only version of torch (no CUDA)
+torch==2.2.2+cpu
+# Required to find the +cpu wheel
+-f https://download.pytorch.org/whl/torch_stable.html
+# Install sentence-transformers without triggering torch reinstallation
+sentence-transformers==2.6.1
+# spacy
+# en_core_web_md @ https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl

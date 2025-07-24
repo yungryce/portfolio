@@ -71,10 +71,8 @@ class GitHubCache:
                 if 'expires_at' in cache_data:
                     expires_at = datetime.fromisoformat(cache_data['expires_at'])
                     if expires_at > datetime.now():
-                        logger.debug(f"Cache hit for key: {cache_key}")
                         return cache_data['data']
                     else:
-                        logger.debug(f"Cache expired for key: {cache_key}")
                         blob_client.delete_blob()
             return None
         except Exception as e:
@@ -254,10 +252,10 @@ class GitHubCache:
                             blob_client.delete_blob()
                             batch_deleted += 1
                             logger.debug(f"Deleted expired blob: {blob.name}")
-                    else:
+                    # else:
                         # Blob is still valid
-                        time_remaining = expires_at - current_time
-                        logger.debug(f"Blob {blob.name} expires in {time_remaining}")
+                        # time_remaining = expires_at - current_time
+                        # logger.debug(f"Blob {blob.name} expires in {time_remaining}")
                 else:
                     # Blob doesn't have expiration data - might be old format
                     # Check blob creation time as fallback

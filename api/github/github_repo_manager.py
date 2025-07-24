@@ -1,5 +1,6 @@
 import logging
 import json
+from typing import Dict, Any, List
 from .github_api import GitHubAPI
 from .github_file_manager import GitHubFileManager
 from .cache_client import GitHubCache
@@ -39,7 +40,7 @@ class GitHubRepoManager:
         self.cache = cache
         self.file_manager = file_manager
 
-    def get_repo_metadata(self, username=None, repo=None, include_languages=False):
+    def get_repo_metadata(self, username: str=None, repo: str=None, include_languages: bool=False) -> Dict[str, Any]:
         """Get metadata for a specific repository.
 
         Args:
@@ -75,7 +76,7 @@ class GitHubRepoManager:
         self.cache._save_to_cache(cache_key, repo_data)
         return repo_data
 
-    def get_all_repos_metadata(self, username=None, per_page=100, include_languages=False):
+    def get_all_repos_metadata(self, username: str=None, per_page=100, include_languages: bool=False) -> List[Dict[str, Any]]:
         """Get metadata for all repositories.
 
         Args:
@@ -177,3 +178,29 @@ class GitHubRepoManager:
         """Deprecated: Use get_all_repos_with_context instead."""
         logger.warning("get_all_repos_with_files is deprecated. Use get_all_repos_with_context instead.")
         return self.get_all_repos_with_context(username, include_languages)
+
+    def get_repository_tree(self, username: str, repo_name: str, recursive: bool = False) -> List[str]:
+        """
+        Recursively fetch all file paths in a repository.
+        Returns a flat list of file paths (including nested files).
+        """
+        def _fetch_tree(path=""):
+            files = []
+            try:
+                contents = self.file_manager.get_file_content(username, repo_name, path)
+                if isinstance(contents, list):
+                    for item in contents:
+                        if item.get('type') == 'file':
+                            files.append(item.get('path'))
+                        elif item.get('type') == 'dir' and recursive:
+                            # Recursively fetch files in subdirectory
+                            sub_path = item.get('path')
+                            files.extend(_fetch_tree(sub_path))
+                # If contents is a dict (single file), add its path
+                elif isinstance(contents, dict) and contents.get('type') == 'file':
+                    files.append(contents.get('path'))
+            except Exception as e:
+                logger.warning(f"Error fetching tree for {repo_name} at '{path}': {str(e)}")
+            return files
+
+        return _fetch_tree("")
