@@ -49,6 +49,41 @@ class AIAssistant:
                 file_types[ext] = file_types.get(ext, 0) + 1
         # logger.debug(f"File types for {repo_name}: {file_types}")
         return file_types
+    
+    def calculate_repo_scores(self, repo: Dict[str, Any], query: str) -> Dict[str, Any]:
+        """
+        Calculates and returns the context, language, and type scores for a repository.
+        Returns a dict with all scores and intermediate data for metadata consumption.
+        """
+        repo_context = repo.get("repoContext", {})
+        repo_languages = repo.get("languages", {})
+        repo_name = repo.get("name", "Unknown")
+
+        # Safety checks
+        if not isinstance(repo_context, dict):
+            repo_context = {}
+        if not isinstance(repo_languages, dict):
+            repo_languages = {}
+
+        context_score = self.semantic_scorer.score_context_similarity(query, repo_context)
+        language_score = self.semantic_scorer.score_language_matches(query, repo_languages)
+        file_types = self.get_all_file_types(repo_name)
+        categorized = self.file_type_analyzer.analyze_repository_files(file_types)
+        type_score = self.file_type_analyzer.calculate_type_score(categorized)
+
+        # Aggregate total score
+        total_score = self.semantic_scorer.aggregate_scores(context_score, language_score, type_score)
+
+        # Prepare metadata
+        score_metadata = {
+            "context_score": context_score,
+            "language_score": language_score,
+            "type_score": type_score,
+            "total_relevance_score": total_score,
+            "file_types": file_types,
+            "categorized_types": categorized
+        }
+        return score_metadata
 
     def process_query(self, query: str, max_repos: int = 3) -> Dict[str, Any]:
         try:
@@ -66,23 +101,24 @@ class AIAssistant:
                 }
             scored_repos = []
             for repo in repositories:
-                repo_context = repo.get("repoContext", {})
-                repo_languages = repo.get("languages", {})
-                context_score = self.semantic_scorer.score_context_similarity(query, repo_context)
-                language_score = self.semantic_scorer.score_language_matches(query, repo_languages)
-                logger.debug(f"------ {repo.get('name', 'Unknown')}: {context_score}: {language_score}")
-                file_types = self.get_all_file_types(repo.get("name"))
-                categorized = self.file_type_analyzer.analyze_repository_files(file_types)
-                logger.debug(f"****** {repo.get('name', 'Unknown')}: {categorized}: {file_types}")
-                type_score = self.file_type_analyzer.calculate_type_score(categorized)
-                total_score = self.semantic_scorer.aggregate_scores(context_score, language_score) + type_score
-                repo["total_relevance_score"] = total_score
-                repo["file_types"] = file_types
-                repo["categorized_types"] = categorized
+                # Calculate all scores and get metadata
+                score_metadata = self.calculate_repo_scores(repo, query)
+                # Attach all score metadata to repo for downstream consumption
+                repo.update(score_metadata)
                 scored_repos.append(repo)
+                
             scored_repos.sort(key=lambda r: r.get("total_relevance_score", 0), reverse=True)
             top_repos = scored_repos[:max_repos]
+            for repo in top_repos:
+                logger.debug(
+                    f"{repo.get('name', 'Unknown')}: "
+                    f"Total: {repo.get('total_relevance_score', 0)}: "
+                    f"Semantic: {repo.get('context_score', 0)}: "
+                    f"Lang: {repo.get('language_score', 0)} -: "
+                    f"Types: {repo.get('type_score', 0)}-{repo.get('categorized_types', {})}"
+                )
             context = self.context_builder.build_tiered_context(top_repos, max_repos=max_repos)
+            logger.debug(f"Built context for top repositories: {context['primary_repo']}")
             ai_response = f"Top repositories for '{query}': {[r['name'] for r in top_repos]}"
             response = {
                 "response": ai_response,
@@ -91,7 +127,12 @@ class AIAssistant:
                         "name": repo.get('name'),
                         "relevance_score": repo.get('total_relevance_score', 0),
                         "languages": list(repo.get('languages', {}).keys()),
-                        "categorized_types": repo.get("categorized_types", {})
+                        "categorized_types": repo.get("categorized_types", {}),
+                        "score_metadata": {
+                            "context_score": repo.get("context_score", 0),
+                            "language_score": repo.get("language_score", 0),
+                            "type_score": repo.get("type_score", 0)
+                        }
                     }
                     for repo in top_repos
                 ],

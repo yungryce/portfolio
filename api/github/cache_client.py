@@ -246,12 +246,13 @@ class GitHubCache:
                         batch_expired += 1
                         
                         if dry_run:
-                            logger.debug(f"Would delete expired blob: {blob.name} (expired at {expires_at})")
+                            # logger.debug(f"Would delete expired blob: {blob.name} (expired at {expires_at})")
+                            pass
                         else:
                             # Delete the expired blob
                             blob_client.delete_blob()
                             batch_deleted += 1
-                            logger.debug(f"Deleted expired blob: {blob.name}")
+                            # logger.debug(f"Deleted expired blob: {blob.name}")
                     # else:
                         # Blob is still valid
                         # time_remaining = expires_at - current_time

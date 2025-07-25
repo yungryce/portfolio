@@ -32,7 +32,7 @@ class SemanticScorer:
         # Use natural language flattening for context
         context_str = flatten_repo_context_to_natural_language(repo_context)
         if not context_str or context_str.strip() == "" or "None" in context_str:
-            logger.debug("Skipping context scoring due to empty or meaningless context string.")
+            logger.debug(f"Skipping context scoring for {repo_context.get('name', 'Unknown')} due to empty or meaningless context string.")
             return 0.0
         query_emb = self.model.encode([query])
         context_emb = self.model.encode([context_str])
@@ -68,5 +68,5 @@ class SemanticScorer:
         score = match_size / total_size
         return min(score, 1.0)
 
-    def aggregate_scores(self, context_score: float, language_score: float) -> float:
-        return context_score + language_score
+    def aggregate_scores(self, context_score: float, language_score: float, type_score: float) -> float:
+        return (context_score * 0.4) + (language_score * 0.3) + (type_score * 0.3)

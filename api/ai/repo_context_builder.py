@@ -1,4 +1,7 @@
 from typing import Dict, Any, List
+import logging
+
+logger = logging.getLogger('portfolio.api')
 
 class RepoContextBuilder:
     """
@@ -9,24 +12,42 @@ class RepoContextBuilder:
         self.username = username
 
     def build_tiered_context(self, top_repos: List[Dict], max_repos: int = 3) -> Dict[str, Any]:
+        """
+        Builds a context dict for the top repositories, retrieving README.md, SKILLS-INDEX.md,
+        and ARCHITECTURE.md using the repo_manager for each repo. Returns all retrieved files,
+        processed repo_context (with scoring metadata), and is suitable for AI context building.
+        """
         context = {}
-        if top_repos:
-            context['primary_repo'] = self._build_detailed_context(top_repos[0])
-        if len(top_repos) > 1:
-            context['secondary_repo'] = self._build_summary_context(top_repos[1])
-        if len(top_repos) > 2:
-            context['tertiary_repo'] = self._build_mention_context(top_repos[2])
+        for i, repo in enumerate(top_repos[:max_repos]):
+            repo_name = repo.get("name")
+            # Retrieve files using repo_manager
+            readme = self.repo_manager.get_file_content(repo_name, "README.md") or ""
+            skills_index = self.repo_manager.get_file_content(repo_name, "SKILLS-INDEX.md") or ""
+            architecture = self.repo_manager.get_file_content(repo_name, "ARCHITECTURE.md") or ""
+            # Compose context for each repo
+            repo_context = {
+                "name": repo_name,
+                "readme": readme,
+                "skills_index": skills_index,
+                "architecture": architecture,
+                "context": repo.get("repoContext", {}),
+                "score_metadata": {
+                    "context_score": repo.get("context_score", 0),
+                    "language_score": repo.get("language_score", 0),
+                    "type_score": repo.get("type_score", 0),
+                    "total_relevance_score": repo.get("total_relevance_score", 0),
+                    "categorized_types": repo.get("categorized_types", {}),
+                    "file_types": repo.get("file_types", {})
+                }
+            }
+            # Assign to tiered context
+            if i == 0:
+                context['primary_repo'] = repo_context
+            elif i == 1:
+                context['secondary_repo'] = repo_context
+            elif i == 2:
+                context['tertiary_repo'] = repo_context
         return context
-
-    def _build_detailed_context(self, repo: Dict) -> Dict:
-        # Retrieve README, SKILLS-INDEX, ARCHITECTURE
-        return {
-            "name": repo.get("name"),
-            "readme": repo.get("readme", ""),
-            "skills_index": repo.get("skills_index", ""),
-            "architecture": repo.get("architecture", ""),
-            "context": repo.get("repoContext", {})
-        }
 
     def _build_summary_context(self, repo: Dict) -> Dict:
         return {
@@ -37,90 +58,4 @@ class RepoContextBuilder:
     def _build_mention_context(self, repo: Dict) -> Dict:
         return {"name": repo.get("name")}
     
-    def process_language_data(repo: dict) -> dict:
-        """
-        Process language data for a repository to add calculated fields.
-        
-        Args:
-            repo: Repository dictionary with 'languages' field
-            
-        Returns:
-            dict: Repository with processed language data added
-        """
-        if not repo.get('languages'):
-            # Ensure consistent structure even without languages
-            repo['total_language_bytes'] = 0
-            repo['language_percentages'] = {}
-            repo['languages_sorted'] = []
-            return repo
-        
-        languages = repo['languages']
-        total_bytes = sum(languages.values())
-        repo['total_language_bytes'] = total_bytes
-        
-        if total_bytes > 0:
-            # Calculate language percentages
-            repo['language_percentages'] = {
-                lang: round((bytes_count / total_bytes) * 100, 1)
-                for lang, bytes_count in languages.items()
-            }
-            
-            # Sort languages by usage (most used first)
-            repo['languages_sorted'] = sorted(
-                languages.items(), 
-                key=lambda x: x[1], 
-                reverse=True
-            )
-        else:
-            repo['language_percentages'] = {}
-            repo['languages_sorted'] = []
-        
-        return repo
-
-    def calculate_language_score(repo_languages: Dict[str, int], query_languages: List[str], 
-                            total_bytes: int = 0) -> float:
-        """
-        Calculate enhanced language relevance score for a repository.
-        
-        Args:
-            repo_languages: Dictionary of language names to byte counts
-            query_languages: List of languages from user query
-            total_bytes: Total bytes in repository
-        
-        Returns:
-            Language relevance score (higher = more relevant)
-        """
-        if not query_languages or not repo_languages:
-            return 0.0
-        
-        score = 0.0
-        
-        for query_lang in query_languages:
-            query_lang_lower = query_lang.lower()
-            
-            # Direct language match (highest priority)
-            for repo_lang, bytes_count in repo_languages.items():
-                if query_lang_lower == repo_lang.lower():
-                    # Score based on percentage of codebase
-                    if total_bytes > 0:
-                        percentage = (bytes_count / total_bytes) * 100
-                        # Higher score for languages that make up more of the codebase
-                        lang_score = min(percentage / 5, 20)  # Max 20 points per direct match
-                        score += lang_score
-                    else:
-                        score += 10  # Default score if no byte data
-                    break
-            
-            # Partial language match (lower priority)
-            else:
-                for repo_lang, bytes_count in repo_languages.items():
-                    if query_lang_lower in repo_lang.lower() or repo_lang.lower() in query_lang_lower:
-                        if total_bytes > 0:
-                            percentage = (bytes_count / total_bytes) * 100
-                            lang_score = min(percentage / 10, 5)  # Max 5 points for partial match
-                            score += lang_score
-                        else:
-                            score += 3  # Reduced score for partial matches
-                        break
-
-        return score
+   

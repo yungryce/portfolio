@@ -32,4 +32,8 @@ class FileTypeAnalyzer:
     def calculate_type_score(self, categorized_files: Dict[str, int]) -> float:
         # Weighted scoring: programming > data > markup > prose > nil
         weights = {'programming': 3, 'data': 2, 'markup': 1.5, 'prose': 1, 'nil': 0}
-        return sum(categorized_files[t] * weights[t] for t in categorized_files)
+        raw_score = sum(categorized_files[t] * weights[t] for t in categorized_files)
+        max_possible = sum(categorized_files.values()) * max(weights.values()) if categorized_files else 1
+        if max_possible == 0:
+            return 0.0
+        return min(raw_score / max_possible, 1.0)

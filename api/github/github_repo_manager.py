@@ -108,6 +108,19 @@ class GitHubRepoManager:
                 repo['languages'] = lang_data or {}
         self.cache._save_to_cache(cache_key, repos)
         return repos
+    
+    def get_file_content(self, repo_name: str, path: str, username: str = None) -> str:
+        """
+        Fetch the content of a file from a repository using the underlying file_manager.
+        Args:
+            repo_name: Name of the repository
+            path: Path to the file (e.g., 'README.md')
+            username: GitHub username (optional, defaults to self.api.username)
+        Returns:
+            File content as a string, or None if not found.
+        """
+        username = username or self.api.username
+        return self.file_manager.get_file_content(username=username, repo=repo_name, path=path)
 
     def get_all_repos_with_context(self, username=None, include_languages=True):
         """
