@@ -84,9 +84,9 @@ class GitHubCache:
             return False
         ttl = ttl or self.cache_ttl
         try:
+            expires_at = (datetime.now() + timedelta(seconds=ttl)).isoformat()
             cache_data = {
                 'data': data,
-                'expires_at': (datetime.now() + timedelta(seconds=ttl)).isoformat(),
                 'cached_at': datetime.now().isoformat(),
                 'ttl': ttl
             }
@@ -100,7 +100,8 @@ class GitHubCache:
                 content_settings=ContentSettings(
                     content_type='application/json',
                     content_encoding='utf-8'
-                )
+                ),
+                metadata={'expires_at': expires_at}
             )
             return True
         except Exception as e:
@@ -331,30 +332,24 @@ class GitHubCache:
             for blob in container_client.list_blobs():
                 total_blobs += 1
                 total_size += blob.size
+                expires_at = blob.metadata.get('expires_at') if blob.metadata else None
                 
-                try:
-                    # Check if blob is expired
-                    blob_client = container_client.get_blob_client(blob.name)
-                    blob_data = blob_client.download_blob().readall()
-                    cache_data = json.loads(blob_data)
-                    
-                    if 'expires_at' in cache_data:
-                        expires_at = datetime.fromisoformat(cache_data['expires_at'])
-                        if expires_at <= current_time:
+                if expires_at:
+                    try:
+                        expires_at_dt = datetime.fromisoformat(expires_at)
+                        if expires_at_dt <= current_time:
                             expired_count += 1
                         else:
                             valid_count += 1
+                    except Exception:
+                        expired_count += 1
+                else:
+                    # No expiration data - check age
+                    blob_age = current_time - blob.last_modified.replace(tzinfo=None)
+                    if blob_age.total_seconds() > (self.cache_ttl * 2):
+                        expired_count += 1
                     else:
-                        # No expiration data - check age
-                        blob_age = current_time - blob.last_modified.replace(tzinfo=None)
-                        if blob_age.total_seconds() > (self.cache_ttl * 2):
-                            expired_count += 1
-                        else:
-                            valid_count += 1
-                            
-                except Exception:
-                    # Count problematic blobs as expired
-                    expired_count += 1
+                        valid_count += 1
             
             return {
                 "status": "active",

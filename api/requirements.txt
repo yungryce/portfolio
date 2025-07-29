@@ -4,12 +4,15 @@
 
 azure-functions
 azure-storage-blob
+azure-functions-durable
 azure-monitor-opentelemetry
 requests
 numpy<2
 openai
 pyyaml
 tiktoken
+pytest
+pytest-mock
 
 # Pin the CPU-only version of torch (no CUDA)
 torch==2.2.2+cpu

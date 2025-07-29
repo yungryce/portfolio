@@ -3,14 +3,18 @@ import logging
 import os
 import time
 import azure.functions as func
+import azure.durable_functions as df
 from datetime import datetime
-from fa_helpers import create_success_response, create_error_response, validate_github_params
+from fa_helpers import create_success_response, create_error_response, get_orchestration_status
 
 # Updated imports - use individual managers instead of GitHubClient
 from github.github_api import GitHubAPI
 from github.cache_client import GitHubCache
 from github.github_file_manager import GitHubFileManager
 from github.github_repo_manager import GitHubRepoManager
+
+# AI imports
+from ai.type_analyzer import FileTypeAnalyzer
 
 # Configure logging
 LOG_FILE_PATH = os.getenv("API_LOG_FILE", "api_function_app.log")
@@ -27,9 +31,8 @@ formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
-app = func.FunctionApp()
+app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 logger.info("Function app initialized")
-
 
 def _get_github_managers(username=None):
     """Get GitHub managers initialized with proper dependencies."""
@@ -39,9 +42,149 @@ def _get_github_managers(username=None):
     api = GitHubAPI(token=github_token, username=username)
     cache = GitHubCache(use_cache=True)
     file_manager = GitHubFileManager(api, cache)
-    repo_manager = GitHubRepoManager(api, cache, file_manager)
+    repo_manager = GitHubRepoManager(api, cache, file_manager, username=username)
     
     return api, cache, file_manager, repo_manager
+
+
+@app.route(route="orchestrators/repo_context_orchestrator", methods=["POST"])
+@app.durable_client_input(client_name="client")
+async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
+    """
+    HTTP endpoint to trigger the repo_context_orchestrator Durable Function.
+    """
+    logger.info("Received request to start repo_context_orchestrator")
+    try:
+        # username = "req.get_json().get('username')"
+        username = "yungryce"
+
+        # Start the orchestrator asynchronously
+        instance_id = await client.start_new('repo_context_orchestrator', None, username)
+        logger.info(f"Started repo_context_orchestrator for user '{username}', instance ID: {instance_id}")
+
+        # Return a status-check response for the orchestration
+        response = client.create_check_status_response(req, instance_id)
+        logger.info(f"Check status response: {response.get_body().decode()}")
+        return response
+    except Exception as e:
+        logger.error(f"Error starting repo_context_orchestrator: {str(e)}")
+        return create_error_response(f"Failed to start orchestration: {str(e)}", 500)
+
+@app.orchestration_trigger(context_name="context")
+def repo_context_orchestrator(context):
+    """
+    Durable Functions orchestrator for parallel repository context retrieval.
+    """
+    username = context.get_input()
+    # Call activity to get repository metadata
+    repos_metadata = yield context.call_activity('get_repo_names_activity', username)
+    tasks = []
+    logger.info(f"Fetched {len(repos_metadata)} repositories for user '{username}'")
+    for repo_metadata in repos_metadata:
+        repo_name = repo_metadata.get('name', {})
+        tasks.append(context.call_activity('fetch_repo_context_bundle_activity', {
+            'username': username,
+            'repo_metadata': repo_metadata
+        }))
+    logger.info(f"Prepared {len(tasks)} tasks to fetch repo context bundles for user '{username}'")
+    results = yield context.task_all(tasks)
+    logger.info(f"Completed fetching repo context bundles for user '{results[-1]}'")
+    return results
+
+@app.activity_trigger(input_name="activityContext")
+def get_repo_names_activity(activityContext):
+    """
+    Activity function to fetch list of repository names for a user.
+    """
+    username = activityContext
+    _, _, _, repo_manager = _get_github_managers(username)
+    repos = repo_manager.get_all_repos_metadata(include_languages=True)
+    return repos
+
+
+@app.activity_trigger(input_name="activityContext")
+def fetch_repo_context_bundle_activity(activityContext):
+    """
+    Activity function to fetch repository metadata, languages, .repo-context.json, and file types for a single repository.
+    """
+    logging.info(f"------=-{activityContext} processed successfully.-=-----")
+    print(f"Processing request for activityContext: {activityContext}")
+    input_data = activityContext
+    username = input_data.get('username')
+    repo_metadata = input_data.get('repo_metadata')
+    repo_name = repo_metadata.get('name')
+
+    # Initialize managers
+    _, _, _, repo_manager = _get_github_managers(username)
+    file_type_analyzer = FileTypeAnalyzer()
+
+    # Fetch .repo-context.json
+    repo_context = repo_manager.get_file_content(repo_name=repo_name, path='.repo-context.json', username=username)
+    if repo_context and isinstance(repo_context, str):
+        import json
+        try:
+            repo_context = json.loads(repo_context)
+        except Exception:
+            repo_context = {}
+
+    # Fetch file types using AI Assistant logic
+    file_types = repo_manager.get_all_file_types(repo_name, username=username)
+    categorized_types = file_type_analyzer.analyze_repository_files(file_types)
+
+    # Aggregate results
+    result = {
+        "metadata": repo_metadata,
+        "repoContext": repo_context,
+        "file_types": file_types,
+        "categorized_types": categorized_types,
+        "languages": repo_metadata.get("languages", {}) if repo_metadata else {}
+    }
+    return result
+
+@app.route(route="ai", methods=["POST"])
+def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
+    logger.info("=-=-Received portfolio query request=-=-")
+    try:
+        # Parse request body
+        request_body = req.get_json()
+        if not request_body or 'query' not in request_body:
+            return create_error_response("Request body must contain 'query' field", 400)
+        
+        query = request_body['query']
+        username = request_body.get('username', 'yungryce')
+        instance_id = request_body.get('instance_id')
+        status_query_url = request_body.get('status_query_url')
+        
+        # Initialize AI assistant with updated managers
+        _, _, _, repo_manager = _get_github_managers(username)
+        from ai.ai_assistant import AIAssistant
+        ai_assistant = AIAssistant(username=username, repo_manager=repo_manager)
+        
+        # Try to get cached results first
+        cached_results = repo_manager.cache._get_from_cache(f"repos_with_context_{username}_with_languages")
+        repo_context_results = None
+        
+        if cached_results:
+            repo_context_results = cached_results
+        elif instance_id:
+            # Fetch orchestration results from Durable Functions status endpoint
+            # This assumes you have a helper to fetch orchestration output by instance_id
+            orchestration_status = get_orchestration_status(instance_id, status_query_url)
+            if orchestration_status and orchestration_status.get("runtimeStatus") == "Completed":
+                repo_context_results = orchestration_status.get("output", [])
+            else:
+                return create_error_response("Orchestration not completed or results unavailable", 202)
+        else:
+            return create_error_response("No repo context results available. Provide instance_id or wait for orchestration.", 400)
+        
+        # Process the query
+        logger.info(f"@ @ @ Repo context results: {repo_context_results}")
+        response = ai_assistant.process_query_results(query, repo_context_results)
+        
+        return create_success_response(response)
+    except Exception as e:
+        logger.error(f"Error processing portfolio query: {str(e)}")
+        return create_error_response(f"Failed to process query: {str(e)}", 500)
 
 @app.route(route="github/repos/{username}", methods=["GET"])
 def get_user_repos(req: func.HttpRequest) -> func.HttpResponse:
@@ -200,29 +343,6 @@ def get_cache_stats(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Error fetching cache statistics: {str(e)}")
         return create_error_response(f"Failed to fetch cache statistics: {str(e)}", 500)
 
-@app.route(route="ai", methods=["POST"])
-def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        # Parse request body
-        request_body = req.get_json()
-        if not request_body or 'query' not in request_body:
-            return create_error_response("Request body must contain 'query' field", 400)
-        
-        query = request_body['query']
-        username = request_body.get('username', 'yungryce')
-        
-        # Initialize AI assistant with updated managers
-        _, _, _, repo_manager = _get_github_managers(username)
-        from ai.ai_assistant import AIAssistant
-        ai_assistant = AIAssistant(username=username, repo_manager=repo_manager)
-        
-        # Process the query
-        response = ai_assistant.process_query(query)
-        
-        return create_success_response(response)
-    except Exception as e:
-        logger.error(f"Error processing portfolio query: {str(e)}")
-        return create_error_response(f"Failed to process query: {str(e)}", 500)
 
 @app.route(route="repository/{repo}/difficulty", auth_level=func.AuthLevel.ANONYMOUS, methods=["GET"])
 def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
@@ -233,7 +353,6 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
         repo_name = req.route_params.get('repo')
         if not repo_name:
             return create_error_response("Missing repository name in URL path", 400)
-        l
         # Get GitHub token
         github_token = os.getenv('GITHUB_TOKEN')
         username = 'yungryce'
@@ -262,7 +381,7 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
             return create_error_response(f"Repository '{repo_name}' not found", 404)
         
         # Process language data first for best analysis
-        from ai.helpers_old import process_language_data
+        from ai.helpers import process_language_data
         processed_repo = process_language_data(target_repo)
         
         # Calculate difficulty with enhanced scoring

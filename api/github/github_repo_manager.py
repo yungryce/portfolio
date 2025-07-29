@@ -1,5 +1,7 @@
 import logging
 import json
+import os
+import time
 from typing import Dict, Any, List
 from .github_api import GitHubAPI
 from .github_file_manager import GitHubFileManager
@@ -35,10 +37,12 @@ def trim_processed_repo(repo: dict) -> dict:
     return trimmed_repo
 
 class GitHubRepoManager:
-    def __init__(self, api: GitHubAPI, cache: GitHubCache, file_manager: GitHubFileManager):
+    def __init__(self, api: GitHubAPI, cache: GitHubCache, file_manager: GitHubFileManager, username: str = None):
+        """Initialize the GitHubRepoManager with API, cache, and file manager."""
         self.api = api
         self.cache = cache
         self.file_manager = file_manager
+        self.username = username
 
     def get_repo_metadata(self, username: str=None, repo: str=None, include_languages: bool=False) -> Dict[str, Any]:
         """Get metadata for a specific repository.
@@ -54,7 +58,7 @@ class GitHubRepoManager:
         Returns:
             dict: Repository metadata or None if not found.
         """
-        username = username or self.api.username
+        username = username or self.username
         if not repo:
             raise ValueError("Repository name is required")
         endpoint = f"repos/{username}/{repo}"
@@ -87,7 +91,7 @@ class GitHubRepoManager:
         Returns:
             list: List of repository metadata dictionaries.
         """
-        username = username or self.api.username
+        username = username or self.username
         endpoint = f"users/{username}/repos"
         params = {'sort': 'updated', 'per_page': per_page}
         cache_key = self.cache._generate_cache_key(endpoint, params)
@@ -119,15 +123,19 @@ class GitHubRepoManager:
         Returns:
             File content as a string, or None if not found.
         """
-        username = username or self.api.username
-        return self.file_manager.get_file_content(username=username, repo=repo_name, path=path)
+        start_time = time.time()
+        username = username or self.username
+        file_content = self.file_manager.get_file_content(username=username, repo=repo_name, path=path)
+        logger.info(f"--- Elapsed={(time.time() - start_time):.3f}s")
+        return file_content
 
     def get_all_repos_with_context(self, username=None, include_languages=True):
         """
         Get all repositories with enhanced context including .repo-context.json and file paths.
         This replaces the old get_all_repos_with_files method with better naming.
         """
-        username = username or self.api.username
+        start_time = time.time()
+        username = username or self.username
         cache_suffix = "_with_languages" if include_languages else "_basic"
         cache_key = f"repos_with_context_{username}{cache_suffix}"
         
@@ -166,7 +174,9 @@ class GitHubRepoManager:
                             repo['file_paths'] = file_paths
                     except Exception as e:
                         logger.warning(f"Failed to get file listing for {repo_name}: {str(e)}")
-                
+
+                logger.info(f"Processing repository: {repo['file_paths']}")
+
                 # Trim to only relevant fields
                 trimmed_repo = trim_processed_repo(repo)
                 repos_with_context.append(trimmed_repo)
@@ -184,6 +194,8 @@ class GitHubRepoManager:
         self.cache._save_to_cache(cache_key, repos_with_context, ttl=3600)  # 1 hour cache
         
         logger.info(f"Enhanced {len(repos_with_context)} repositories with context for {username}")
+        logger.info(f"--- Elapsed={(time.time() - start_time):.3f}s")
+
         return repos_with_context
 
     # Keep the old method name for backward compatibility
@@ -192,28 +204,42 @@ class GitHubRepoManager:
         logger.warning("get_all_repos_with_files is deprecated. Use get_all_repos_with_context instead.")
         return self.get_all_repos_with_context(username, include_languages)
 
-    def get_repository_tree(self, username: str, repo_name: str, recursive: bool = False) -> List[str]:
+    def get_repository_tree(self, repo_name: str, username: str = None, recursive: bool = False) -> List[str]:
         """
         Recursively fetch all file paths in a repository.
         Returns a flat list of file paths (including nested files).
         """
+        start_time = time.time()
+        username = username or self.username
+
         def _fetch_tree(path=""):
             files = []
             try:
-                contents = self.file_manager.get_file_content(username, repo_name, path)
-                if isinstance(contents, list):
-                    for item in contents:
-                        if item.get('type') == 'file':
-                            files.append(item.get('path'))
-                        elif item.get('type') == 'dir' and recursive:
-                            # Recursively fetch files in subdirectory
-                            sub_path = item.get('path')
-                            files.extend(_fetch_tree(sub_path))
-                # If contents is a dict (single file), add its path
-                elif isinstance(contents, dict) and contents.get('type') == 'file':
-                    files.append(contents.get('path'))
+                contents = self.file_manager.list_directory(username, repo_name, path)
+                for item in contents:
+                    if item.get('type') == 'file':
+                        files.append(item.get('path'))
+                    elif item.get('type') == 'dir' and recursive:
+                        sub_path = item.get('path')
+                        files.extend(_fetch_tree(sub_path))
+                    elif isinstance(contents, dict) and contents.get('type') == 'file':
+                        files.append(contents.get('path'))
             except Exception as e:
                 logger.warning(f"Error fetching tree for {repo_name} at '{path}': {str(e)}")
             return files
 
+        logger.info(f"--- Elapsed={(time.time() - start_time):.3f}s")
         return _fetch_tree("")
+
+    def get_all_file_types(self, repo_name: str, username: str = None) -> Dict[str, int]:
+        """
+        Recursively retrieve all file types/extensions in a repository.
+        """
+        username = username or self.username
+        file_types = {}
+        files = self.get_repository_tree(repo_name, username=username, recursive=True)
+        for file_path in files:
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext:
+                file_types[ext] = file_types.get(ext, 0) + 1
+        return file_types

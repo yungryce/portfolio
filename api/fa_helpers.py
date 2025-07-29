@@ -1,9 +1,12 @@
 import json
 import logging
+import os
 import azure.functions as func
 from typing import Optional, Dict, List, Any
 from datetime import datetime
 
+
+logger = logging.getLogger('portfolio.api')
 
 def create_success_response(data: dict, cache_control: str = "public, max-age=900") -> func.HttpResponse:
     """Create standardized success response with caching."""
@@ -175,3 +178,43 @@ def handle_github_error(error: Exception, logger: Optional[logging.Logger] = Non
         mimetype="application/json"
     )
 
+def get_orchestration_status(instance_id: str = None, status_query_url: str = None) -> dict:
+    """
+    Fetch orchestration status and output from Azure Durable Functions runtime API.
+    Prefer using the returned statusQueryGetUri for robustness.
+    """
+    import requests
+
+    if status_query_url:
+        status_url = status_query_url
+        logger.debug(f"Fetching orchestration status using statusQueryGetUri: {status_url}")
+        headers = {}
+    elif instance_id:
+        # Fallback: construct status URL from environment/config
+        base_url = os.getenv("DURABLE_FUNCTIONS_BASE_URL", "http://localhost:7071")
+        host_key = os.getenv("DURABLE_FUNCTIONS_HOST_KEY", "")
+        task_hub = os.getenv("DURABLE_FUNCTIONS_TASK_HUB", "DurableFunctionsHub")
+        connection = os.getenv("DURABLE_FUNCTIONS_CONNECTION", "Storage")
+        status_url = (
+            f"{base_url}/runtime/webhooks/durabletask/instances/{instance_id}"
+            f"?taskHub={task_hub}&connection={connection}"
+        )
+        logger.debug(f"Fetching orchestration status for instance {instance_id} from {base_url}")
+        logger.debug(f"Using task hub: {task_hub}, connection: {connection}, host key: {'***' if host_key else 'None'}")
+        headers = {}
+        if host_key:
+            headers["x-functions-key"] = host_key
+    else:
+        logger.error("Either status_query_url or instance_id must be provided.")
+        return {}
+
+    try:
+        resp = requests.get(status_url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+        else:
+            logger.error(f"Failed to fetch orchestration status: {resp.status_code} {resp.text}")
+            return {}
+    except Exception as e:
+        logger.error(f"Error fetching orchestration status: {str(e)}")
+        return {}

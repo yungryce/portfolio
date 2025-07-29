@@ -75,6 +75,40 @@ class AIContextBuilder:
             }
         return context
 
+    def build_tiered_context(self, top_repos: List[Dict], max_repos: int = 3) -> Dict[str, Any]:
+        """
+        Builds a context dict for the top repositories, retrieving README.md, SKILLS-INDEX.md,
+        and ARCHITECTURE.md using the repo_manager for each repo. Returns all retrieved files,
+        processed repo_context (with scoring metadata), and is suitable for AI context building.
+        """
+        context = {}
+        for i, repo in enumerate(top_repos[:max_repos]):
+            repo_name = repo.get("name")
+            # Retrieve files using repo_manager
+            readme = self.repo_manager.get_file_content(repo_name, "README.md") or ""
+            skills_index = self.repo_manager.get_file_content(repo_name, "SKILLS-INDEX.md") or ""
+            architecture = self.repo_manager.get_file_content(repo_name, "ARCHITECTURE.md") or ""
+            # Compose context for each repo
+            repo_context = {
+                "name": repo_name,
+                "readme": readme,
+                "skills_index": skills_index,
+                "architecture": architecture,
+                "context_metadata": {
+                    "project_identity": repo.get("repoContext", {}).get("project_identity"),
+                    "tech_stack": repo.get("repoContext", {}).get("tech_stack"),
+                },
+                "score_metadata": {
+                    "total_relevance_score": repo.get("total_relevance_score", 0)
+                }
+            }
+            # Assign to tiered context
+            if i == 0:
+                context['primary_repo'] = repo_context
+            elif i == 1:
+                context['tertiary_repo'] = repo_context
+        return context
+
     def build_rules_context(self, tiered_context: Dict[str, Any], fallback_used: bool = False) -> str:
         """
         Build the system message/rules context for AI processing using tiered context.
