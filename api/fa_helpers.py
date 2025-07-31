@@ -178,6 +178,32 @@ def handle_github_error(error: Exception, logger: Optional[logging.Logger] = Non
         mimetype="application/json"
     )
 
+
+def trim_processed_repo(repo: dict) -> dict:
+    """
+    Trim repository dictionary to only include relevant keys.
+    Args:
+        repo: Repository dictionary with all data
+    Returns:
+        Dictionary with only the relevant keys preserved
+    """
+    keys_to_keep = [
+        'id', 'name', 'url', 'description', 'fork',
+        'created_at', 'updated_at', 'pushed_at', 'size',
+        'language', 'license', 'allow_forking', 'topics',
+        'visibility', 'file_paths',
+        'total_language_bytes', 'language_percentages',
+        'languages_sorted', 'relevance_scores',
+        'language_relevance_score', 'matched_query_languages'
+    ]
+    trimmed_repo = {k: v for k, v in repo.items() if k in keys_to_keep}
+    if 'owner' in repo and isinstance(repo['owner'], dict):
+        trimmed_repo['owner'] = {}
+        for nested_key in ['login', 'url']:
+            if nested_key in repo['owner']:
+                trimmed_repo['owner'][nested_key] = repo['owner'][nested_key]
+    return trimmed_repo
+
 def get_orchestration_status(instance_id: str = None, status_query_url: str = None) -> dict:
     """
     Fetch orchestration status and output from Azure Durable Functions runtime API.

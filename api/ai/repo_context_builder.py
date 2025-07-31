@@ -1,5 +1,10 @@
+from github.github_api import GitHubAPI
+from github.cache_client import GitHubCache
+from github.github_file_manager import GitHubFileManager
+from github.github_repo_manager import GitHubRepoManager
 from typing import Dict, Any, List
 import logging
+import os
 
 logger = logging.getLogger('portfolio.api')
 
@@ -7,8 +12,12 @@ class RepoContextBuilder:
     """
     Builds graduated AI context for top repositories.
     """
-    def __init__(self, repo_manager, username):
-        self.repo_manager = repo_manager
+    def __init__(self, username):
+        github_token = os.getenv('GITHUB_TOKEN')
+        api = GitHubAPI(token=github_token, username=username)
+        cache = GitHubCache(use_cache=True)
+        file_manager = GitHubFileManager(api, cache)
+        self.repo_manager = GitHubRepoManager(api, cache, file_manager, username=username)
         self.username = username
 
     def build_tiered_context(self, top_repos: List[Dict], max_repos: int = 3) -> Dict[str, Any]:

@@ -1,7 +1,9 @@
 from typing import Dict, Any, Union, List
 import yaml
 import re
+import logging
 
+logger = logging.getLogger('portfolio.api')
 
 class FileTypeAnalyzer:
     """

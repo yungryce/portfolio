@@ -38,6 +38,8 @@ class SemanticScorer:
         context_emb = self.model.encode([context_str])
         semantic_score = cosine_similarity(query_emb, context_emb)[0][0]
         keyword_score = keyword_overlap_score(query, context_str)
+        project_name = repo_context.get("project_identity", {}).get("name")
+        logger.debug(f"Context similarity score for: '{project_name}'= {semantic_score}, keyword overlap: {keyword_score}")
         return (semantic_score * 0.8) + (keyword_score * 0.2)
 
     def score_language_matches(self, query: str, repo_languages: Dict) -> float:
@@ -45,12 +47,14 @@ class SemanticScorer:
         Returns a normalized score [0, 1] based on the proportion of query language matches
         to the number of query language terms. Ignores size.
         """
+        logger.debug(f"Scoring language matches for: {repo_languages}")
         query_terms = [t.lower() for t in extract_language_terms(query)]
         if not query_terms:
             return 0.0
         repo_langs = [lang.lower() for lang in repo_languages.keys()]
         matches = set(query_terms) & set(repo_langs)
         score = len(matches) / len(query_terms)
+        logger.debug(f"Language match score for query '{query}': {score} (matches: {matches})")
         return min(score, 1.0)
 
     def score_language_size(self, query: str, repo_languages: Dict) -> float:
@@ -65,6 +69,7 @@ class SemanticScorer:
         if total_size == 0:
             return 0.0
         match_size = sum(size for lang, size in repo_languages.items() if lang.lower() in query_terms)
+        logger.debug(f"Language size score for query '{query}': {match_size}/{total_size} = {match_size / total_size if total_size > 0 else 0.0}")
         score = match_size / total_size
         return min(score, 1.0)
 

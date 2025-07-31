@@ -43,6 +43,11 @@ class GitHubRepoManager:
         self.cache = cache
         self.file_manager = file_manager
         self.username = username
+        
+    @staticmethod
+    def get_bundle_context_cache_key(username):
+        endpoint = f"repos_bundle_context_{username}"
+        return GitHubCache._generate_cache_key(endpoint)
 
     def get_repo_metadata(self, username: str=None, repo: str=None, include_languages: bool=False) -> Dict[str, Any]:
         """Get metadata for a specific repository.
@@ -123,10 +128,8 @@ class GitHubRepoManager:
         Returns:
             File content as a string, or None if not found.
         """
-        start_time = time.time()
         username = username or self.username
         file_content = self.file_manager.get_file_content(username=username, repo=repo_name, path=path)
-        logger.info(f"--- Elapsed={(time.time() - start_time):.3f}s")
         return file_content
 
     def get_all_repos_with_context(self, username=None, include_languages=True):
@@ -134,7 +137,6 @@ class GitHubRepoManager:
         Get all repositories with enhanced context including .repo-context.json and file paths.
         This replaces the old get_all_repos_with_files method with better naming.
         """
-        start_time = time.time()
         username = username or self.username
         cache_suffix = "_with_languages" if include_languages else "_basic"
         cache_key = f"repos_with_context_{username}{cache_suffix}"
@@ -194,7 +196,6 @@ class GitHubRepoManager:
         self.cache._save_to_cache(cache_key, repos_with_context, ttl=3600)  # 1 hour cache
         
         logger.info(f"Enhanced {len(repos_with_context)} repositories with context for {username}")
-        logger.info(f"--- Elapsed={(time.time() - start_time):.3f}s")
 
         return repos_with_context
 
@@ -209,7 +210,6 @@ class GitHubRepoManager:
         Recursively fetch all file paths in a repository.
         Returns a flat list of file paths (including nested files).
         """
-        start_time = time.time()
         username = username or self.username
 
         def _fetch_tree(path=""):
@@ -228,7 +228,6 @@ class GitHubRepoManager:
                 logger.warning(f"Error fetching tree for {repo_name} at '{path}': {str(e)}")
             return files
 
-        logger.info(f"--- Elapsed={(time.time() - start_time):.3f}s")
         return _fetch_tree("")
 
     def get_all_file_types(self, repo_name: str, username: str = None) -> Dict[str, int]:

@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Any
 from ai.semantic_scorer import SemanticScorer
 from ai.type_analyzer import FileTypeAnalyzer
 from ai.repo_context_builder import RepoContextBuilder
+from ai.ai_context_builder import AIContextBuilder
 from data_filter import extract_language_terms
 from .helpers import extract_context_terms
 
@@ -16,25 +17,15 @@ class AIAssistant:
     Main AI coordinator for portfolio queries.
     Orchestrates repository scoring, context building, and AI query processing.
     """
-    def __init__(self, username: str = 'yungryce', repo_manager=None):
+    def __init__(self, username: str = 'yungryce'):
         logger.info(f"Initializing AI Assistant for user: {username}")
         self.username = username
-        self.repo_manager = repo_manager
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.semantic_scorer = SemanticScorer()
         self.file_type_analyzer = FileTypeAnalyzer()
-        self.context_builder = RepoContextBuilder(repo_manager=repo_manager, username=username)
-        # Repo manager setup if not provided
-        if not self.repo_manager:
-            from github.github_api import GitHubAPI
-            from github.cache_client import GitHubCache
-            from github.github_file_manager import GitHubFileManager
-            from github.github_repo_manager import GitHubRepoManager
-            github_token = os.getenv('GITHUB_TOKEN')
-            api = GitHubAPI(token=github_token, username=username)
-            cache = GitHubCache(use_cache=True)
-            file_manager = GitHubFileManager(api, cache)
-            self.repo_manager = GitHubRepoManager(api, cache, file_manager)
+        self.ai_context_builder = AIContextBuilder()
+        self.context_builder = RepoContextBuilder(username=username)
+
         logger.info(f"AI Assistant initialized for user: {self.username}")
     
     def calculate_repo_scores(self, repo: Dict[str, Any], query: str) -> Dict[str, Any]:
@@ -97,7 +88,7 @@ class AIAssistant:
             scored_repos.sort(key=lambda r: r.get("total_relevance_score", 0), reverse=True)
             top_repos = scored_repos[:max_repos]
             context = self.context_builder.build_tiered_context(top_repos, max_repos=max_repos)
-            system_message = self.context_builder.build_rules_context(context)
+            system_message = self.ai_context_builder.build_rules_context(context)
             logger.debug(f"Built system message for AI: {system_message[:500]}...")
             response = {
                 "response": f"Top repositories for '{query}': {[r['name'] for r in top_repos]}",

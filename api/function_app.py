@@ -5,7 +5,7 @@ import time
 import azure.functions as func
 import azure.durable_functions as df
 from datetime import datetime
-from fa_helpers import create_success_response, create_error_response, get_orchestration_status
+from fa_helpers import create_success_response, create_error_response, get_orchestration_status, trim_processed_repo
 
 # Updated imports - use individual managers instead of GitHubClient
 from github.github_api import GitHubAPI
@@ -76,19 +76,27 @@ def repo_context_orchestrator(context):
     Durable Functions orchestrator for parallel repository context retrieval.
     """
     username = context.get_input()
-    # Call activity to get repository metadata
     repos_metadata = yield context.call_activity('get_repo_names_activity', username)
     tasks = []
-    logger.info(f"Fetched {len(repos_metadata)} repositories for user '{username}'")
     for repo_metadata in repos_metadata:
-        repo_name = repo_metadata.get('name', {})
         tasks.append(context.call_activity('fetch_repo_context_bundle_activity', {
             'username': username,
-            'repo_metadata': repo_metadata
+            'repo_metadata': trim_processed_repo(repo_metadata)
         }))
-    logger.info(f"Prepared {len(tasks)} tasks to fetch repo context bundles for user '{username}'")
     results = yield context.task_all(tasks)
-    logger.info(f"Completed fetching repo context bundles for user '{results[-1]}'")
+    logger.info(f"Completed fetching repo context bundles for user '{len(results)} of type {type(results)}'")
+    logger.info(f"Results: {json.dumps(results[-1], indent=2)}")
+    
+    # --- Cache the full bundle ---
+    try:
+        _, cache, _, _ = _get_github_managers(username)
+        cache_key = GitHubRepoManager.get_bundle_context_cache_key(username)
+        cache._save_to_cache(cache_key, results, ttl=3600)
+        logger.info(f"Cached full repo context bundle under key: {cache_key}")
+    except Exception as e:
+        logger.warning(f"Failed to cache repo context bundle: {str(e)}")
+    # ----------------------------
+    
     return results
 
 @app.activity_trigger(input_name="activityContext")
@@ -107,8 +115,6 @@ def fetch_repo_context_bundle_activity(activityContext):
     """
     Activity function to fetch repository metadata, languages, .repo-context.json, and file types for a single repository.
     """
-    logging.info(f"------=-{activityContext} processed successfully.-=-----")
-    print(f"Processing request for activityContext: {activityContext}")
     input_data = activityContext
     username = input_data.get('username')
     repo_metadata = input_data.get('repo_metadata')
@@ -156,29 +162,34 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         status_query_url = request_body.get('status_query_url')
         
         # Initialize AI assistant with updated managers
-        _, _, _, repo_manager = _get_github_managers(username)
+        _, cache, _, _ = _get_github_managers(username)
         from ai.ai_assistant import AIAssistant
-        ai_assistant = AIAssistant(username=username, repo_manager=repo_manager)
+        ai_assistant = AIAssistant(username=username)
         
         # Try to get cached results first
-        cached_results = repo_manager.cache._get_from_cache(f"repos_with_context_{username}_with_languages")
+        cache_key = GitHubRepoManager.get_bundle_context_cache_key(username)
+        cached_results = cache._get_from_cache(cache_key)
+        logger.debug(f"Cached results for user '{username}': {cached_results is not None}")
         repo_context_results = None
         
         if cached_results:
             repo_context_results = cached_results
+            logger.info(f"Using cached results for user '{username}'")
         elif instance_id:
             # Fetch orchestration results from Durable Functions status endpoint
             # This assumes you have a helper to fetch orchestration output by instance_id
             orchestration_status = get_orchestration_status(instance_id, status_query_url)
             if orchestration_status and orchestration_status.get("runtimeStatus") == "Completed":
-                repo_context_results = orchestration_status.get("output", [])
+                # Normalize orchestration output to flat repo dicts
+                raw_results = orchestration_status.get("output", [])
+                cache._save_to_cache(cache_key, repo_context_results, ttl=3600)
+                logger.info(f"Cached orchestration results under key: {cache_key}")
             else:
                 return create_error_response("Orchestration not completed or results unavailable", 202)
         else:
             return create_error_response("No repo context results available. Provide instance_id or wait for orchestration.", 400)
         
         # Process the query
-        logger.info(f"@ @ @ Repo context results: {repo_context_results}")
         response = ai_assistant.process_query_results(query, repo_context_results)
         
         return create_success_response(response)
@@ -258,7 +269,7 @@ def get_user_repos_with_context(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Error fetching repositories with context for {username}: {str(e)}")
         return create_error_response(f"Failed to fetch repositories with context: {str(e)}", 500)
 
-@app.timer_trigger(schedule="0 0 * * * *", arg_name="myTimer", run_on_startup=False,
+@app.timer_trigger(schedule="0 0 0 * * *", arg_name="myTimer", run_on_startup=False,
                    use_monitor=True) 
 def cache_cleanup_timer(myTimer: func.TimerRequest) -> None:
     """
