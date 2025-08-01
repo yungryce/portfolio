@@ -7,7 +7,6 @@ logger = logging.getLogger('portfolio.api')
 
 class GitHubAPI:
     def __init__(self, token=None, username=None):
-        logger.debug("Initializing GitHubAPI client")
         self.token = token or os.getenv('GITHUB_TOKEN')
         self.username = username or 'yungryce'
         self.headers = {'Authorization': f'token {self.token}'} if self.token else {}

@@ -26,8 +26,6 @@ class GitHubCache:
                 except Exception as e:
                     if "ContainerAlreadyExists" not in str(e):
                         logger.warning(f"Container creation issue: {str(e)}")
-                    logger.info(f"Using existing cache container: {self.container_name}")
-                logger.info("Azure Storage cache initialized")
             except ClientAuthenticationError as auth_err:
                 logger.error(f"Azure Storage authentication failed: {auth_err}. "
                              "Check your storage account keys or managed identity configuration.")
@@ -66,15 +64,24 @@ class GitHubCache:
                 blob=cache_key
             )
             if blob_client.exists():
-                data = blob_client.download_blob().readall()
-                cache_data = json.loads(data)
-                if 'expires_at' in cache_data:
-                    expires_at = datetime.fromisoformat(cache_data['expires_at'])
+                metadata = blob_client.get_blob_properties().metadata
+                logger.debug(f"Retrieved metadata for key {cache_key}: {metadata}")
+                
+                if 'expires_at' in metadata:
+                    expires_at = datetime.fromisoformat(metadata['expires_at'])
                     if expires_at > datetime.now():
+                        data = blob_client.download_blob().readall()
+                        cache_data = json.loads(data)
                         return cache_data['data']
                     else:
+                        logger.warning(f"Cache key {cache_key} expired at {expires_at}")
                         blob_client.delete_blob()
-            return None
+                else:
+                    logger.warning(f"Cache key {cache_key} missing expires_at metadata")
+                return None
+            else:
+                logger.debug(f"Cache key {cache_key} does not exist")
+                return None
         except Exception as e:
             logger.warning(f"Error reading from cache for key {cache_key}: {str(e)}")
             return None

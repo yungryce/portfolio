@@ -89,7 +89,7 @@ class AIAssistant:
             top_repos = scored_repos[:max_repos]
             context = self.context_builder.build_tiered_context(top_repos, max_repos=max_repos)
             system_message = self.ai_context_builder.build_rules_context(context)
-            logger.debug(f"Built system message for AI: {system_message[:500]}...")
+            # logger.debug(f"Built system message for AI: {system_message[:500]}...")
             response = {
                 "response": f"Top repositories for '{query}': {[r['name'] for r in top_repos]}",
                 "tiered_context": context,

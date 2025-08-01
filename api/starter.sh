@@ -4,12 +4,38 @@
 START_TIME=$(date +%s)
 
 # Start orchestration for repo_context_orchestrator and get instanceId
+echo "Requesting repo context..."
 START_RESPONSE=$(curl -s -X POST "http://localhost:7071/api/orchestrators/repo_context_orchestrator" \
   -H "Content-Type: application/json" \
   -d '{"username": "yungryce"}')
-echo "Orchestration start response: $START_RESPONSE"
+echo "Response received: $(echo $START_RESPONSE | cut -c 1-150)..."
 
-# Extract instanceId and statusQueryGetUri from response
+# Check if response indicates cached data
+CACHED_STATUS=$(echo "$START_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin).get('status', ''))" 2>/dev/null)
+
+if [ "$CACHED_STATUS" == "cached" ]; then
+  echo "Cache exists, skipping orchestration."
+  
+  # Extract cache info
+  CACHE_KEY=$(echo "$START_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin).get('cache_key', ''))" 2>/dev/null)
+  REPOS_COUNT=$(echo "$START_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin).get('repos_count', ''))" 2>/dev/null)
+  echo "Using cached data with key: $CACHE_KEY (contains $REPOS_COUNT repositories)"
+  
+  # End timer for cache retrieval
+  END_TIME=$(date +%s)
+  DURATION=$((END_TIME - START_TIME))
+  echo "Cache retrieval duration: ${DURATION} seconds"
+  
+  # Make request to portfolio_query without instance_id
+  echo "Sending query to AI endpoint..."
+  curl -X POST "http://localhost:7071/api/ai" \
+    -H "Content-Type: application/json" \
+    -d "{\"query\": \"what are some of his devops projects?\", \"username\": \"yungryce\"}"
+  
+  exit 0
+fi
+
+# If not cached, extract instanceId and statusQueryGetUri from response
 INSTANCE_ID=$(echo "$START_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin).get('id', ''))")
 STATUS_URL=$(echo "$START_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin).get('statusQueryGetUri', ''))")
 
@@ -27,6 +53,7 @@ if [ -z "$STATUS_URL" ]; then
 fi
 
 # Wait for orchestration to complete (poll status endpoint)
+echo "Waiting for orchestration to complete..."
 while true; do
   STATUS_RESPONSE=$(curl -s "$STATUS_URL")
   STATUS=$(echo "$STATUS_RESPONSE" | grep -oP '"runtimeStatus":"\K[^"]+')
@@ -49,6 +76,7 @@ DURATION=$((END_TIME - START_TIME))
 echo "Orchestration duration: ${DURATION} seconds"
 
 # Make request to portfolio_query with instance_id and statusQueryGetUri
+echo "Sending query to AI endpoint with orchestration results..."
 curl -X POST "http://localhost:7071/api/ai" \
   -H "Content-Type: application/json" \
   -d "{\"query\": \"what are some of his devops projects?\", \"username\": \"yungryce\", \"instance_id\": \"$INSTANCE_ID\", \"status_query_url\": \"$STATUS_URL\"}"

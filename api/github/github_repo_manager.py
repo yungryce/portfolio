@@ -43,11 +43,6 @@ class GitHubRepoManager:
         self.cache = cache
         self.file_manager = file_manager
         self.username = username
-        
-    @staticmethod
-    def get_bundle_context_cache_key(username):
-        endpoint = f"repos_bundle_context_{username}"
-        return GitHubCache._generate_cache_key(endpoint)
 
     def get_repo_metadata(self, username: str=None, repo: str=None, include_languages: bool=False) -> Dict[str, Any]:
         """Get metadata for a specific repository.

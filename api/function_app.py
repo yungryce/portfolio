@@ -1,4 +1,5 @@
 import json
+from linecache import cache
 import logging
 import os
 import time
@@ -57,6 +58,23 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
     try:
         # username = "req.get_json().get('username')"
         username = "yungryce"
+        
+        # Check if cache already exists
+        _, cache, _, _ = _get_github_managers(username)
+        cache_key = cache._generate_cache_key(f"repos_bundle_context_{username}")
+        logger.info(f"Checking cache for user '{username}' with key: {cache_key}")
+        cached_results = cache._get_from_cache(cache_key)
+        
+        if cached_results:
+            logger.info(f"Cache exists for user '{username}', skipping orchestration")
+            # Return a success response with cache info
+            return create_success_response({
+                "status": "cached",
+                "message": "Using cached repository data",
+                "timestamp": datetime.now().isoformat(),
+                "cache_key": cache_key,
+                "repos_count": len(cached_results) if isinstance(cached_results, list) else 0
+            })
 
         # Start the orchestrator asynchronously
         instance_id = await client.start_new('repo_context_orchestrator', None, username)
@@ -85,14 +103,16 @@ def repo_context_orchestrator(context):
         }))
     results = yield context.task_all(tasks)
     logger.info(f"Completed fetching repo context bundles for user '{len(results)} of type {type(results)}'")
-    logger.info(f"Results: {json.dumps(results[-1], indent=2)}")
     
     # --- Cache the full bundle ---
     try:
         _, cache, _, _ = _get_github_managers(username)
-        cache_key = GitHubRepoManager.get_bundle_context_cache_key(username)
-        cache._save_to_cache(cache_key, results, ttl=3600)
-        logger.info(f"Cached full repo context bundle under key: {cache_key}")
+        cache_key = cache._generate_cache_key(f"repos_bundle_context_{username}")
+        if results and isinstance(results, list) and len(results) > 0:
+            cache._save_to_cache(cache_key, results, ttl=3600)
+            logger.info(f"Cached full repo context bundle ({len(results)} repos) under key: {cache_key}")
+        else:
+            logger.warning(f"Not caching empty results: {results}")
     except Exception as e:
         logger.warning(f"Failed to cache repo context bundle: {str(e)}")
     # ----------------------------
@@ -139,6 +159,7 @@ def fetch_repo_context_bundle_activity(activityContext):
 
     # Aggregate results
     result = {
+        "name": repo_name,
         "metadata": repo_metadata,
         "repoContext": repo_context,
         "file_types": file_types,
@@ -167,7 +188,7 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         ai_assistant = AIAssistant(username=username)
         
         # Try to get cached results first
-        cache_key = GitHubRepoManager.get_bundle_context_cache_key(username)
+        cache_key = cache._generate_cache_key(f"repos_bundle_context_{username}")
         cached_results = cache._get_from_cache(cache_key)
         logger.debug(f"Cached results for user '{username}': {cached_results is not None}")
         repo_context_results = None
@@ -181,7 +202,7 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
             orchestration_status = get_orchestration_status(instance_id, status_query_url)
             if orchestration_status and orchestration_status.get("runtimeStatus") == "Completed":
                 # Normalize orchestration output to flat repo dicts
-                raw_results = orchestration_status.get("output", [])
+                repo_context_results = orchestration_status.get("output", [])
                 cache._save_to_cache(cache_key, repo_context_results, ttl=3600)
                 logger.info(f"Cached orchestration results under key: {cache_key}")
             else:
