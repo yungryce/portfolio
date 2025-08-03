@@ -3,18 +3,48 @@ import json
 import hashlib
 import logging
 from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, Union, List
 from azure.storage.blob import BlobServiceClient, ContentSettings
 from azure.core.exceptions import HttpResponseError, ClientAuthenticationError
 
 logger = logging.getLogger('portfolio.api')
 
 class GitHubCache:
-    def __init__(self, use_cache=True):
+    """
+    Azure Blob Storage-based caching system for GitHub API responses.
+    
+    This class provides a robust caching layer that stores GitHub API responses
+    in Azure Blob Storage with TTL-based expiration and automatic cleanup capabilities.
+    
+    Attributes:
+        use_cache (bool): Whether caching is enabled
+        cache_ttl (int): Default time-to-live for cache entries in seconds
+        blob_service_client (BlobServiceClient): Azure Blob Storage client
+        container_name (str): Name of the blob container for cache storage
+    """
+    def __init__(self, use_cache: bool = True) -> None:
+        """
+        Initialize the GitHub cache with Azure Blob Storage backend.
+        
+        Args:
+            use_cache: Whether to enable caching functionality. Defaults to True.
+        """
         self.use_cache = use_cache
-        self.cache_ttl = 3600
+        self.cache_ttl = 21600  # Default TTL of 6 hours
         self._init_cache()
 
-    def _init_cache(self):
+    def _init_cache(self) -> None:
+        """
+        Initialize Azure Blob Storage connection and create container if needed.
+        
+        Sets up the blob service client using the AzureWebJobsStorage connection string
+        and creates the cache container if it doesn't exist. Handles authentication
+        and network errors gracefully.
+        
+        Raises:
+            Logs errors but doesn't raise exceptions to allow graceful fallback
+            when Azure Storage is not available.
+        """
         connection_string = os.getenv('AzureWebJobsStorage')
         if connection_string and self.use_cache:
             try:
@@ -47,7 +77,24 @@ class GitHubCache:
             logger.warning("Azure Storage connection string not found, caching disabled")
             self.blob_service_client = None
 
-    def _generate_cache_key(self, endpoint, params=None):
+    def _generate_cache_key(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Generate a normalized cache key from an endpoint and optional parameters.
+        
+        Creates a consistent, filesystem-safe cache key by normalizing the endpoint
+        and including a hash of parameters when provided.
+        
+        Args:
+            endpoint: The API endpoint or identifier to cache
+            params: Optional dictionary of parameters to include in the key
+            
+        Returns:
+            A normalized cache key string safe for use as a blob name
+            
+        Example:
+            >>> cache._generate_cache_key("repos/user/repo", {"include": "languages"})
+            "repos_user_repo_a1b2c3d4"
+        """
         normalized_endpoint = endpoint.lstrip('/').replace('/', '_').replace('?', '_').replace('&', '_')
         if params:
             param_string = json.dumps(params, sort_keys=True)
@@ -55,38 +102,104 @@ class GitHubCache:
             return f"{normalized_endpoint}_{param_hash}"
         return normalized_endpoint
 
-    def _get_from_cache(self, cache_key):
+    def _get_from_cache(self, cache_key: str) -> Dict[str, Any]:
+        """
+        Retrieve cache data and metadata for a given key with expiration checking.
+        
+        Fetches the cached data from Azure Blob Storage, validates its expiration,
+        and returns comprehensive metadata about the cache entry status.
+        
+        Args:
+            cache_key: The cache key to retrieve
+            
+        Returns:
+            Dictionary containing:
+            - status: 'valid', 'expired', 'missing', 'disabled', or 'error'
+            - data: The cached data (None if not valid)
+            - metadata: Blob metadata dictionary
+            - expires_at: ISO format expiration timestamp (if available)
+            - time_until_expiry_seconds: Seconds until expiration (if valid)
+            - last_modified: ISO format last modified timestamp
+            - size_bytes: Size of the cached data in bytes
+            
+        Example:
+            >>> result = cache._get_from_cache("repos_user_repo")
+            >>> if result['status'] == 'valid':
+            ...     data = result['data']
+        """
         if not self.blob_service_client or not self.use_cache:
-            return None
+            return {'status': 'disabled', 'data': None, 'metadata': None}
         try:
             blob_client = self.blob_service_client.get_blob_client(
-                container=self.container_name, 
+                container=self.container_name,
                 blob=cache_key
             )
-            if blob_client.exists():
-                metadata = blob_client.get_blob_properties().metadata
-                logger.debug(f"Retrieved metadata for key {cache_key}: {metadata}")
-                
-                if 'expires_at' in metadata:
-                    expires_at = datetime.fromisoformat(metadata['expires_at'])
-                    if expires_at > datetime.now():
-                        data = blob_client.download_blob().readall()
-                        cache_data = json.loads(data)
-                        return cache_data['data']
-                    else:
-                        logger.warning(f"Cache key {cache_key} expired at {expires_at}")
-                        blob_client.delete_blob()
-                else:
-                    logger.warning(f"Cache key {cache_key} missing expires_at metadata")
-                return None
-            else:
-                logger.debug(f"Cache key {cache_key} does not exist")
-                return None
-        except Exception as e:
-            logger.warning(f"Error reading from cache for key {cache_key}: {str(e)}")
-            return None
+            if not blob_client.exists():
+                return {'status': 'missing', 'data': None, 'metadata': None}
 
-    def _save_to_cache(self, cache_key, data, ttl=None):
+            properties = blob_client.get_blob_properties()
+            metadata = properties.metadata
+
+            # Check expiration
+            current_time = datetime.now()
+            if 'expires_at' in metadata:
+                expires_at = datetime.fromisoformat(metadata['expires_at'])
+                time_until_expiry = (expires_at - current_time).total_seconds()
+                if expires_at > current_time:
+                    data = json.loads(blob_client.download_blob().readall())
+                    return {
+                        'status': 'valid',
+                        'data': data.get('data'),
+                        'metadata': metadata,
+                        'expires_at': expires_at.isoformat(),
+                        'time_until_expiry_seconds': int(time_until_expiry),
+                        'last_modified': properties.last_modified.isoformat(),
+                        'size_bytes': properties.size
+                    }
+                else:
+                    blob_client.delete_blob()
+                    return {
+                        'status': 'expired',
+                        'data': None,
+                        'metadata': metadata,
+                        'expires_at': expires_at.isoformat(),
+                        'time_until_expiry_seconds': 0,
+                        'last_modified': properties.last_modified.isoformat(),
+                        'size_bytes': properties.size
+                    }
+            else:
+                logger.warning(f"Cache key {cache_key} missing expires_at metadata")
+                return {
+                    'status': 'None',
+                    'data': None,
+                    'metadata': metadata,
+                    'last_modified': properties.last_modified.isoformat(),
+                    'size_bytes': properties.size
+                }
+        except Exception as e:
+            logger.warning(f"Error retrieving cache entry for key {cache_key}: {str(e)}")
+            return {'status': 'error', 'data': None, 'metadata': None}
+
+    def _save_to_cache(self, cache_key: str, data: Any, ttl: Optional[int] = None) -> bool:
+        """
+        Save data to cache with specified or default TTL.
+        
+        Stores the provided data in Azure Blob Storage with proper JSON serialization,
+        content type settings, and expiration metadata.
+        
+        Args:
+            cache_key: The cache key to store data under
+            data: The data to cache (must be JSON serializable)
+            ttl: Time-to-live in seconds. Uses default cache_ttl if not provided
+            
+        Returns:
+            True if successfully saved, False otherwise
+            
+        Example:
+            >>> success = cache._save_to_cache("user_repos", repos_data, ttl=3600)
+            >>> if success:
+            ...     print("Data cached successfully")
+        """
         if not self.blob_service_client or not self.use_cache:
             return False
         ttl = ttl or self.cache_ttl
@@ -115,16 +228,31 @@ class GitHubCache:
             logger.warning(f"Error saving to cache for key {cache_key}: {str(e)}")
             return False
 
-    def cleanup_expired_cache(self, batch_size=100, dry_run=False):
+    def cleanup_expired_cache(self, batch_size: int = 100, dry_run: bool = False) -> Dict[str, Any]:
         """
         Clean up expired cache entries from Azure Blob Storage.
         
-        Args:
-            batch_size: Number of blobs to process in each batch
-            dry_run: If True, only log what would be deleted without actually deleting
+        Scans all blobs in the cache container, identifies expired entries based on
+        their expiration metadata or age, and optionally deletes them. Processes
+        blobs in batches for better performance and memory usage.
         
+        Args:
+            batch_size: Number of blobs to process in each batch. Defaults to 100
+            dry_run: If True, only identifies expired entries without deleting them
+            
         Returns:
-            dict: Summary of cleanup operation
+            Dictionary containing cleanup operation results:
+            - status: 'completed', 'skipped', or 'failed'
+            - total_blobs: Total number of blobs processed
+            - expired_count: Number of expired blobs found
+            - deleted_count: Number of blobs actually deleted
+            - error_count: Number of errors encountered
+            - dry_run: Whether this was a dry run
+            - cleanup_time: ISO timestamp of cleanup operation
+            
+        Example:
+            >>> result = cache.cleanup_expired_cache(batch_size=50, dry_run=True)
+            >>> print(f"Found {result['expired_count']} expired entries")
         """
         if not self.blob_service_client or not self.use_cache:
             logger.warning("Cache cleanup skipped: no blob service client or caching disabled")
@@ -221,16 +349,22 @@ class GitHubCache:
 
     def _process_cleanup_batch(self, container_client, blob_batch, current_time, dry_run):
         """
-        Process a batch of blobs for cleanup.
+        Process a batch of blobs for cleanup operation.
+        
+        Examines each blob in the batch to determine if it's expired based on
+        metadata or age, and optionally deletes expired blobs.
         
         Args:
-            container_client: Azure container client
+            container_client: Azure container client for blob operations
             blob_batch: List of blob objects to process
             current_time: Current datetime for expiration comparison
             dry_run: If True, don't actually delete blobs
-        
+            
         Returns:
-            dict: Batch processing results
+            Dictionary with batch processing results:
+            - expired: Number of expired blobs found in this batch
+            - deleted: Number of blobs actually deleted from this batch
+            - errors: Number of errors encountered in this batch
         """
         batch_expired = 0
         batch_deleted = 0
@@ -304,10 +438,26 @@ class GitHubCache:
 
     def get_cache_statistics(self):
         """
-        Get statistics about the current cache state.
+        Get comprehensive statistics about the current cache state.
+        
+        Analyzes all blobs in the cache container to provide detailed statistics
+        including total size, number of valid/expired entries, and container health.
         
         Returns:
-            dict: Cache statistics
+            Dictionary containing cache statistics:
+            - status: 'active', 'disabled', 'no_container', or 'error'
+            - total_blobs: Total number of cache entries
+            - total_size_bytes: Total size of all cache entries in bytes
+            - total_size_mb: Total size in megabytes (rounded to 2 decimal places)
+            - expired_count: Number of expired cache entries
+            - valid_count: Number of valid cache entries
+            - container_name: Name of the cache container
+            - default_ttl_seconds: Default TTL for new cache entries
+            
+        Example:
+            >>> stats = cache.get_cache_statistics()
+            >>> print(f"Cache has {stats['valid_count']} valid entries, "
+            ...       f"{stats['total_size_mb']} MB total")
         """
         if not self.blob_service_client or not self.use_cache:
             return {

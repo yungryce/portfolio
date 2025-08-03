@@ -14,8 +14,8 @@ class GitHubFileManager:
         endpoint = f"repos/{username}/{repo}/contents/{path_segment}"
         cache_key = self.cache._generate_cache_key(endpoint)
         cached = self.cache._get_from_cache(cache_key)
-        if cached is not None:
-            return cached
+        if cached and cached['status'] == 'valid':
+            return cached['data']
         file_data = self.api.make_request('GET', endpoint)
         if not file_data:
             return None
@@ -42,8 +42,8 @@ class GitHubFileManager:
         endpoint = f"repos/{username}/{repo}/contents/{path_segment}"
         cache_key = self.cache._generate_cache_key(endpoint)
         cached = self.cache._get_from_cache(cache_key)
-        if cached is not None:
-            return cached
+        if cached and cached['status'] == 'valid':
+            return cached['data']
         file_data = self.api.make_request('GET', endpoint)
         if isinstance(file_data, list):
             self.cache._save_to_cache(cache_key, file_data)

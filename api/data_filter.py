@@ -9,130 +9,21 @@ advanced_skills = {
     # Cloud & DevOps
     'devops', 'cloud native', 'aws', 'azure', 'gcp', 'terraform', 
     'kubernetes', 'docker', 'helm', 'gitops', 'ci/cd', 'iac',
-    
-    # Architecture Patterns
     'microservices', 'serverless', 'event-driven', 'distributed systems',
     'domain-driven design', 'hexagonal architecture', 'cqrs', 'event sourcing',
-    
-    # Backend Technologies
     'graphql', 'grpc', 'websockets', 'service mesh', 'api gateway',
     'oauth', 'jwt', 'openid', 'message broker', 'kafka', 'rabbitmq',
-    
-    # Data Engineering & ML
     'data pipeline', 'etl', 'spark', 'hadoop', 'airflow', 'machine learning',
     'neural networks', 'nlp', 'computer vision', 'data warehouse',
-    
-    # Database Advanced Concepts
     'nosql', 'mongodb', 'cassandra', 'redis', 'elasticsearch', 'neo4j',
     'database sharding', 'replication', 'data modeling',
-    
-    # Security
     'security', 'penetration testing', 'oauth2', 'encryption', 'zero trust',
     'container security', 'threat modeling', 'devsecops',
-    
-    # Frontend Advanced
     'webassembly', 'pwa', 'microfrontends', 'state management',
     'ssr', 'graphql client', 'web workers',
-    
-    # System Design
     'high availability', 'fault tolerance', 'scalability', 'resilience',
     'chaos engineering', 'load balancing', 'cdn', 'edge computing'
 }
-
-
-complexity_indicators = [
-    # Core fundamentals (from original list)
-    'authentication', 'authorization', 'caching', 'concurrency',
-    'database', 'error handling', 'logging', 'messaging', 'security',
-    'transactions', 'validation',
-    
-    # Concurrency patterns
-    'multithreading', 'thread safety', 'mutex', 'semaphore', 'lock',
-    'deadlock prevention', 'race condition', 'atomic operations', 'synchronization',
-    'async/await', 'coroutines', 'futures', 'promises', 'reactive programming',
-    
-    # Error handling & resilience
-    'circuit breaker', 'retry mechanism', 'backoff strategy', 'fallback',
-    'graceful degradation', 'exception handling', 'defensive programming',
-    'fault isolation', 'error boundary', 'recovery mechanism',
-    
-    # Performance optimization
-    'connection pooling', 'object pooling', 'memory pooling', 'resource pooling',
-    'lazy loading', 'eager loading', 'memoization', 'code optimization',
-    'query optimization', 'indexing strategy', 'query plan', 'execution plan',
-    'jit compilation', 'hot path optimization',
-    
-    # State management
-    'state machine', 'state transition', 'immutable state', 'state persistence', 
-    'global state', 'context management', 'session management', 'lifecycle hooks',
-    'hydration', 'dehydration',
-    
-    # Data processing
-    'stream processing', 'batch processing', 'binary data', 'blob handling',
-    'serialization', 'deserialization', 'compression', 'encryption',
-    'data transformation', 'data validation', 'schema validation',
-    
-    # Integration patterns
-    'webhook handling', 'callback processing', 'polling mechanism', 'long polling',
-    'push notification', 'ipc', 'inter-process communication', 'cross-origin',
-    'idempotency', 'consistency guarantee',
-    
-    # Advanced programming patterns
-    'dependency injection', 'aop', 'aspect-oriented', 'reflection', 'introspection',
-    'metaprogramming', 'code generation', 'plugin system', 'extension mechanism',
-    'hot reload', 'dynamic loading', 'monkey patching',
-    
-    # Security implementation details
-    'input sanitization', 'output encoding', 'csrf protection', 'xss prevention',
-    'sql injection', 'rate limiting', 'throttling', 'acl', 'rbac', 'abac',
-    'permission system',
-    
-    # Testing complexity
-    'mock object', 'test double', 'stub', 'spy', 'test fixture', 'test harness',
-    'property-based testing', 'fuzz testing', 'mutation testing', 'bdd', 'tdd',
-    
-    # Networking complexity
-    'connection management', 'keepalive', 'multiplexing', 'protocol negotiation',
-    'handshaking', 'header compression', 'binary protocol', 'custom protocol',
-    'socket programming', 'network buffer'
-]
-
-# Common file extensions
-file_extensions = {
-    # Programming languages
-    'c', 'cpp', 'h', 'hpp', 'cs', 'java', 'py', 'rb', 'js', 'ts', 'rs', 'go', 'php',
-    'swift', 'kt', 'kts', 'm', 'scala', 'lua', 'sh', 'bat', 'pl',
-
-    # Web & styling
-    'html', 'htm', 'xhtml', 'xml', 'css', 'scss', 'sass', 'less',
-
-    # Scripts & data
-    'json', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'csv', 'tsv', 'sql',
-
-    # Docs
-    'md', 'txt', 'rst', 'pdf', 'doc', 'docx', 'odt', 'rtf', 'tex',
-
-    # Images
-    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp', 'ico', 'tiff', 'tif',
-
-    # Audio/video
-    'mp3', 'wav', 'ogg', 'flac', 'aac', 'mp4', 'mov', 'avi', 'mkv', 'webm',
-
-    # Archives
-    'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst',
-
-    # Code-related configs
-    'dockerfile', 'makefile', 'gitignore', 'editorconfig', 'env', 'npmrc',
-}
-
-# Version regex patterns (used programmatically)
-version_patterns = [
-    r'^v?\d+(\.\d+)*$',  # v1, 1.0.0, 2.0, etc.
-    r'^\d{4}$',          # Year-style versions: 2022
-    r'^\d{4}\.\d{2}$',   # Ubuntu-style: 20.04
-    r'^\d+\.\d+\.\d+$',  # SemVer strict
-    r'^\d+\.\d+[a-z]$',  # 3.2b, 1.0a
-]
 
 # Common technical terms (broad and useful in tech contexts)
 technical_keywords = {
@@ -171,6 +62,65 @@ technical_keywords = {
     'linux', 'windows', 'macos', 'ubuntu', 'debian', 'arch', 'fedora', 'centos',
 }
 
+complexity_indicators = [
+    'authentication', 'authorization', 'caching', 'concurrency',
+    'database', 'error handling', 'logging', 'messaging', 'security',
+    'transactions', 'validation',
+    'multithreading', 'thread safety', 'mutex', 'semaphore', 'lock',
+    'deadlock prevention', 'race condition', 'atomic operations', 'synchronization',
+    'async/await', 'coroutines', 'futures', 'promises', 'reactive programming',
+    'circuit breaker', 'retry mechanism', 'backoff strategy', 'fallback',
+    'graceful degradation', 'exception handling', 'defensive programming',
+    'fault isolation', 'error boundary', 'recovery mechanism',
+    'connection pooling', 'object pooling', 'memory pooling', 'resource pooling',
+    'lazy loading', 'eager loading', 'memoization', 'code optimization',
+    'query optimization', 'indexing strategy', 'query plan', 'execution plan',
+    'jit compilation', 'hot path optimization',
+    'state machine', 'state transition', 'immutable state', 'state persistence', 
+    'global state', 'context management', 'session management', 'lifecycle hooks',
+    'hydration', 'dehydration',
+    'stream processing', 'batch processing', 'binary data', 'blob handling',
+    'serialization', 'deserialization', 'compression', 'encryption',
+    'data transformation', 'data validation', 'schema validation',
+    'webhook handling', 'callback processing', 'polling mechanism', 'long polling',
+    'push notification', 'ipc', 'inter-process communication', 'cross-origin',
+    'idempotency', 'consistency guarantee',
+    'dependency injection', 'aop', 'aspect-oriented', 'reflection', 'introspection',
+    'metaprogramming', 'code generation', 'plugin system', 'extension mechanism',
+    'hot reload', 'dynamic loading', 'monkey patching',
+    'input sanitization', 'output encoding', 'csrf protection', 'xss prevention',
+    'sql injection', 'rate limiting', 'throttling', 'acl', 'rbac', 'abac',
+    'permission system',
+    'mock object', 'test double', 'stub', 'spy', 'test fixture', 'test harness',
+    'property-based testing', 'fuzz testing', 'mutation testing', 'bdd', 'tdd',
+    'connection management', 'keepalive', 'multiplexing', 'protocol negotiation',
+    'handshaking', 'header compression', 'binary protocol', 'custom protocol',
+    'socket programming', 'network buffer'
+]
+
+# Common file extensions
+file_extensions = {
+    # Programming languages
+    'c', 'cpp', 'h', 'hpp', 'cs', 'java', 'py', 'rb', 'js', 'ts', 'rs', 'go', 'php',
+    'swift', 'kt', 'kts', 'm', 'scala', 'lua', 'sh', 'bat', 'pl',
+    'html', 'htm', 'xhtml', 'xml', 'css', 'scss', 'sass', 'less',
+    'json', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'csv', 'tsv', 'sql',
+    'md', 'txt', 'rst', 'pdf', 'doc', 'docx', 'odt', 'rtf', 'tex',
+    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp', 'ico', 'tiff', 'tif',
+    'mp3', 'wav', 'ogg', 'flac', 'aac', 'mp4', 'mov', 'avi', 'mkv', 'webm',
+    'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst',
+    'dockerfile', 'makefile', 'gitignore', 'editorconfig', 'env', 'npmrc',
+}
+
+# Version regex patterns (used programmatically)
+version_patterns = [
+    r'^v?\d+(\.\d+)*$',  # v1, 1.0.0, 2.0, etc.
+    r'^\d{4}$',          # Year-style versions: 2022
+    r'^\d{4}\.\d{2}$',   # Ubuntu-style: 20.04
+    r'^\d+\.\d+\.\d+$',  # SemVer strict
+    r'^\d+\.\d+[a-z]$',  # 3.2b, 1.0a
+]
+
 # Common stop words to filter out
 stop_words = {
     'the', 'and', 'for', 'are', 'can', 'you', 'get', 'use', 'show', 'find',
@@ -188,9 +138,11 @@ stop_words = {
 
 # Optimized structured result with precompiled regex patterns
 technical_terms_structured = {
+    "advanced_skills": frozenset(advanced_skills),  # Use frozenset for O(1) lookups
+    "complexity_indicators": frozenset(complexity_indicators),  # Use
     "file_extensions": frozenset(file_extensions),  # Use frozenset for O(1) lookups
     "version_patterns": [re.compile(pattern) for pattern in version_patterns],  # Precompile regex
-    "technical_keywords": frozenset(technical_keywords),  # Use frozenset for O(1) lookups
+    "domain": frozenset(technical_keywords),  # Use frozenset for O(1) lookups
     "stop_words": frozenset(stop_words),  # Use frozenset for O(1) lookups
 }
 
@@ -243,112 +195,3 @@ def extract_language_terms(query: str) -> List[str]:
     return found_languages
 
 
-# Add this new dictionary after your deployment_patterns
-
-tool_ecosystems = {
-    'ansible': {
-        'patterns': [
-            r'.*/?(ansible\.cfg)$',                               # Config
-            r'.*/?inventory(\.ya?ml)?$',                          # Inventory
-            r'.*/?(site|requirements)\.ya?ml$',                   # Site, requirements
-            r'.*/?(group|host)_vars/.*\.ya?ml$',                 # Variable files
-            r'.*/?roles/[^/]+/(tasks|defaults|handlers|vars)/.*\.ya?ml$',  # Role structure
-            r'.*/?playbook.*\.ya?ml$'                             # Generic playbook
-        ],
-        'confidence_weight': 0.8,
-        'coverage_weight': 0.9,
-        'related_languages': ['yaml', 'jinja']
-    },
-    'kubernetes': {
-        'patterns': [
-            r'.*/?(deployment|service|ingress|configmap|secret|statefulset|daemonset|job|cronjob|namespace|pod|pv|pvc|rbac|role|rolebinding|serviceaccount)\.ya?ml$',
-            r'.*/?(kustomization|values|chart)\.ya?ml$',
-            r'.*/?(charts|helm|templates)/.*\.ya?ml$'
-        ],
-        'confidence_weight': 0.9,
-        'coverage_weight': 0.8,
-        'related_languages': ['yaml', 'helm']
-    },
-    'terraform': {
-        'patterns': [
-            r'.*/?.*\.tf$',
-            r'.*/?.*\.tfvars$',
-            r'.*/?(terraform\.tfstate|\.tfplan)$',
-            r'.*/?(main|provider|variables|outputs|backend)\.tf$',
-            r'.*/?modules/.*/.*\.tf$'
-        ],
-        'confidence_weight': 0.95,
-        'coverage_weight': 0.9,
-        'related_languages': ['hcl', 'json']
-    },
-    'github_actions': {
-        'patterns': [
-            r'.*\.github/workflows/.*\.ya?ml$',
-            r'.*\.github/actions/.*\.ya?ml$'
-        ],
-        'confidence_weight': 1.0,
-        'coverage_weight': 0.8,
-        'related_languages': ['yaml', 'javascript', 'typescript']
-    },
-    'azure_pipelines': {
-        'patterns': [
-            r'.*/?(azure-pipelines|pipeline)\.ya?ml$',
-            r'.*/?azure-pipelines/.*\.ya?ml$'
-        ],
-        'confidence_weight': 0.8,
-        'coverage_weight': 0.7,
-        'related_languages': ['yaml']
-    },
-    'azure_resource_manager': {
-        'patterns': [
-            r'.*/?(azuredeploy|template|parameters)\.json$',
-            r'.*/?.*\.bicep$'
-        ],
-        'confidence_weight': 0.8,
-        'coverage_weight': 0.6,
-        'related_languages': ['json', 'bicep']
-    },
-    'azure_functions': {
-        'patterns': [
-            r'.*/?(host|function|proxies|local\.settings)\.json$'
-        ],
-        'confidence_weight': 0.6,
-        'coverage_weight': 0.5,
-        'related_languages': ['json', 'python', 'javascript', 'typescript', 'csharp', 'java']
-    },
-    'docker': {
-        'patterns': [
-            r'.*/?Dockerfile$',
-            r'.*/?docker-compose\.ya?ml$',
-            r'.*/?\.dockerignore$',
-            r'.*/?docker/.*'
-        ],
-        'confidence_weight': 0.95,
-        'coverage_weight': 0.7,
-        'related_languages': ['dockerfile', 'yaml']
-    },
-    'circleci': {
-        'patterns': [
-            r'.*\.circleci/config\.ya?ml$'
-        ],
-        'confidence_weight': 1.0,
-        'coverage_weight': 0.5,
-        'related_languages': ['yaml']
-    },
-    'travis': {
-        'patterns': [
-            r'.*/?\.travis\.ya?ml$'
-        ],
-        'confidence_weight': 1.0,
-        'coverage_weight': 0.4,
-        'related_languages': ['yaml']
-    },
-    'jenkins': {
-        'patterns': [
-            r'.*/?Jenkinsfile$'
-        ],
-        'confidence_weight': 1.0,
-        'coverage_weight': 0.6,
-        'related_languages': ['groovy']
-    }
-}

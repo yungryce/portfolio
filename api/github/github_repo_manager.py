@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import requests
 import time
 from typing import Dict, Any, List
 from .github_api import GitHubAPI
@@ -64,16 +65,18 @@ class GitHubRepoManager:
         endpoint = f"repos/{username}/{repo}"
         cache_key = self.cache._generate_cache_key(endpoint)
         cached = self.cache._get_from_cache(cache_key)
-        if cached is not None:
-            return cached
+        if cached and cached['status'] == 'valid':
+            return cached['data']
         repo_data = self.api.make_request('GET', endpoint)
         if not repo_data:
             return None
         if include_languages:
             lang_endpoint = f"repos/{username}/{repo}/languages"
             lang_cache_key = self.cache._generate_cache_key(lang_endpoint)
-            lang_data = self.cache._get_from_cache(lang_cache_key)
-            if lang_data is None:
+            lang_cached = self.cache._get_from_cache(lang_cache_key)
+            if lang_cached and lang_cached['status'] == 'valid':
+                lang_data = lang_cached['data']  # Extract 'data' from the response
+            else:
                 lang_data = self.api.make_request('GET', lang_endpoint)
                 self.cache._save_to_cache(lang_cache_key, lang_data)
             repo_data['languages'] = lang_data or {}
@@ -96,8 +99,8 @@ class GitHubRepoManager:
         params = {'sort': 'updated', 'per_page': per_page}
         cache_key = self.cache._generate_cache_key(endpoint, params)
         cached = self.cache._get_from_cache(cache_key)
-        if cached is not None:
-            return cached
+        if cached and cached['status'] == 'valid':
+            return cached['data']
         repos = self.api.make_request('GET', endpoint, params=params)
         if not repos:
             return []
@@ -105,10 +108,16 @@ class GitHubRepoManager:
             for repo in repos:
                 lang_endpoint = f"repos/{username}/{repo['name']}/languages"
                 lang_cache_key = self.cache._generate_cache_key(lang_endpoint)
-                lang_data = self.cache._get_from_cache(lang_cache_key)
-                if lang_data is None:
-                    lang_data = self.api.make_request('GET', lang_endpoint)
-                    self.cache._save_to_cache(lang_cache_key, lang_data)
+                lang_cached = self.cache._get_from_cache(lang_cache_key)
+                if lang_cached and lang_cached['status'] == 'valid':
+                    lang_data = lang_cached['data']
+                else:
+                    try:
+                        lang_data = self.api.make_request('GET', lang_endpoint)
+                        self.cache._save_to_cache(lang_cache_key, lang_data)
+                    except requests.exceptions.RequestException as e:
+                        logger.error(f"Failed to fetch languages for {repo['name']}: {e}")
+                        lang_data = {}
                 repo['languages'] = lang_data or {}
         self.cache._save_to_cache(cache_key, repos)
         return repos
@@ -137,9 +146,9 @@ class GitHubRepoManager:
         cache_key = f"repos_with_context_{username}{cache_suffix}"
         
         cached = self.cache._get_from_cache(cache_key)
-        if cached:
-            logger.info(f"Using cached data ({len(cached)} repositories)")
-            return cached
+        if cached and cached['status'] == 'valid':  # Check cache status
+            logger.info(f"Using cached data ({len(cached['data'])} repositories)")  # Extract 'data'
+            return cached['data']
         
         # Get all repositories with language data
         all_repos = self.get_all_repos_metadata(username, include_languages=include_languages)
@@ -188,7 +197,7 @@ class GitHubRepoManager:
                 repos_with_context.append(trimmed_repo)
         
         # Cache the enhanced result
-        self.cache._save_to_cache(cache_key, repos_with_context, ttl=3600)  # 1 hour cache
+        self.cache._save_to_cache(cache_key, repos_with_context, ttl=None)  # 1 hour cache
         
         logger.info(f"Enhanced {len(repos_with_context)} repositories with context for {username}")
 

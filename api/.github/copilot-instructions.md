@@ -1,83 +1,143 @@
+````markdown
 # Copilot Instructions for Portfolio API
 
-## Project Overview
-This backend powers a portfolio website using Azure Functions, Python, and AI. It integrates GitHub data and Groq (Llama 3.1) for context-rich, secure, and scalable portfolio analysis. The design emphasizes modularity, caching, and context enrichment for high-performance AI queries.
+## Overview
+This repository contains an Azure Functions-based backend API for a portfolio website. It integrates GitHub data and AI-powered portfolio assistance. The project is structured to ensure modularity, scalability, and maintainability.
 
-## Architecture & Major Components
-- **Azure Functions Entrypoint**: `function_app.py` defines HTTP endpoints and orchestrates request handling. All requests flow through this file.
-- **GitHub Integration** (`github/`):
-  - `github_api.py`: Handles direct GitHub API requests.
-  - `github_repo_manager.py`: Manages repository metadata, context extraction, and caching. Use `get_all_repos_with_context` for all context-rich operations (deprecated: `get_all_repos_with_files`).
-  - `github_file_manager.py`: Fetches file contents and directory listings from GitHub.
-  - `cache_client.py`: Implements caching for API responses and file data. All GitHub data access should use this cache layer.
-- **AI Orchestration** (`ai/`):
-  - `ai_assistant.py`: Main orchestrator for repository scoring, context building, and AI query processing.
-  - `ai_context_builder.py`: Builds tiered context for AI, manages Groq API calls, and enforces token limits. See `build_tiered_context`, `build_ai_query_context`, and `process_query_with_metadata` for core logic.
-  - `semantic_scorer.py`, `type_analyzer.py`, `repo_context_builder.py`: Support context enrichment and scoring.
-- **Helpers**: `fa_helpers.py` and `data_filter.py` provide response formatting, validation, and language extraction utilities. Always use `create_error_response` and `create_success_response` for HTTP responses.
+## Architecture
+### Key Components
+- **Azure Functions**: Provides the serverless backend for API endpoints.
+- **Durable Functions**: Orchestrates parallel processing of GitHub repositories.
+- **GitHub Integration**: Fetches repository data using secure token authentication.
+- **Cache Management**: Implements sophisticated caching for GitHub data with TTL and invalidation.
+- **AI Assistant**: Processes natural language queries using Groq API and repository analysis.
 
-## Data Flow
-1. HTTP request received by Azure Function endpoint (`function_app.py`).
-2. GitHub managers are initialized per request (see `_get_github_managers`).
-3. Repository data is fetched, cached, and contextually enriched (including `.repo-context.json`, file listings, and scoring).
-4. AI queries are processed using Groq API (Llama 3.1) with tiered, token-limited context (see `ai/ai_context_builder.py`).
-5. Structured responses are returned to the frontend.
+### Data Flow
+1. HTTP requests are received by Azure Functions.
+2. GitHub data is fetched from cache if valid, otherwise from GitHub API.
+3. Durable Functions orchestrate parallel processing of repository data.
+4. AI components analyze repository content and process user queries.
+5. Responses are returned to the frontend with appropriate caching headers.
 
-## Key Patterns & Conventions
-- **Caching**: All GitHub API and file responses must use `GitHubCache` (see `github/cache_client.py`).
-- **Context Enrichment**: Always use `get_all_repos_with_context` for repo context. Context is built from `.repo-context.json`, file listings, and scoring metadata.
-- **Logging**: Use the `portfolio.api` logger. Logs are written to `api_function_app.log` (configurable via `API_LOG_FILE` env var).
-- **Environment Variables**: Secrets (GitHub token, Groq API key) are loaded from environment variables. Never expose tokens in responses or logs.
-- **Error Handling**: Use `create_error_response` and `create_success_response` from `fa_helpers.py` for all HTTP responses.
-- **AI Query Processing**: Use `ai/ai_context_builder.py` for all Groq API calls. Enforce token and character limits using `ensure_context_size`.
-- **Deprecation**: Do not use `get_all_repos_with_files` (deprecated).
+### Manager Pattern
+The codebase uses a manager pattern for dependency injection:
+```python
+def _get_github_managers(username=None):
+    api = GitHubAPI(token=github_token, username=username)
+    cache = GitHubCache(use_cache=True)
+    file_manager = GitHubFileManager(api, cache)
+    repo_manager = GitHubRepoManager(api, cache, file_manager, username=username)
+    return api, cache, file_manager, repo_manager
+```
+
+## Durable Functions Orchestration
+The API uses Azure Durable Functions to orchestrate parallel processing of GitHub repositories:
+
+1. **Orchestrator Function**: `repo_context_orchestrator` coordinates the workflow.
+2. **Activity Functions**:
+   - `get_stale_repos_activity`: Identifies repositories needing processing.
+   - `fetch_repo_context_bundle_activity`: Processes a single repository.
+   - `merge_repo_results_activity`: Combines fresh and cached data.
+
+Example orchestration pattern:
+```python
+@app.orchestration_trigger(context_name="context")
+def repo_context_orchestrator(context):
+    username = context.get_input()
+    stale_repos_data = yield context.call_activity('get_stale_repos_activity', username)
+    tasks = []
+    for repo_metadata in stale_repos_data['stale_repos']:
+        tasks.append(context.call_activity('fetch_repo_context_bundle_activity', {...}))
+    stale_results = yield context.task_all(tasks)
+    merged_results = yield context.call_activity('merge_repo_results_activity', {...})
+    return merged_results
+```
+
+## Caching Strategy
+The API implements a sophisticated caching mechanism:
+
+1. **Cache Levels**:
+   - Bundle cache: Complete set of repository data
+   - Individual repository cache: Data for single repositories
+   
+2. **Cache Operations**:
+   - Cache generation with TTL (12-24 hours)
+   - Cache validation before use
+   - Cache cleanup via timer trigger
+   - Force refresh option
+
+Example cache check:
+```python
+if not force_refresh:
+    cache_entry = cache._get_from_cache(bundle_cache_key)
+    if cache_entry['status'] == 'valid':
+        return create_success_response({
+            "status": "cached",
+            "message": "Using cached repository data",
+            # Additional metadata...
+        })
+```
+
+## AI Components
+The API includes AI capabilities for repository analysis:
+
+1. **Query Processing**: `AIAssistant.process_query_results` handles natural language queries.
+2. **File Type Analysis**: `FileTypeAnalyzer` categorizes repository files.
+3. **Repository Difficulty Analysis**: Calculates difficulty scores for repositories.
 
 ## Developer Workflows
-- **Local Development**:
-  - Use Azure Functions Core Tools: `func start` (requires local.settings.json for env vars).
-  - Set environment variables in `local.settings.json`.
-- **Testing**:
-  - Main tests: `tests/test_new_architecture.py`. Run with `pytest` from the repo root.
-- **Dependencies**:
-  - All Python dependencies are in `requirements.txt`. Do not manually add `azure-functions-worker`.
-  - For CPU-only PyTorch, use the pinned wheel URL in `requirements.txt`.
+### Local Development
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Set up environment variables:
+   ```bash
+   export GITHUB_TOKEN=your_github_token
+   export GROQ_API_KEY=your_groq_api_key
+   ```
+3. Run the Azure Functions locally:
+   ```bash
+   func start
+   ```
+
+### Testing
+`./starter.sh` script runs tests:
+```bash
+
+## Error Handling Pattern
+All endpoints follow a consistent error handling pattern:
+```python
+try:
+    # Business logic
+    return create_success_response(result)
+except Exception as e:
+    logger.error(f"Error description: {str(e)}")
+    return create_error_response(f"User-facing message: {str(e)}", status_code)
+```
+
+## Logging
+The API uses structured logging throughout:
+```python
+logger = logging.getLogger('portfolio.api')
+logger.info(f"Meaningful message with context: {variable}")
+logger.error(f"Error message: {str(e)}", exc_info=True)
+```
 
 ## Integration Points
-- **External APIs**:
-  - GitHub API: All repository and file data.
-  - Groq API: All AI-powered query processing (see `ai/ai_context_builder.py`).
-- **Azure Services**:
-  - Azure Functions: Main compute platform.
-  - Azure Storage, Azure Monitor: Logging and telemetry.
+### GitHub API
+- Authenticated via personal access token in environment variables.
+- Rate limit handling and error management included.
 
-## Project-Specific Examples
-- Fetch all repositories with context:
-  ```python
-  repo_manager.get_all_repos_with_context(username="myuser")
-  ```
-- Process an AI query:
-  ```python
-  ai_assistant = AIAssistant(username="myuser", repo_manager=repo_manager)
-  result = ai_assistant.process_query(query="Show me my Python projects")
-  ```
-- Fetch a file from a repo:
-  ```python
-  repo_manager.get_file_content(repo_name="myrepo", path="README.md")
-  ```
+### Groq API
+- Used for AI query processing with Llama 3.1 model.
+- API key stored in environment variables.
 
-## Directory References
-- `function_app.py`: Azure Functions entrypoint and routing
-- `github/`: GitHub API, repo management, caching, file access
-- `ai/`: AI orchestration, context building, scoring
-- `requirements.txt`: Python dependencies
-- `local.settings.json`: Local environment config
-- `Samples/`: Reference documentation and schema templates
+## Cache Management
+- Periodic cleanup via timer trigger (`cache_cleanup_timer`).
+- Manual cleanup endpoint (`/github/cache/cleanup`).
+- Cache statistics endpoint (`/github/cache/stats`).
+````
 
-## Additional Notes
-- Follow the README.md template in `Samples/doc-schema/project/README.md` for documentation generation.
-- For infrastructure or context extraction, see `Samples/repo-context/README.md` and `PROJECT-MANIFEST.md`.
-- Always use structured logging and cache responses for performance.
-
----
-
-*Ask for feedback if any section is unclear, incomplete, or missing critical project knowledge.*
+## Sentence Transformer
+...
