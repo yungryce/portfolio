@@ -1,4 +1,6 @@
 from typing import Dict, Any, Union, List, Set, Tuple
+from sentence_transformers import SentenceTransformer, InputExample, losses
+from torch.utils.data import DataLoader
 import logging
 import re
 from ai.extractor import flatten_repo_context_to_natural_language
@@ -26,7 +28,9 @@ class SemanticScorer:
     Uses sentence-transformers (MiniLM) for embedding-based similarity.
     """
     def __init__(self, model_path: str):
+        self.model_path = model_path
         self.model = SentenceTransformer(model_path)
+
 
     def extract_technical_terms_from_query(self, query: str) -> Tuple[List[str], Dict[str, float]]:
         """
@@ -61,6 +65,7 @@ class SemanticScorer:
         domain_matches = [term for term in technical_terms_structured['domain'] if term in query_lower]
         if domain_matches:
             extracted_terms.extend(domain_matches)
+        
             term_categories['domain'] = len(domain_matches) / len(query_tokens) if query_tokens else 0
         
         # 3. Check for technical keywords

@@ -6,8 +6,7 @@ from ai.semantic_scorer import SemanticScorer
 from ai.type_analyzer import FileTypeAnalyzer
 from ai.repo_context_builder import RepoContextBuilder
 from ai.ai_context_builder import AIContextBuilder
-from data_filter import extract_language_terms
-from .helpers import extract_context_terms
+from model.fine_tuning import SemanticModel
 
 logger = logging.getLogger('portfolio.api')
 
@@ -80,6 +79,30 @@ class AIAssistant:
                     "total_repositories": 0,
                     "query": query
                 }
+                
+            cache_key = "fine_tuned_model"
+            cache_result = self.cache_client._get_from_cache(cache_key)
+            if cache_result['status'] != 'valid':
+                SemanticModel = SemanticModel()
+                logger.info("Fine-tuned model not found in cache. Running fine-tuning process...")
+                
+                # Generate training pairs
+                training_pairs = []
+                for repo_context in repo_context_results:
+                    training_pairs.extend(generate_semantic_training_pairs(repo_context))
+                
+                # Fine-tune the model
+                fine_tuned_model_path = "/tmp/fine_tuned_model"
+                self.semantic_scorer.fine_tune_model(training_pairs, self.semantic_scorer.model_path, fine_tuned_model_path)
+                
+                # Save fine-tuned model to cache
+                self.cache_client._save_to_cache(cache_key, {"model_path": fine_tuned_model_path}, ttl=86400)  # Cache for 24 hours
+                logger.info("Fine-tuned model saved to cache.")
+                
+            # Load fine-tuned model
+            fine_tuned_model_path = cache_result.get('data', {}).get('model_path', "/tmp/fine_tuned_model")
+            self.semantic_scorer.load_model(fine_tuned_model_path)
+            
             scored_repos = []
             for repo in repo_context_results:
                 score_metadata = self.calculate_repo_scores(repo, query)

@@ -18,7 +18,7 @@ class SemanticModel:
         """
         logger.info(f"Initializing SemanticModel with model path: {model_path}")
         self.model = SentenceTransformer(model_path)
-
+        
     def fine_tune_model(self, training_pairs: List[Tuple[str, str, float]], output_path: str):
         """
         Fine-tunes the Sentence Transformer model using semantic training pairs.
@@ -44,7 +44,7 @@ class SemanticModel:
             logger.info(f"Fine-tuned model saved to: {output_path}")
         except Exception as e:
             logger.error(f"Error during fine-tuning: {str(e)}", exc_info=True)
-
+        
     def flatten_repo_context_to_natural_language(self, repo_context: Dict) -> str:
         """
         Converts the repository context bundle (including .repo-context.json, README.md,
@@ -60,7 +60,7 @@ class SemanticModel:
         logger.debug("Flattening repository context into natural language.")
         lines = []
 
-        # Extract structured fields
+        # Extract structured fields from repo-context.json
         identity = repo_context.get("repoContext", {}).get("project_identity", {})
         tech_stack = repo_context.get("repoContext", {}).get("tech_stack", {})
         skills = repo_context.get("repoContext", {}).get("skill_manifest", {})
@@ -71,14 +71,47 @@ class SemanticModel:
         # Build natural language representation
         if identity.get('name'):
             lines.append(f"Project Name: {identity['name']}.")
+        if identity.get('description'):
+            lines.append(f"Description: {identity['description']}.")
+        if identity.get('type'):
+            lines.append(f"Type: {identity['type']}.")
+        if identity.get('scope'):
+            lines.append(f"Scope: {identity['scope']}.")
+
         if tech_stack.get("primary"):
             lines.append(f"Primary technologies include {', '.join(tech_stack['primary'])}.")
+        if tech_stack.get("secondary"):
+            lines.append(f"Secondary tools include {', '.join(tech_stack['secondary'])}.")
+        if tech_stack.get("key_libraries"):
+            lines.append(f"Key libraries: {', '.join(tech_stack['key_libraries'])}.")
+        if tech_stack.get("development_tools"):
+            lines.append(f"Development tools used: {', '.join(tech_stack['development_tools'])}.")
+
         if skills.get("technical"):
             lines.append(f"Technical skills demonstrated include {', '.join(skills['technical'])}.")
+        if skills.get("domain"):
+            lines.append(f"Domain-specific knowledge areas: {', '.join(skills['domain'])}.")
+        if skills.get("competency_level"):
+            lines.append(f"Competency level: {skills['competency_level']}.")
+
         if outcomes.get("deliverables"):
             lines.append(f"Deliverables include {', '.join(outcomes['deliverables'])}.")
+        if outcomes.get("skills_acquired"):
+            lines.append(f"Skills acquired: {', '.join(outcomes['skills_acquired'])}.")
+        if outcomes.get("primary"):
+            lines.append(f"Primary outcomes: {', '.join(outcomes['primary'])}.")
+
+        if assessment.get("difficulty"):
+            lines.append(f"Difficulty level: {assessment['difficulty']}.")
+        if assessment.get("evaluation_criteria"):
+            lines.append(f"Evaluation criteria: {', '.join(assessment['evaluation_criteria'])}.")
+
         if metadata.get("tags"):
-            lines.append(f"Tagged with: {', '.join(metadata['tags'])}.")
+            lines.append(f"Tags: {', '.join(metadata['tags'])}.")
+        if metadata.get("maintainer"):
+            lines.append(f"Maintainer: {metadata['maintainer']}.")
+        if metadata.get("license"):
+            lines.append(f"License: {metadata['license']}.")
 
         # Add README, SKILLS-INDEX, and ARCHITECTURE content
         for key in ["readme", "skills_index", "architecture"]:
@@ -107,18 +140,40 @@ class SemanticModel:
         # Extract relevant fields
         identity = repo_context.get("repoContext", {}).get("project_identity", {})
         tech_stack = repo_context.get("repoContext", {}).get("tech_stack", {})
+        skills = repo_context.get("repoContext", {}).get("skill_manifest", {})
+        outcomes = repo_context.get("repoContext", {}).get("outcomes", {})
         readme = repo_context.get("readme", "")
+        skills_index = repo_context.get("skills_index", "")
         architecture = repo_context.get("architecture", "")
 
-        # Generate pairs
-        if architecture:
-            pairs.append(("What is the main architecture of this project?", architecture, 1.0))
+        # Generate pairs based on schema fields
         if identity.get("name"):
-            pairs.append((f"Describe the architecture of {identity['name']}.", architecture, 1.0))
+            pairs.append((f"What is {identity['name']}?", identity.get("description", ""), 1.0))
+        if identity.get("description"):
+            pairs.append(("Summarize this project.", identity["description"], 1.0))
+
         if tech_stack.get("primary"):
             pairs.append(("Which technologies are used in this project?", ", ".join(tech_stack["primary"]), 1.0))
+        if tech_stack.get("secondary"):
+            pairs.append(("What supporting tools are used?", ", ".join(tech_stack["secondary"]), 0.8))
+
+        if skills.get("technical"):
+            pairs.append(("What technical skills are demonstrated?", ", ".join(skills["technical"]), 1.0))
+        if skills.get("domain"):
+            pairs.append(("What domain-specific knowledge areas are covered?", ", ".join(skills["domain"]), 1.0))
+
+        if outcomes.get("deliverables"):
+            pairs.append(("What are the deliverables of this project?", ", ".join(outcomes["deliverables"]), 1.0))
+        if outcomes.get("skills_acquired"):
+            pairs.append(("What skills were acquired?", ", ".join(outcomes["skills_acquired"]), 1.0))
+
+        # Include README, SKILLS-INDEX, and ARCHITECTURE content
         if readme:
-            pairs.append(("Summarize this project.", readme, 1.0))
+            pairs.append(("Summarize the README content.", readme, 1.0))
+        if skills_index:
+            pairs.append(("List the core skills demonstrated in this project.", skills_index, 1.0))
+        if architecture:
+            pairs.append(("Describe the architecture of this project.", architecture, 1.0))
 
         logger.debug(f"Generated {len(pairs)} training pairs.")
         return pairs
