@@ -1,4 +1,4 @@
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Any
 from sentence_transformers import SentenceTransformer, InputExample, losses
 from torch.utils.data import DataLoader
 import logging
@@ -44,84 +44,6 @@ class SemanticModel:
             logger.info(f"Fine-tuned model saved to: {output_path}")
         except Exception as e:
             logger.error(f"Error during fine-tuning: {str(e)}", exc_info=True)
-        
-    def flatten_repo_context_to_natural_language(self, repo_context: Dict) -> str:
-        """
-        Converts the repository context bundle (including .repo-context.json, README.md,
-        SKILLS-INDEX.md, ARCHITECTURE.md) into a natural-language-like paragraph
-        for sentence-transformer embedding and fine-tuning.
-
-        Args:
-            repo_context (Dict): Repository context bundle.
-
-        Returns:
-            str: Flattened natural-language representation of the repository context.
-        """
-        logger.debug("Flattening repository context into natural language.")
-        lines = []
-
-        # Extract structured fields from repo-context.json
-        identity = repo_context.get("repoContext", {}).get("project_identity", {})
-        tech_stack = repo_context.get("repoContext", {}).get("tech_stack", {})
-        skills = repo_context.get("repoContext", {}).get("skill_manifest", {})
-        outcomes = repo_context.get("repoContext", {}).get("outcomes", {})
-        metadata = repo_context.get("repoContext", {}).get("metadata", {})
-        assessment = repo_context.get("repoContext", {}).get("assessment", {})
-
-        # Build natural language representation
-        if identity.get('name'):
-            lines.append(f"Project Name: {identity['name']}.")
-        if identity.get('description'):
-            lines.append(f"Description: {identity['description']}.")
-        if identity.get('type'):
-            lines.append(f"Type: {identity['type']}.")
-        if identity.get('scope'):
-            lines.append(f"Scope: {identity['scope']}.")
-
-        if tech_stack.get("primary"):
-            lines.append(f"Primary technologies include {', '.join(tech_stack['primary'])}.")
-        if tech_stack.get("secondary"):
-            lines.append(f"Secondary tools include {', '.join(tech_stack['secondary'])}.")
-        if tech_stack.get("key_libraries"):
-            lines.append(f"Key libraries: {', '.join(tech_stack['key_libraries'])}.")
-        if tech_stack.get("development_tools"):
-            lines.append(f"Development tools used: {', '.join(tech_stack['development_tools'])}.")
-
-        if skills.get("technical"):
-            lines.append(f"Technical skills demonstrated include {', '.join(skills['technical'])}.")
-        if skills.get("domain"):
-            lines.append(f"Domain-specific knowledge areas: {', '.join(skills['domain'])}.")
-        if skills.get("competency_level"):
-            lines.append(f"Competency level: {skills['competency_level']}.")
-
-        if outcomes.get("deliverables"):
-            lines.append(f"Deliverables include {', '.join(outcomes['deliverables'])}.")
-        if outcomes.get("skills_acquired"):
-            lines.append(f"Skills acquired: {', '.join(outcomes['skills_acquired'])}.")
-        if outcomes.get("primary"):
-            lines.append(f"Primary outcomes: {', '.join(outcomes['primary'])}.")
-
-        if assessment.get("difficulty"):
-            lines.append(f"Difficulty level: {assessment['difficulty']}.")
-        if assessment.get("evaluation_criteria"):
-            lines.append(f"Evaluation criteria: {', '.join(assessment['evaluation_criteria'])}.")
-
-        if metadata.get("tags"):
-            lines.append(f"Tags: {', '.join(metadata['tags'])}.")
-        if metadata.get("maintainer"):
-            lines.append(f"Maintainer: {metadata['maintainer']}.")
-        if metadata.get("license"):
-            lines.append(f"License: {metadata['license']}.")
-
-        # Add README, SKILLS-INDEX, and ARCHITECTURE content
-        for key in ["readme", "skills_index", "architecture"]:
-            content = repo_context.get(key)
-            if content:
-                lines.append(f"{key.capitalize()}: {content.strip()}")
-
-        flattened_context = "\n".join(lines)
-        logger.debug(f"Flattened context: {flattened_context[:500]}")  # Log first 500 characters
-        return flattened_context
 
     def generate_semantic_training_pairs(self, repo_context: Dict) -> List[Tuple[str, str, float]]:
         """
@@ -177,3 +99,165 @@ class SemanticModel:
 
         logger.debug(f"Generated {len(pairs)} training pairs.")
         return pairs
+        
+    def load_model_from_storage(self, model_info: Dict[str, Any]) -> bool:
+        """
+        Loads a fine-tuned model from Azure Blob Storage.
+        
+        Args:
+            model_info: Dictionary containing model storage information
+            
+        Returns:
+            bool: True if model was successfully loaded, False otherwise
+        """
+        import tempfile
+        import zipfile
+        import os
+        import shutil
+        from azure.storage.blob import BlobServiceClient
+        
+        try:
+            # Extract model storage information
+            container = model_info.get("container", "ai-models")
+            blob_name = model_info.get("blob_name")
+            
+            if not blob_name:
+                logger.error("Missing blob_name in model_info")
+                return False
+            
+            # Download model from Azure Blob Storage
+            connection_string = os.getenv('AzureWebJobsStorage')
+            if not connection_string:
+                logger.error("AzureWebJobsStorage connection string not found")
+                return False
+                
+            blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+            container_client = blob_service_client.get_container_client(container)
+            blob_client = container_client.get_blob_client(blob_name)
+            
+            # Create a temporary directory to extract the model
+            temp_dir = tempfile.mkdtemp()
+            zip_path = os.path.join(temp_dir, "model.zip")
+            
+            # Download the blob
+            with open(zip_path, "wb") as download_file:
+                download_file.write(blob_client.download_blob().readall())
+            
+            # Extract the zip file
+            model_dir = os.path.join(temp_dir, "model")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(model_dir)
+            
+            # Load the model
+            self.model = SentenceTransformer(model_dir)
+            logger.info(f"Successfully loaded model from {container}/{blob_name}")
+            
+            # Cleanup temporary files
+            shutil.rmtree(temp_dir)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error loading model from storage: {str(e)}", exc_info=True)
+            return False
+        
+    def train_from_repositories(self, repo_contexts: List[Dict], output_path: str) -> bool:
+        """
+        Trains a semantic model using a list of repository contexts and persists it to Azure Blob Storage.
+        
+        Args:
+            repo_contexts (List[Dict]): List of repository context bundles
+            output_path (str): Path identifier for the model (used for both temp storage and blob name)
+        
+        Returns:
+            bool: True if training was successful, False otherwise
+        """
+        import uuid
+        import zipfile
+        import tempfile
+        import os
+        from azure.storage.blob import BlobServiceClient, ContentSettings
+        
+        logger.info(f"Training semantic model from {len(repo_contexts)} repositories")
+        
+        # Generate training pairs from all repositories
+        training_pairs = []
+        for repo_context in repo_contexts:
+            repo_name = repo_context.get('name', 'Unknown')
+            logger.debug(f"Generating training pairs for repository: {repo_name}")
+            try:
+                pairs = self.generate_semantic_training_pairs(repo_context)
+                training_pairs.extend(pairs)
+                logger.debug(f"Generated {len(pairs)} training pairs for {repo_name}")
+            except Exception as e:
+                logger.error(f"Error generating training pairs for {repo_name}: {str(e)}")
+                continue
+        
+        # Fine-tune the model if we have training pairs
+        if not training_pairs:
+            logger.warning("No training pairs generated, skipping fine-tuning")
+            return False
+        
+        try:
+            # Create a temporary directory for the model
+            temp_dir = tempfile.mkdtemp()
+            temp_model_path = os.path.join(temp_dir, "model")
+            
+            # Fine-tune the model and save to temp location
+            self.fine_tune_model(training_pairs, temp_model_path)
+            logger.info(f"Successfully trained model with {len(training_pairs)} pairs to temporary location")
+            
+            # Create a zip file of the model
+            model_id = os.path.basename(output_path)
+            zip_path = os.path.join(temp_dir, f"{model_id}.zip")
+            
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(temp_model_path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, temp_model_path)
+                        zipf.write(file_path, arcname)
+            
+            # Upload zip to Azure Blob Storage
+            connection_string = os.getenv('AzureWebJobsStorage')
+            if not connection_string:
+                logger.error("AzureWebJobsStorage connection string not found")
+                return False
+                
+            blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+            
+            # Use a dedicated container for models
+            container_name = "ai-models"
+            container_client = blob_service_client.get_container_client(container_name)
+            
+            # Create container if it doesn't exist
+            try:
+                container_client.create_container()
+                logger.info(f"Created models container: {container_name}")
+            except Exception as e:
+                if "ContainerAlreadyExists" not in str(e):
+                    logger.warning(f"Container creation issue: {str(e)}")
+            
+            # Upload the model zip file to blob storage
+            blob_name = f"{model_id}.zip"
+            blob_client = container_client.get_blob_client(blob_name)
+            
+            with open(zip_path, "rb") as data:
+                blob_client.upload_blob(
+                    data, 
+                    overwrite=True,
+                    content_settings=ContentSettings(
+                        content_type='application/zip',
+                        content_encoding='utf-8'
+                    )
+                )
+                
+            logger.info(f"Model uploaded to Azure Blob Storage: container={container_name}, blob={blob_name}")
+            
+            # Cleanup temporary files
+            import shutil
+            shutil.rmtree(temp_dir)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error during model training and storage: {str(e)}", exc_info=True)
+            return False

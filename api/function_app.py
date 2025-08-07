@@ -119,6 +119,7 @@ def repo_context_orchestrator(context):
     
     if not stale_repos_data['stale_repos']:
         logger.info(f"No stale repositories found for user '{username}', returning cached bundle")
+        logger.info(f"Cached bundle contains {len(stale_repos_data['cached_bundle'])} repositories")
         return stale_repos_data['cached_bundle']
     
     logger.info(f"Processing {len(stale_repos_data['stale_repos'])} stale repositories for user '{username}'")
@@ -173,6 +174,7 @@ def get_stale_repos_activity(activityContext):
     
     all_repos_metadata = repo_manager.get_all_repos_metadata(include_languages=True)
     stale_repos = []
+    valid_repos = []
     for repo_metadata in all_repos_metadata:
         repo_name = repo_metadata.get('name')
         if not repo_name:
@@ -183,14 +185,16 @@ def get_stale_repos_activity(activityContext):
         
         if cached_repo_data['status'] != 'valid':
             stale_repos.append(repo_metadata)
-    
-    logger.info(f"Found {len(stale_repos)} stale repositories out of {len(all_repos_metadata)} total for user '{username}'")
+        else:
+            valid_repos.append(repo_metadata)
+
+    logger.info(f"Found {len(stale_repos)} stale and {len(valid_repos)} valid repositories out of {len(all_repos_metadata)} for '{username}'")
     logger.debug(f"Stale repositories type: {type(stale_repos)} - Cached bundle type: {type(cached_bundle['data'])}")
     logger.debug(f"{json.dumps(cached_bundle, indent=2)}")
 
     return {
         'stale_repos': stale_repos,
-        'cached_bundle': cached_data  # Always return the data array, never the whole cache object
+        'cached_bundle': valid_repos  # Always return the data array, never the whole cache object
     }
 
 @app.activity_trigger(input_name="activityContext")
@@ -215,15 +219,20 @@ def fetch_repo_context_bundle_activity(activityContext):
             repo_context = json.loads(repo_context)
         except Exception:
             repo_context = {}
+    else:
+        repo_context = {}
 
     # Fetch additional documentation files as plain text
-    readme_content = repo_manager.get_file_content(repo_name=repo_name, path='README.md', username=username)
-    skills_index_content = repo_manager.get_file_content(repo_name=repo_name, path='SKILLS-INDEX.md', username=username)
-    architecture_content = repo_manager.get_file_content(repo_name=repo_name, path='ARCHITECTURE.md', username=username)
+    readme_content = repo_manager.get_file_content(repo_name=repo_name, path='README.md', username=username) or ""
+    skills_index_content = repo_manager.get_file_content(repo_name=repo_name, path='SKILLS-INDEX.md', username=username) or ""
+    architecture_content = repo_manager.get_file_content(repo_name=repo_name, path='ARCHITECTURE.md', username=username) or ""
 
     # Fetch file types using AI Assistant logic
     file_types = repo_manager.get_all_file_types(repo_name, username=username)
     categorized_types = file_type_analyzer.analyze_repository_files(file_types)
+    
+    # Flag for repositories with complete documentation
+    has_documentation = bool(repo_context) and bool(readme_content)
 
     # Aggregate results
     result = {
@@ -235,7 +244,8 @@ def fetch_repo_context_bundle_activity(activityContext):
         "languages": repo_metadata.get("languages", {}) if repo_metadata else {},
         "readme": readme_content,
         "skills_index": skills_index_content,
-        "architecture": architecture_content
+        "architecture": architecture_content,
+        "has_documentation": has_documentation,
     }
     
     # Save aggregated data to cache
