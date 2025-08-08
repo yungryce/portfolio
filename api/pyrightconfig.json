@@ -1,0 +1,17 @@
+{
+  "venvPath": "./",
+  "venv": "venv",
+  "reportMissingImports": false,
+  "typeCheckingMode": "basic",
+  "exclude": [
+    "**/venv",
+    "**/.venv",
+    "**/__pycache__",
+    "venv/lib/python3.11/site-packages/torch",
+    "venv/lib/python3.11/site-packages/transformers",
+    "venv/lib/python3.11/site-packages/scipy"
+  ],
+  "ignore": [
+    "venv/**"
+  ]
+}

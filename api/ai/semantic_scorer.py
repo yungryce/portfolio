@@ -3,7 +3,7 @@ from sentence_transformers import SentenceTransformer, InputExample, losses
 from torch.utils.data import DataLoader
 import logging
 import re
-from sentence_transformers import SentenceTransformer
+from model.fine_tuning import SemanticModel
 from sklearn.metrics.pairwise import cosine_similarity
 from data_filter import extract_language_terms, technical_terms_structured
         
@@ -26,10 +26,14 @@ class SemanticScorer:
     Scores repositories using semantic similarity between user query and repo context.
     Uses sentence-transformers (MiniLM) for embedding-based similarity.
     """
-    def __init__(self, model_path: str):
-        self.model_path = model_path
-        self.model = SentenceTransformer(model_path)
+    def __init__(self, semantic_model: SemanticModel):
+        """
+        Initializes the SemanticScorer with a SemanticModel instance.
 
+        Args:
+            semantic_model (SemanticModel): The SemanticModel instance providing the model.
+        """
+        self.semantic_model = semantic_model
 
     def flatten_repo_context_to_natural_language(self, repo_context: Dict) -> str:
         """
@@ -216,14 +220,17 @@ class SemanticScorer:
 
         # Enrich the query with domain terms
         enriched_query = self.enrich_query_with_domain(query)
+        
+        # Get the current model (tuned or base)
+        model = self.semantic_model.get_model()
 
         # Semantic similarity between original query and context
-        query_emb = self.model.encode([enriched_query])
-        context_emb = self.model.encode([context_str])
+        query_emb = model.encode([enriched_query])
+        context_emb = model.encode([context_str])
         semantic_score_query_context = cosine_similarity(query_emb, context_emb)[0][0]
 
         # Semantic similarity between enriched query and context
-        enriched_query_emb = self.model.encode([enriched_query])
+        enriched_query_emb = model.encode([enriched_query])
         semantic_score_enriched_context = cosine_similarity(enriched_query_emb, context_emb)[0][0]
 
         # Aggregate scores with dynamic weighting

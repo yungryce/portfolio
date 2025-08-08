@@ -1,4 +1,5 @@
 from typing import Tuple, List, Dict, Any
+from github.cache_client import GitHubCache
 from sentence_transformers import SentenceTransformer, InputExample, losses
 from torch.utils.data import DataLoader
 import logging
@@ -9,97 +10,100 @@ class SemanticModel:
     """
     A class to handle semantic scoring using a fine-tuned Sentence Transformer model.
     """
-    def __init__(self, model_path: str):
+    def __init__(self):
         """
         Initializes the SemanticModel with a pretrained Sentence Transformer model.
 
         Args:
             model_path (str): Path to the pretrained Sentence Transformer model.
         """
-        logger.info(f"Initializing SemanticModel with model path: {model_path}")
-        self.model = SentenceTransformer(model_path)
+        logger.info(f"Initializing SemanticModel")
+        self.model = None
+        self.cache_client = GitHubCache(use_cache=True)
+
+    def _ensure_base_model(self):
+        """
+        Lazily loads the base sentence transformer if not already loaded.
+        """
+        if self.model is None:
+            try:
+                logger.info("Loading base sentence transformer model (all-MiniLM-L6-v2)")
+                self.model = SentenceTransformer("all-MiniLM-L6-v2")
+            except Exception as e:
+                logger.error(f"Failed to load base model: {e}", exc_info=True)
+                self.model = None
+
+    def get_model(self) -> SentenceTransformer:
+        """
+        Returns the current model (tuned or base). If no model is loaded, initializes the base model.
         
-    def fine_tune_model(self, training_pairs: List[Tuple[str, str, float]], output_path: str):
+        Returns:
+            SentenceTransformer: The current model instance.
         """
-        Fine-tunes the Sentence Transformer model using semantic training pairs.
-
+        if self.model is None:
+            self._ensure_base_model()
+        return self.model
+        
+    def ensure_model_ready(self, repo_contexts: List[Dict]) -> bool:
+        """
+        Ensures a fine-tuned model is ready for use. Checks cache first, loads existing model,
+        or trains a new one if necessary.
+        
         Args:
-            training_pairs (List[Tuple[str, str, float]]): List of (query, context, similarity_score) tuples.
-            output_path (str): Path to save the fine-tuned model.
-        """
-        logger.info(f"Starting fine-tuning process with {len(training_pairs)} training pairs.")
-        try:
-            # Prepare training data
-            train_examples = [InputExample(texts=[pair[0], pair[1]], label=pair[2]) for pair in training_pairs]
-            train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=16)
-
-            # Define a loss function
-            train_loss = losses.CosineSimilarityLoss(self.model)
-
-            # Fine-tune the model
-            self.model.fit(train_objectives=[(train_dataloader, train_loss)], epochs=3, warmup_steps=100)
-
-            # Save the fine-tuned model
-            self.model.save(output_path)
-            logger.info(f"Fine-tuned model saved to: {output_path}")
-        except Exception as e:
-            logger.error(f"Error during fine-tuning: {str(e)}", exc_info=True)
-
-    def generate_semantic_training_pairs(self, repo_context: Dict) -> List[Tuple[str, str, float]]:
-        """
-        Generates (query, context, label) training pairs for semantic model fine-tuning
-        using the repository context bundle.
-
-        Args:
-            repo_context (Dict): Repository context bundle.
+            repo_contexts: List of repository contexts for training if needed
+            cache_client: Cache client for model metadata storage
 
         Returns:
-            List[Tuple[str, str, float]]: List of (query, context, similarity_score) tuples.
+            bool: True if model is ready for use, False otherwise
         """
-        logger.debug("Generating semantic training pairs from repository context.")
-        pairs = []
+        import datetime
 
-        # Extract relevant fields
-        identity = repo_context.get("repoContext", {}).get("project_identity", {})
-        tech_stack = repo_context.get("repoContext", {}).get("tech_stack", {})
-        skills = repo_context.get("repoContext", {}).get("skill_manifest", {})
-        outcomes = repo_context.get("repoContext", {}).get("outcomes", {})
-        readme = repo_context.get("readme", "")
-        skills_index = repo_context.get("skills_index", "")
-        architecture = repo_context.get("architecture", "")
+        cache_key = "fine_tuned_model"
+        cache_result = self.cache_client._get_from_cache(cache_key)
 
-        # Generate pairs based on schema fields
-        if identity.get("name"):
-            pairs.append((f"What is {identity['name']}?", identity.get("description", ""), 1.0))
-        if identity.get("description"):
-            pairs.append(("Summarize this project.", identity["description"], 1.0))
+        if cache_result['status'] == 'valid':
+            logger.info("Found valid fine-tuned model in cache. Loading from storage...")
+            model_info = cache_result['data']
 
-        if tech_stack.get("primary"):
-            pairs.append(("Which technologies are used in this project?", ", ".join(tech_stack["primary"]), 1.0))
-        if tech_stack.get("secondary"):
-            pairs.append(("What supporting tools are used?", ", ".join(tech_stack["secondary"]), 0.8))
+            load_success = self.load_model_from_storage(model_info)
+            if load_success:
+                logger.info(f"Successfully loaded fine-tuned model from storage: {model_info.get('blob_name')}")
+                return True
+            else:
+                logger.warning("Failed to load model from storage. Will train new model.")
 
-        if skills.get("technical"):
-            pairs.append(("What technical skills are demonstrated?", ", ".join(skills["technical"]), 1.0))
-        if skills.get("domain"):
-            pairs.append(("What domain-specific knowledge areas are covered?", ", ".join(skills["domain"]), 1.0))
-
-        if outcomes.get("deliverables"):
-            pairs.append(("What are the deliverables of this project?", ", ".join(outcomes["deliverables"]), 1.0))
-        if outcomes.get("skills_acquired"):
-            pairs.append(("What skills were acquired?", ", ".join(outcomes["skills_acquired"]), 1.0))
-
-        # Include README, SKILLS-INDEX, and ARCHITECTURE content
-        if readme:
-            pairs.append(("Summarize the README content.", readme, 1.0))
-        if skills_index:
-            pairs.append(("List the core skills demonstrated in this project.", skills_index, 1.0))
-        if architecture:
-            pairs.append(("Describe the architecture of this project.", architecture, 1.0))
-
-        logger.debug(f"Generated {len(pairs)} training pairs.")
-        return pairs
+        # No valid cache entry or failed to load - train new model
+        documented_repos = [repo for repo in repo_contexts if repo.get("has_documentation", False)]
+        if not documented_repos:
+            logger.warning("No documented repositories available for training. Using base model.")
+            return False  # Indicates no documentation available to process
         
+        logger.info(f"Training with {len(documented_repos)} documented repositories")
+        
+        # Train model using the documented repositories
+        model_path = f"fine_tuned_model_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        success = self.train_from_repositories(documented_repos, model_path)
+        
+        # Save model metadata to cache if training was successful
+        if success:
+            model_info = {
+                "storage_type": "blob",
+                "container": "ai-models",
+                "blob_name": f"{model_path}.zip",
+                "training_timestamp": datetime.datetime.now().isoformat(),
+                "training_repos_count": len(documented_repos)
+            }
+            
+            self.cache_client._save_to_cache(
+                cache_key, 
+                model_info,
+                ttl=86400 * 7  # Cache for 7 days since models are now durable
+            )
+            logger.info("Fine-tuned model reference saved to cache.")
+            return True
+
+        return False
+
     def load_model_from_storage(self, model_info: Dict[str, Any]) -> bool:
         """
         Loads a fine-tuned model from Azure Blob Storage.
@@ -150,15 +154,18 @@ class SemanticModel:
             
             # Load the model
             self.model = SentenceTransformer(model_dir)
-            logger.info(f"Successfully loaded model from {container}/{blob_name}")
+            if self.model is None:
+                logger.error("Model is not loaded. Please load or train the model before using it.")
+                return False
             
             # Cleanup temporary files
             shutil.rmtree(temp_dir)
+            logger.info(f"Successfully loaded model from {container}/{blob_name}")
             
             return True
         except Exception as e:
             logger.error(f"Error loading model from storage: {str(e)}", exc_info=True)
-            return False
+            return False        
         
     def train_from_repositories(self, repo_contexts: List[Dict], output_path: str) -> bool:
         """
@@ -203,8 +210,14 @@ class SemanticModel:
             temp_model_path = os.path.join(temp_dir, "model")
             
             # Fine-tune the model and save to temp location
-            self.fine_tune_model(training_pairs, temp_model_path)
-            logger.info(f"Successfully trained model with {len(training_pairs)} pairs to temporary location")
+            training_success = self.fine_tune_model(training_pairs, temp_model_path)
+            if not training_success:
+                logger.error("Fine-tuning failed.")
+                return False
+            
+            # Load the trained model into self.model
+            self.model = SentenceTransformer(temp_model_path)
+            logger.info("Trained model loaded into memory for immediate use.")
             
             # Create a zip file of the model
             model_id = os.path.basename(output_path)
@@ -261,3 +274,95 @@ class SemanticModel:
         except Exception as e:
             logger.error(f"Error during model training and storage: {str(e)}", exc_info=True)
             return False
+        
+    def fine_tune_model(self, training_pairs: List[Tuple[str, str, float]], output_path: str):
+        """
+        Fine-tunes the Sentence Transformer model using semantic training pairs.
+
+        Args:
+            training_pairs (List[Tuple[str, str, float]]): List of (query, context, similarity_score) tuples.
+            output_path (str): Path to save the fine-tuned model.
+        """
+        logger.info(f"Starting fine-tuning process with {len(training_pairs)} training pairs.")
+
+        self._ensure_base_model()
+        if self.model is None:
+            logger.error("Cannot fine-tune: base model failed to load.")
+            return False
+
+        if not training_pairs:
+            logger.warning("No training pairs provided; skipping fine-tune.")
+            return False
+
+        try:
+            # Prepare training data
+            train_examples = [InputExample(texts=[pair[0], pair[1]], label=pair[2]) for pair in training_pairs]
+            train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=16)
+
+            # Define a loss function
+            train_loss = losses.CosineSimilarityLoss(self.model)
+
+            # Fine-tune the model
+            self.model.fit(train_objectives=[(train_dataloader, train_loss)], epochs=3, warmup_steps=100)
+
+            # Save the fine-tuned model
+            self.model.save(output_path)
+            return True
+        except Exception as e:
+            logger.error(f"Error during fine-tuning: {str(e)}", exc_info=True)
+            return False
+
+    def generate_semantic_training_pairs(self, repo_context: Dict) -> List[Tuple[str, str, float]]:
+        """
+        Generates (query, context, label) training pairs for semantic model fine-tuning
+        using the repository context bundle.
+
+        Args:
+            repo_context (Dict): Repository context bundle.
+
+        Returns:
+            List[Tuple[str, str, float]]: List of (query, context, similarity_score) tuples.
+        """
+        logger.debug("Generating semantic training pairs from repository context.")
+        pairs = []
+
+        # Extract relevant fields
+        identity = repo_context.get("repoContext", {}).get("project_identity", {})
+        tech_stack = repo_context.get("repoContext", {}).get("tech_stack", {})
+        skills = repo_context.get("repoContext", {}).get("skill_manifest", {})
+        outcomes = repo_context.get("repoContext", {}).get("outcomes", {})
+        readme = repo_context.get("readme", "")
+        skills_index = repo_context.get("skills_index", "")
+        architecture = repo_context.get("architecture", "")
+
+        # Generate pairs based on schema fields
+        if identity.get("name"):
+            pairs.append((f"What is {identity['name']}?", identity.get("description", ""), 1.0))
+        if identity.get("description"):
+            pairs.append(("Summarize this project.", identity["description"], 1.0))
+
+        if tech_stack.get("primary"):
+            pairs.append(("Which technologies are used in this project?", ", ".join(tech_stack["primary"]), 1.0))
+        if tech_stack.get("secondary"):
+            pairs.append(("What supporting tools are used?", ", ".join(tech_stack["secondary"]), 0.8))
+
+        if skills.get("technical"):
+            pairs.append(("What technical skills are demonstrated?", ", ".join(skills["technical"]), 1.0))
+        if skills.get("domain"):
+            pairs.append(("What domain-specific knowledge areas are covered?", ", ".join(skills["domain"]), 1.0))
+
+        if outcomes.get("deliverables"):
+            pairs.append(("What are the deliverables of this project?", ", ".join(outcomes["deliverables"]), 1.0))
+        if outcomes.get("skills_acquired"):
+            pairs.append(("What skills were acquired?", ", ".join(outcomes["skills_acquired"]), 1.0))
+
+        # Include README, SKILLS-INDEX, and ARCHITECTURE content
+        if readme:
+            pairs.append(("Summarize the README content.", readme, 1.0))
+        if skills_index:
+            pairs.append(("List the core skills demonstrated in this project.", skills_index, 1.0))
+        if architecture:
+            pairs.append(("Describe the architecture of this project.", architecture, 1.0))
+
+        logger.debug(f"Generated {len(pairs)} training pairs.")
+        return pairs
