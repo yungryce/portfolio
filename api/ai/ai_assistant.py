@@ -29,17 +29,17 @@ class AIAssistant:
         self.cache_client = GitHubCache(use_cache=True)
 
         logger.info(f"AI Assistant initialized for user: {self.username}")
-    
-    def calculate_repo_scores(self, repo: Dict[str, Any], query: str) -> Dict[str, Any]:
+
+    def calculate_repo_scores(self, repo_bundle: Dict[str, Any], query: str) -> Dict[str, Any]:
         """
         Calculates and returns the context, language, and type scores for a repository.
         Returns a dict with all scores and intermediate data for metadata consumption.
         """
-        repo_context = repo.get("repoContext", {})
-        repo_languages = repo.get("languages", {})
-        file_types = repo.get("file_types", {})
-        categorized = repo.get("categorized_types", {})
-        repo_name = repo.get("name", "Unknown")
+        repo_context = repo_bundle.get("repoContext", {})
+        repo_languages = repo_bundle.get("languages", {})
+        file_types = repo_bundle.get("file_types", {})
+        categorized = repo_bundle.get("categorized_types", {})
+        repo_name = repo_bundle.get("name", "Unknown")
 
         # Safety checks
         if not isinstance(repo_context, dict):
@@ -51,7 +51,7 @@ class AIAssistant:
         if not isinstance(categorized, dict):
             categorized = {}
 
-        context_score = self.semantic_scorer.score_context_similarity(query, repo_context)
+        context_score = self.semantic_scorer.score_context_similarity(query, repo_bundle)
         language_score = self.semantic_scorer.score_language_matches(query, repo_languages)
         type_score = self.file_type_analyzer.calculate_type_score(categorized)
 
@@ -69,13 +69,13 @@ class AIAssistant:
         }
         return score_metadata
 
-    def process_query_results(self, query: str, repo_context_results: List[Dict[str, Any]], max_repos: int = 3) -> Dict[str, Any]:
+    def process_query_results(self, query: str, all_repos_bundle: List[Dict[str, Any]], max_repos: int = 3) -> Dict[str, Any]:
         """
         Consumes repository context results from the orchestrator, scores repositories, builds context, and prepares AI query payload for Groq API.
         """
         try:
             logger.info(f"Processing query: {query[:100]} with orchestrator results...")
-            if not repo_context_results:
+            if not all_repos_bundle:
                 return {
                     "response": f"No repositories found for {self.username}.",
                     "repositories_used": [],
@@ -84,19 +84,22 @@ class AIAssistant:
                 }
 
             # Ensure fine-tuned model is ready (handles cache check, loading, and training)
-            model_ready = self.semantic_model.ensure_model_ready(repo_context_results)
+            model_ready = self.semantic_model.ensure_model_ready(all_repos_bundle)
             if not model_ready:
                 logger.warning("Model preparation failed, but continuing with base model")
           
             # Score repositories - use all repositories for scoring even if they lack documentation
             scored_repos = []
-            for repo in repo_context_results:
+            documented_repos = [repo for repo in all_repos_bundle if repo.get("has_documentation", False)]
+            for repo_bundle in documented_repos:
+                repo_name = repo_bundle.get('name', 'Unknown')
+                logger.info(f"Scoring repository: {repo_name}")
                 try:
-                    score_metadata = self.calculate_repo_scores(repo, query)
-                    repo.update(score_metadata)
-                    scored_repos.append(repo)
+                    score_metadata = self.calculate_repo_scores(repo_bundle, query)
+                    repo_bundle.update(score_metadata)
+                    scored_repos.append(repo_bundle)
                 except Exception as e:
-                    logger.error(f"Error scoring repository {repo.get('name', 'Unknown')}: {str(e)}")
+                    logger.error(f"Error scoring repository {repo_bundle.get('name', 'Unknown')}: {str(e)}")
                     continue
                 
             scored_repos.sort(key=lambda r: r.get("total_relevance_score", 0), reverse=True)
@@ -116,7 +119,7 @@ class AIAssistant:
                     }
                     for repo in top_repos
                 ],
-                "total_repositories": len(repo_context_results),
+                "total_repositories": len(all_repos_bundle),
                 "query": query
             }
             logger.info(f"Successfully processed query using {len(top_repos)} repositories")

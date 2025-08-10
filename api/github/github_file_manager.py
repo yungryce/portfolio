@@ -1,36 +1,23 @@
 from .github_api import GitHubAPI
-from .cache_client import GitHubCache
+from .cache_manager import cache_manager
 
 class GitHubFileManager:
-    def __init__(self, api: GitHubAPI, cache: GitHubCache):
+    def __init__(self, api: GitHubAPI):
         self.api = api
-        self.cache = cache
 
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, path: f"file_content:{username}:{repo}:{path}", ttl=3600)
     def get_file_content(self, username=None, repo=None, path=None):
         username = username or self.api.username
         if not repo:
             raise ValueError("Repository name is required")
         path_segment = path if path else ""
         endpoint = f"repos/{username}/{repo}/contents/{path_segment}"
-        cache_key = self.cache._generate_cache_key(endpoint)
-        cached = self.cache._get_from_cache(cache_key)
-        if cached and cached['status'] == 'valid':
-            return cached['data']
         file_data = self.api.make_request('GET', endpoint)
-        if not file_data:
-            return None
         if isinstance(file_data, dict) and file_data.get('type') == 'file':
-            content = self.api.decode_file_content(file_data)
-            self.cache._save_to_cache(cache_key, content)
-            return content
-        elif isinstance(file_data, list):
-            self.cache._save_to_cache(cache_key, file_data)
-            return file_data
-        return None
+            return self.api.decode_file_content(file_data)
+        return file_data
 
-    def get_container_files(self, username=None, repo=None, container_path=""):
-        return self.get_file_content(username, repo, container_path or "")
-
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, path: f"directory_list:{username}:{repo}:{path}", ttl=3600)
     def list_directory(self, username=None, repo=None, path=""):
         """
         List files and directories at the given path (metadata only, no content).
@@ -40,12 +27,5 @@ class GitHubFileManager:
             raise ValueError("Repository name is required")
         path_segment = path if path else ""
         endpoint = f"repos/{username}/{repo}/contents/{path_segment}"
-        cache_key = self.cache._generate_cache_key(endpoint)
-        cached = self.cache._get_from_cache(cache_key)
-        if cached and cached['status'] == 'valid':
-            return cached['data']
         file_data = self.api.make_request('GET', endpoint)
-        if isinstance(file_data, list):
-            self.cache._save_to_cache(cache_key, file_data)
-            return file_data
-        return []
+        return file_data if isinstance(file_data, list) else []

@@ -3,49 +3,24 @@ import json
 import os
 import requests
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from .github_api import GitHubAPI
 from .github_file_manager import GitHubFileManager
-from .cache_client import GitHubCache
+from .cache_manager import cache_manager
+from .fa_helpers import trim_processed_repo
 
 
 logger = logging.getLogger('portfolio.api')
 
-def trim_processed_repo(repo: dict) -> dict:
-    """
-    Trim repository dictionary to only include relevant keys.
-    Args:
-        repo: Repository dictionary with all data
-    Returns:
-        Dictionary with only the relevant keys preserved
-    """
-    keys_to_keep = [
-        'id', 'name', 'url', 'description', 'fork',
-        'created_at', 'updated_at', 'pushed_at', 'size',
-        'language', 'license', 'allow_forking', 'topics',
-        'visibility', 'languages', 'file_paths',
-        'total_language_bytes', 'language_percentages',
-        'languages_sorted', 'relevance_scores',
-        'language_relevance_score', 'matched_query_languages',
-        'repoContext'
-    ]
-    trimmed_repo = {k: v for k, v in repo.items() if k in keys_to_keep}
-    if 'owner' in repo and isinstance(repo['owner'], dict):
-        trimmed_repo['owner'] = {}
-        for nested_key in ['login', 'url']:
-            if nested_key in repo['owner']:
-                trimmed_repo['owner'][nested_key] = repo['owner'][nested_key]
-    return trimmed_repo
-
 class GitHubRepoManager:
-    def __init__(self, api: GitHubAPI, cache: GitHubCache, file_manager: GitHubFileManager, username: str = None):
+    def __init__(self, api: GitHubAPI, file_manager: GitHubFileManager, username: Optional[str] = None):
         """Initialize the GitHubRepoManager with API, cache, and file manager."""
         self.api = api
-        self.cache = cache
         self.file_manager = file_manager
         self.username = username
 
-    def get_repo_metadata(self, username: str=None, repo: str=None, include_languages: bool=False) -> Dict[str, Any]:
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo: f"repos:{username}:{repo}", ttl=3600)
+    def get_repo_metadata(self, username: Optional[str]=None, repo: Optional[str]=None, include_languages: bool=False) -> Dict[str, Any]:
         """Get metadata for a specific repository.
 
         Args:
@@ -63,27 +38,17 @@ class GitHubRepoManager:
         if not repo:
             raise ValueError("Repository name is required")
         endpoint = f"repos/{username}/{repo}"
-        cache_key = self.cache._generate_cache_key(endpoint)
-        cached = self.cache._get_from_cache(cache_key)
-        if cached and cached['status'] == 'valid':
-            return cached['data']
         repo_data = self.api.make_request('GET', endpoint)
-        if not repo_data:
-            return None
+        if not isinstance(repo_data, dict):
+            raise ValueError("Invalid response format for repository metadata")
         if include_languages:
-            lang_endpoint = f"repos/{username}/{repo}/languages"
-            lang_cache_key = self.cache._generate_cache_key(lang_endpoint)
-            lang_cached = self.cache._get_from_cache(lang_cache_key)
-            if lang_cached and lang_cached['status'] == 'valid':
-                lang_data = lang_cached['data']  # Extract 'data' from the response
-            else:
-                lang_data = self.api.make_request('GET', lang_endpoint)
-                self.cache._save_to_cache(lang_cache_key, lang_data)
-            repo_data['languages'] = lang_data or {}
-        self.cache._save_to_cache(cache_key, repo_data)
+            languages = self.api.make_request('GET', f"{endpoint}/languages")
+            if isinstance(languages, dict):
+                repo_data['languages'] = languages
         return repo_data
 
-    def get_all_repos_metadata(self, username: str=None, per_page=100, include_languages: bool=False) -> List[Dict[str, Any]]:
+    @cache_manager.cache_decorator(cache_key_func=lambda username: f"repos:{username}:all", ttl=3600)
+    def get_all_repos_metadata(self, username: Optional[str]=None, per_page=100, include_languages: bool=False) -> List[Dict[str, Any]]:
         """Get metadata for all repositories.
 
         Args:
@@ -95,34 +60,22 @@ class GitHubRepoManager:
             list: List of repository metadata dictionaries.
         """
         username = username or self.username
+        if not username:
+            raise ValueError("Username is required")
         endpoint = f"users/{username}/repos"
-        params = {'sort': 'updated', 'per_page': per_page}
-        cache_key = self.cache._generate_cache_key(endpoint, params)
-        cached = self.cache._get_from_cache(cache_key)
-        if cached and cached['status'] == 'valid':
-            return cached['data']
-        repos = self.api.make_request('GET', endpoint, params=params)
-        if not repos:
-            return []
+        repos = self.api.make_request('GET', endpoint, params={'per_page': per_page})
+        if not isinstance(repos, list):
+            raise ValueError("Invalid response format for repositories metadata")
         if include_languages:
             for repo in repos:
-                lang_endpoint = f"repos/{username}/{repo['name']}/languages"
-                lang_cache_key = self.cache._generate_cache_key(lang_endpoint)
-                lang_cached = self.cache._get_from_cache(lang_cache_key)
-                if lang_cached and lang_cached['status'] == 'valid':
-                    lang_data = lang_cached['data']
-                else:
-                    try:
-                        lang_data = self.api.make_request('GET', lang_endpoint)
-                        self.cache._save_to_cache(lang_cache_key, lang_data)
-                    except requests.exceptions.RequestException as e:
-                        logger.error(f"Failed to fetch languages for {repo['name']}: {e}")
-                        lang_data = {}
-                repo['languages'] = lang_data or {}
-        self.cache._save_to_cache(cache_key, repos)
+                if isinstance(repo, dict) and 'name' in repo:
+                    languages = self.api.make_request('GET', f"repos/{username}/{repo['name']}/languages")
+                    if isinstance(languages, dict):
+                        repo['languages'] = languages
         return repos
     
-    def get_file_content(self, repo_name: str, path: str, username: str = None) -> str:
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, path: f"file_content:{username}:{repo}:{path}", ttl=3600)
+    def get_file_content(self, username: Optional[str], repo: str, path: str) -> Optional[str]:
         """
         Fetch the content of a file from a repository using the underlying file_manager.
         Args:
@@ -132,75 +85,25 @@ class GitHubRepoManager:
         Returns:
             File content as a string, or None if not found.
         """
-        username = username or self.username
-        file_content = self.file_manager.get_file_content(username=username, repo=repo_name, path=path)
-        return file_content
+        if not username:
+            raise ValueError("Username is required")
+        endpoint = f"repos/{username}/{repo}/contents/{path}"
+        file_data = self.api.make_request('GET', endpoint)
+        if isinstance(file_data, dict) and file_data.get('type') == 'file':
+            return self.api.decode_file_content(file_data)
+        return None
 
-    def get_all_repos_with_context(self, username=None, include_languages=True):
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo: f"repos_with_context:{username}:{repo}", ttl=None)
+    def get_all_repos_with_context(self, username: Optional[str], include_languages: bool = True):
         """
         Get all repositories with enhanced context including .repo-context.json and file paths.
         This replaces the old get_all_repos_with_files method with better naming.
         """
-        username = username or self.username
-        cache_suffix = "_with_languages" if include_languages else "_basic"
-        cache_key = f"repos_with_context_{username}{cache_suffix}"
-        
-        cached = self.cache._get_from_cache(cache_key)
-        if cached and cached['status'] == 'valid':  # Check cache status
-            logger.info(f"Using cached data ({len(cached['data'])} repositories)")  # Extract 'data'
-            return cached['data']
-        
-        # Get all repositories with language data
-        all_repos = self.get_all_repos_metadata(username, include_languages=include_languages)
-        repos_with_context = []
-        
-        for repo in all_repos:
-            try:
-                repo_name = repo['name']
-                
-                # Get repository context from .repo-context.json
-                repo_context = self.file_manager.get_file_content(username, repo_name, '.repo-context.json')
-                if repo_context and isinstance(repo_context, str):
-                    try:
-                        repo['repoContext'] = json.loads(repo_context)
-                    except json.JSONDecodeError:
-                        logger.warning(f"Invalid JSON in .repo-context.json for {repo_name}")
-                        repo['repoContext'] = {}
-                else:
-                    repo['repoContext'] = {}
-                
-                # Get root directory file listing
-                if 'contents_url' in repo:
-                    try:
-                        root_files = self.file_manager.get_file_content(username, repo_name, "")
-                        if isinstance(root_files, list):
-                            # Extract file paths for efficient processing
-                            file_paths = [item.get('path') for item in root_files 
-                                        if isinstance(item, dict) and 'path' in item]
-                            repo['file_paths'] = file_paths
-                    except Exception as e:
-                        logger.warning(f"Failed to get file listing for {repo_name}: {str(e)}")
-
-                logger.info(f"Processing repository: {repo['file_paths']}")
-
-                # Trim to only relevant fields
-                trimmed_repo = trim_processed_repo(repo)
-                repos_with_context.append(trimmed_repo)
-                
-            except Exception as e:
-                logger.warning(f"Failed to enhance {repo.get('name', 'unknown')}: {str(e)}")
-                # Ensure repo has required fields even on error
-                if 'languages' not in repo and include_languages:
-                    repo['languages'] = {}
-                repo['repoContext'] = {}
-                trimmed_repo = trim_processed_repo(repo)
-                repos_with_context.append(trimmed_repo)
-        
-        # Cache the enhanced result
-        self.cache._save_to_cache(cache_key, repos_with_context, ttl=None)  # 1 hour cache
-        
-        logger.info(f"Enhanced {len(repos_with_context)} repositories with context for {username}")
-
+        if not username:
+            raise ValueError("Username is required")
+        username = str(username)  # Ensure username is a string
+        repos = self.get_all_repos_metadata(username, include_languages=include_languages)
+        repos_with_context = [trim_processed_repo(repo) for repo in repos if isinstance(repo, dict)]
         return repos_with_context
 
     # Keep the old method name for backward compatibility
@@ -209,7 +112,7 @@ class GitHubRepoManager:
         logger.warning("get_all_repos_with_files is deprecated. Use get_all_repos_with_context instead.")
         return self.get_all_repos_with_context(username, include_languages)
 
-    def get_repository_tree(self, repo_name: str, username: str = None, recursive: bool = False) -> List[str]:
+    def get_repository_tree(self, repo_name: str, username: Optional[str] = None, recursive: bool = False) -> List[str]:
         """
         Recursively fetch all file paths in a repository.
         Returns a flat list of file paths (including nested files).
@@ -234,15 +137,15 @@ class GitHubRepoManager:
 
         return _fetch_tree("")
 
-    def get_all_file_types(self, repo_name: str, username: str = None) -> Dict[str, int]:
+    @cache_manager.cache_decorator(cache_key_func=lambda repo_name, username: f"file_types:{username}:{repo_name}", ttl=3600)
+    def get_all_file_types(self, repo_name: str, username: Optional[str] = None) -> Dict[str, int]:
         """
         Recursively retrieve all file types/extensions in a repository.
         """
-        username = username or self.username
-        file_types = {}
-        files = self.get_repository_tree(repo_name, username=username, recursive=True)
-        for file_path in files:
-            ext = os.path.splitext(file_path)[1].lower()
-            if ext:
-                file_types[ext] = file_types.get(ext, 0) + 1
-        return file_types
+        if not username:
+            raise ValueError("Username is required")
+        endpoint = f"repos/{username}/{repo_name}/languages"
+        languages = self.api.make_request('GET', endpoint)
+        if not isinstance(languages, dict):
+            raise ValueError("Invalid response format for file types")
+        return languages

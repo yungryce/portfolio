@@ -1,8 +1,13 @@
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional
 from github.cache_client import GitHubCache
 from sentence_transformers import SentenceTransformer, InputExample, losses
 from torch.utils.data import DataLoader
 import logging
+import os
+import tempfile
+import zipfile
+import shutil
+from azure.storage.blob import BlobServiceClient, ContentSettings
 
 logger = logging.getLogger('portfolio.api')
 
@@ -43,14 +48,51 @@ class SemanticModel:
         if self.model is None:
             self._ensure_base_model()
         return self.model
+    
+    def _generate_repo_fingerprint(self, repos_bundle: List[Dict]) -> str:
+        """
+        Generates a unique fingerprint of repositories to determine if retraining is needed.
         
-    def ensure_model_ready(self, repo_contexts: List[Dict]) -> bool:
+        Args:
+            repos_bundle: List of repository context bundles
+            
+        Returns:
+            str: SHA-256 hash representing the current state of repositories
+        """
+        import hashlib
+        import json
+        
+        # Extract essential data for fingerprinting
+        fingerprint_data = []
+        for repo in repos_bundle:
+            if not repo.get("has_documentation", False):
+                continue
+                
+            # Include repo name, last modified, and other key metadata
+            repo_data = {
+                "name": repo.get("name", ""),
+                "last_modified": repo.get("last_updated", ""),
+                # Include hashes of key content fields to detect changes
+                "readme_hash": hashlib.sha256(repo.get("readme", "").encode()).hexdigest()[:16],
+                "skills_hash": hashlib.sha256(repo.get("skills_index", "").encode()).hexdigest()[:16],
+                "arch_hash": hashlib.sha256(repo.get("architecture", "").encode()).hexdigest()[:16]
+            }
+            fingerprint_data.append(repo_data)
+        
+        # Sort to ensure consistent order
+        fingerprint_data.sort(key=lambda x: x["name"])
+        
+        # Generate hash from the serialized data
+        fingerprint_str = json.dumps(fingerprint_data, sort_keys=True)
+        return hashlib.sha256(fingerprint_str.encode()).hexdigest()
+        
+    def ensure_model_ready(self, all_repos_bundle: List[Dict]) -> bool:
         """
         Ensures a fine-tuned model is ready for use. Checks cache first, loads existing model,
         or trains a new one if necessary.
         
         Args:
-            repo_contexts: List of repository contexts for training if needed
+            all_repos_bundle: List of repository contexts for training if needed
             cache_client: Cache client for model metadata storage
 
         Returns:
@@ -58,31 +100,49 @@ class SemanticModel:
         """
         import datetime
 
-        cache_key = "fine_tuned_model"
+        # Filter documented repositories
+        documented_repos = [repo for repo in all_repos_bundle if repo.get("has_documentation", False)]
+        if not documented_repos:
+            logger.warning("No documented repositories available for training. Using base model.")
+            return False
+    
+        # Generate fingerprint of current repositories
+        fingerprint = self._generate_repo_fingerprint(documented_repos)
+        logger.info(f"Generated repository fingerprint: {fingerprint[:8]}...")
+        
+        # Check local disk cache first
+        local_cache_dir = os.path.join(tempfile.gettempdir(), "semantic_models")
+        local_model_path = os.path.join(local_cache_dir, f"model_{fingerprint}")
+        
+        if os.path.exists(local_model_path):
+            try:
+                logger.info(f"Found matching model in local disk cache: {fingerprint[:8]}")
+                self.model = SentenceTransformer(local_model_path)
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to load model from disk cache: {str(e)}")
+
+        cache_key = "fine_tuned_model_metadata"
         cache_result = self.cache_client._get_from_cache(cache_key)
 
         if cache_result['status'] == 'valid':
-            logger.info("Found valid fine-tuned model in cache. Loading from storage...")
-            model_info = cache_result['data']
+            model_metadata = cache_result['data']
 
-            load_success = self.load_model_from_storage(model_info)
-            if load_success:
-                logger.info(f"Successfully loaded fine-tuned model from storage: {model_info.get('blob_name')}")
-                return True
-            else:
-                logger.warning("Failed to load model from storage. Will train new model.")
+            # Check if we have a model matching the current fingerprint
+            if model_metadata.get("fingerprint") == fingerprint:
+                logger.info("Found model with matching repository fingerprint")
+                
+                load_success = self.load_model_from_storage(model_metadata, local_cache_dir)
+                if load_success:
+                    return True
 
-        # No valid cache entry or failed to load - train new model
-        documented_repos = [repo for repo in repo_contexts if repo.get("has_documentation", False)]
-        if not documented_repos:
-            logger.warning("No documented repositories available for training. Using base model.")
-            return False  # Indicates no documentation available to process
         
-        logger.info(f"Training with {len(documented_repos)} documented repositories")
-        
+        # No matching model found - train new model
+        logger.info(f"No model found with matching fingerprint. Training with {len(documented_repos)} repositories")
+
         # Train model using the documented repositories
-        model_path = f"fine_tuned_model_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        success = self.train_from_repositories(documented_repos, model_path)
+        model_path = f"model_{fingerprint}"
+        success = self.train_from_repositories(documented_repos, model_path, local_cache_dir)
         
         # Save model metadata to cache if training was successful
         if success:
@@ -90,21 +150,23 @@ class SemanticModel:
                 "storage_type": "blob",
                 "container": "ai-models",
                 "blob_name": f"{model_path}.zip",
+                "fingerprint": fingerprint,
                 "training_timestamp": datetime.datetime.now().isoformat(),
-                "training_repos_count": len(documented_repos)
+                "training_repos_count": len(documented_repos),
+                "repo_names": [repo.get("name", "Unknown") for repo in documented_repos]
             }
             
             self.cache_client._save_to_cache(
                 cache_key, 
-                model_info,
-                ttl=86400 * 7  # Cache for 7 days since models are now durable
+                model_metadata,
+                ttl=None  # No expiration - models valid until repos change
             )
-            logger.info("Fine-tuned model reference saved to cache.")
+            logger.info("Fine-tuned model metadata saved to cache.")
             return True
 
         return False
 
-    def load_model_from_storage(self, model_info: Dict[str, Any]) -> bool:
+    def load_model_from_storage(self, model_info: Dict[str, Any], local_cache_dir: Optional[str] = None) -> bool:
         """
         Loads a fine-tuned model from Azure Blob Storage.
         
@@ -113,21 +175,27 @@ class SemanticModel:
             
         Returns:
             bool: True if model was successfully loaded, False otherwise
-        """
-        import tempfile
-        import zipfile
-        import os
-        import shutil
-        from azure.storage.blob import BlobServiceClient
-        
+        """        
         try:
             # Extract model storage information
             container = model_info.get("container", "ai-models")
             blob_name = model_info.get("blob_name")
+            fingerprint = model_info.get("fingerprint", "")
             
             if not blob_name:
                 logger.error("Missing blob_name in model_info")
                 return False
+            
+            # Check if we already have this model in local cache
+            if local_cache_dir and fingerprint:
+                local_model_path = os.path.join(local_cache_dir, f"model_{fingerprint}")
+                if os.path.exists(local_model_path):
+                    try:
+                        logger.info(f"Loading model from local cache: {local_model_path}")
+                        self.model = SentenceTransformer(local_model_path)
+                        return True
+                    except Exception as local_e:
+                        logger.warning(f"Failed to load from local cache: {str(local_e)}")
             
             # Download model from Azure Blob Storage
             connection_string = os.getenv('AzureWebJobsStorage')
@@ -154,10 +222,18 @@ class SemanticModel:
             
             # Load the model
             self.model = SentenceTransformer(model_dir)
-            if self.model is None:
-                logger.error("Model is not loaded. Please load or train the model before using it.")
-                return False
-            
+
+            # Save to local cache if requested
+            if local_cache_dir and fingerprint:
+                os.makedirs(local_cache_dir, exist_ok=True)
+                local_model_path = os.path.join(local_cache_dir, f"model_{fingerprint}")
+                
+                # Copy model files to local cache
+                if os.path.exists(local_model_path):
+                    shutil.rmtree(local_model_path)
+                shutil.copytree(model_dir, local_model_path)
+                logger.info(f"Model saved to local cache: {local_model_path}")
+        
             # Cleanup temporary files
             shutil.rmtree(temp_dir)
             logger.info(f"Successfully loaded model from {container}/{blob_name}")
@@ -167,32 +243,26 @@ class SemanticModel:
             logger.error(f"Error loading model from storage: {str(e)}", exc_info=True)
             return False        
         
-    def train_from_repositories(self, repo_contexts: List[Dict], output_path: str) -> bool:
+    def train_from_repositories(self, repos_bundle: List[Dict], output_path: str, local_cache_dir: Optional[str] = None) -> bool:
         """
         Trains a semantic model using a list of repository contexts and persists it to Azure Blob Storage.
         
         Args:
-            repo_contexts (List[Dict]): List of repository context bundles
+            repos_bundle (List[Dict]): List of repository context bundles
             output_path (str): Path identifier for the model (used for both temp storage and blob name)
         
         Returns:
             bool: True if training was successful, False otherwise
         """
-        import uuid
-        import zipfile
-        import tempfile
-        import os
-        from azure.storage.blob import BlobServiceClient, ContentSettings
-        
-        logger.info(f"Training semantic model from {len(repo_contexts)} repositories")
+        logger.info(f"Training semantic model from {len(repos_bundle)} repositories")
         
         # Generate training pairs from all repositories
         training_pairs = []
-        for repo_context in repo_contexts:
-            repo_name = repo_context.get('name', 'Unknown')
+        for repo_bundle in repos_bundle:
+            repo_name = repo_bundle.get('name', 'Unknown')
             logger.debug(f"Generating training pairs for repository: {repo_name}")
             try:
-                pairs = self.generate_semantic_training_pairs(repo_context)
+                pairs = self.generate_semantic_training_pairs(repo_bundle)
                 training_pairs.extend(pairs)
                 logger.debug(f"Generated {len(pairs)} training pairs for {repo_name}")
             except Exception as e:
@@ -218,6 +288,16 @@ class SemanticModel:
             # Load the trained model into self.model
             self.model = SentenceTransformer(temp_model_path)
             logger.info("Trained model loaded into memory for immediate use.")
+            
+            # After successful training, save to local cache if requested
+            if local_cache_dir:
+                os.makedirs(local_cache_dir, exist_ok=True)
+                local_model_path = os.path.join(local_cache_dir, output_path)
+                
+                if os.path.exists(local_model_path):
+                    shutil.rmtree(local_model_path)
+                shutil.copytree(temp_model_path, local_model_path)
+                logger.info(f"Model saved to local cache: {local_model_path}")
             
             # Create a zip file of the model
             model_id = os.path.basename(output_path)
@@ -263,12 +343,10 @@ class SemanticModel:
                         content_encoding='utf-8'
                     )
                 )
-                
-            logger.info(f"Model uploaded to Azure Blob Storage: container={container_name}, blob={blob_name}")
-            
+                            
             # Cleanup temporary files
-            import shutil
             shutil.rmtree(temp_dir)
+            logger.info(f"Model uploaded to Azure Blob Storage: container={container_name}, blob={blob_name}")
             
             return True
         except Exception as e:
@@ -312,13 +390,13 @@ class SemanticModel:
             logger.error(f"Error during fine-tuning: {str(e)}", exc_info=True)
             return False
 
-    def generate_semantic_training_pairs(self, repo_context: Dict) -> List[Tuple[str, str, float]]:
+    def generate_semantic_training_pairs(self, repo_bundle: Dict) -> List[Tuple[str, str, float]]:
         """
         Generates (query, context, label) training pairs for semantic model fine-tuning
         using the repository context bundle.
 
         Args:
-            repo_context (Dict): Repository context bundle.
+            repo_bundle (Dict): Repository context bundle.
 
         Returns:
             List[Tuple[str, str, float]]: List of (query, context, similarity_score) tuples.
@@ -327,13 +405,13 @@ class SemanticModel:
         pairs = []
 
         # Extract relevant fields
-        identity = repo_context.get("repoContext", {}).get("project_identity", {})
-        tech_stack = repo_context.get("repoContext", {}).get("tech_stack", {})
-        skills = repo_context.get("repoContext", {}).get("skill_manifest", {})
-        outcomes = repo_context.get("repoContext", {}).get("outcomes", {})
-        readme = repo_context.get("readme", "")
-        skills_index = repo_context.get("skills_index", "")
-        architecture = repo_context.get("architecture", "")
+        identity = repo_bundle.get("repoContext", {}).get("project_identity", {})
+        tech_stack = repo_bundle.get("repoContext", {}).get("tech_stack", {})
+        skills = repo_bundle.get("repoContext", {}).get("skill_manifest", {})
+        outcomes = repo_bundle.get("repoContext", {}).get("outcomes", {})
+        readme = repo_bundle.get("readme", "")
+        skills_index = repo_bundle.get("skills_index", "")
+        architecture = repo_bundle.get("architecture", "")
 
         # Generate pairs based on schema fields
         if identity.get("name"):

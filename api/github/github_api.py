@@ -2,8 +2,19 @@ import os
 import requests
 import logging
 from base64 import b64decode
-from .cache_client import GitHubCache
+from .cache_manager import cache_manager
+import hashlib
+
 logger = logging.getLogger('portfolio.api')
+
+def generate_request_cache_key(method, endpoint, params=None):
+    """Generate a cache key for a GitHub API request."""
+    normalized_endpoint = endpoint.lstrip('/').replace('/', '_').replace('?', '_').replace('&', '_')
+    if params:
+        param_string = str(params)
+        param_hash = hashlib.md5(param_string.encode()).hexdigest()[:8]
+        return f"request:{method}:{normalized_endpoint}:{param_hash}"
+    return f"request:{method}:{normalized_endpoint}"
 
 class GitHubAPI:
     def __init__(self, token=None, username=None):
@@ -11,6 +22,7 @@ class GitHubAPI:
         self.username = username or 'yungryce'
         self.headers = {'Authorization': f'token {self.token}'} if self.token else {}
 
+    @cache_manager.cache_decorator(cache_key_func=generate_request_cache_key, ttl=3600)
     def make_request(self, method, endpoint, headers=None, params=None, data=None, accept_raw=False, timeout=30):
         full_url = f"https://api.github.com/{endpoint.lstrip('/')}"
         request_headers = self.headers.copy()
