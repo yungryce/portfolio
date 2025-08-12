@@ -7,7 +7,7 @@ from ai.repo_context_builder import RepoContextBuilder
 from ai.ai_context_builder import AIContextBuilder
 from model.fine_tuning import SemanticModel
 from ai.semantic_scorer import SemanticScorer
-from github.cache_client import GitHubCache
+from Samples.cache_client import GitHubCache
 
 logger = logging.getLogger('portfolio.api')
 

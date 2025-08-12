@@ -1,5 +1,5 @@
 from github.github_api import GitHubAPI
-from github.cache_client import GitHubCache
+from Samples.cache_client import GitHubCache
 from github.github_file_manager import GitHubFileManager
 from github.github_repo_manager import GitHubRepoManager
 from typing import Dict, Any, List

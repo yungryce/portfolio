@@ -1,5 +1,4 @@
 import json
-from linecache import cache
 import logging
 import os
 import time
@@ -42,7 +41,7 @@ def _get_github_managers(username=None):
 
     # Initialize components in dependency order
     api = GitHubAPI(token=github_token, username=username)
-    file_manager = GitHubFileManager(api, cache_manager)
+    file_manager = GitHubFileManager(api)
     repo_manager = GitHubRepoManager(api, file_manager, username=username)
 
     return api, file_manager, repo_manager
@@ -68,25 +67,45 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
 
         if not force_refresh:
             cache_entry = cache_manager.get(bundle_cache_key)
-            if cache_entry and cache_entry['status'] == 'valid':
+            if cache_entry:
                 logger.info(f"Cache exists for user '{username}', cache info: {len(cache_entry['data'])} repositories")
 
-                # Return cached response with additional metadata
-                return create_success_response({
-                    "status": "cached",
-                    "message": "Using cached repository data",
-                    "timestamp": datetime.now().isoformat(),
-                    "cache_key": bundle_cache_key,
-                    "repos_count": len(cache_entry['data']) if isinstance(cache_entry['data'], list) else 0,
-                    "cache_info": {
-                        "expires_at": cache_entry.get('expires_at'),
-                        "time_until_expiry_seconds": cache_entry.get('time_until_expiry_seconds'),
-                        "last_modified": cache_entry.get('last_modified'),
-                        "size_bytes": cache_entry.get('size_bytes')
-                    }
-                })
-            elif cache_entry and cache_entry['status'] == 'expired':
-                logger.info(f"Cache expired for user '{username}', proceeding with orchestration")
+                # Get current repository list and calculate fingerprints
+                _, _, repo_manager = _get_github_managers(username)
+                current_repos = repo_manager.get_all_repos_metadata(include_languages=False)
+                current_fingerprints = {
+                    repo.get('name'): cache_manager.generate_repo_fingerprint(repo)
+                    for repo in current_repos if repo.get('name')
+                }
+
+                # Compare fingerprints with cached bundle
+                cached_fingerprints = {
+                    repo.get('repo_metadata', {}).get('name'): repo.get('fingerprint')
+                    for repo in cache_entry['data'] if repo.get('repo_metadata', {}).get('name')
+                }
+
+                # Detect changes in existing repositories
+                changed_repos = [
+                    repo_name for repo_name, fingerprint in current_fingerprints.items()
+                    if cached_fingerprints.get(repo_name) != fingerprint
+                ]
+
+                if not changed_repos:
+                    # Return cached response with additional metadata
+                    bundle_fingerprint = cache_entry.get('metadata', {}).get('fingerprint', 'unknown')
+                    return create_success_response({
+                        "status": "cached",
+                        "message": "Using cached repository data",
+                        "timestamp": datetime.now().isoformat(),
+                        "cache_key": bundle_cache_key,
+                        "repos_count": len(cache_entry['data']) if isinstance(cache_entry['data'], list) else 0,
+                        "bundle_fingerprint": bundle_fingerprint,
+                        "cache_info": {
+                            "last_modified": cache_entry.get('last_modified'),
+                            "size_bytes": cache_entry.get('size_bytes'),
+                            "no_expiry": cache_entry.get('no_expiry', False)
+                        }
+                    })
             else:
                 logger.info(f"No valid cache found for user '{username}', proceeding with orchestration")
         else:
@@ -97,7 +116,7 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
         logger.info(f"Started repo_context_orchestrator for user '{username}', instance ID: {instance_id}")
 
         # Return a status-check response for the orchestration
-        response = client.create_check_status_response(req, instance_id)
+        response = create_success_response(req, instance_id)
         logger.info(f"Check status response: {response.get_body().decode()}")
         return response
 
@@ -114,18 +133,18 @@ def repo_context_orchestrator(context):
     username = context.get_input()
 
     # Get repositories that need processing (stale or missing from cache)
-    stale_repos_data = yield context.call_activity('get_stale_repos_activity', username)
+    repos_data = yield context.call_activity('get_stale_repos_activity', username)
 
-    if not stale_repos_data['stale_repos']:
+    if not repos_data['stale_repos'] and repos_data['cached_bundle']:
         logger.info(f"No stale repositories found for user '{username}', returning cached bundle")
-        logger.info(f"Cached bundle contains {len(stale_repos_data['cached_bundle'])} repositories")
-        return stale_repos_data['cached_bundle']
+        logger.info(f"Cached bundle contains {len(repos_data['cached_bundle'])} repositories")
+        return repos_data['cached_bundle']
 
-    logger.info(f"Processing {len(stale_repos_data['stale_repos'])} stale repositories for user '{username}'")
+    logger.info(f"Processing {len(repos_data['stale_repos'])} stale repositories for user '{username}'")
 
     # Process only stale repositories
     tasks = []
-    for repo_metadata in stale_repos_data['stale_repos']:
+    for repo_metadata in repos_data['stale_repos']:
         tasks.append(context.call_activity('fetch_repo_context_bundle_activity', {
             'username': username,
             'repo_metadata': trim_processed_repo(repo_metadata)
@@ -138,7 +157,7 @@ def repo_context_orchestrator(context):
     merged_results = yield context.call_activity('merge_repo_results_activity', {
         'username': username,
         'fresh_results': stale_results,
-        'cached_bundle': stale_repos_data['cached_bundle']
+        'cached_bundle': repos_data['cached_bundle']
     })
 
     logger.info(f"Completed repo context orchestration for user '{username}': "
@@ -150,66 +169,66 @@ def repo_context_orchestrator(context):
 def get_stale_repos_activity(activityContext):
     """
     Activity function to identify repositories that need processing.
+    Uses fingerprinting to detect changes instead of relying solely on TTL.
     Returns both stale repositories and existing cached bundle.
     """
     username = activityContext
     _, _, repo_manager = _get_github_managers(username)
 
+    # Fetch cached bundle
     bundle_cache_key = f"repos_bundle_context_{username}"
     cached_bundle = cache_manager.get(bundle_cache_key)
     logger.info(f"Bundle cache status for '{username}': {cached_bundle.get('status')}")
 
-    # Initialize empty data array as default
-    cached_data = []
-
-    if cached_bundle and cached_bundle['status'] == 'valid' and isinstance(cached_bundle.get('data'), list):
-        logger.info(f"Valid bundle cache found for user '{username}', repositories: {len(cached_bundle['data'])}")
-        return {
-            'stale_repos': [],
-            'cached_bundle': cached_bundle['data']
-        }
-    logger.info(f"Bundle cache not valid for user '{username}', checking individual repository caches")
-
+    # Fetch current repository metadata
     all_repos_metadata = repo_manager.get_all_repos_metadata(include_languages=True)
+
+    # Calculate fingerprints for current repositories
+    current_fingerprints = {
+        repo.get('name'): cache_manager.generate_repo_fingerprint(repo)
+        for repo in all_repos_metadata if repo.get('name')
+    }
+
+    # Extract fingerprints from cached bundle
+    cached_fingerprints = {
+        repo.get('repo_metadata', {}).get('name'): repo.get('fingerprint')
+        for repo in (cached_bundle.get('data') or []) if repo.get('repo_metadata', {}).get('name')
+    }
+
+    # Identify stale and valid repositories
     stale_repos = []
-    valid_repos_meta = []
+    valid_repos = []
     for repo_metadata in all_repos_metadata:
         repo_name = repo_metadata.get('name')
         if not repo_name:
             continue
 
-        repo_cache_key = f"repo_context_{username}_{repo_name}"
-        cached_repo_data = cache_manager.get(repo_cache_key)
+        current_fingerprint = current_fingerprints.get(repo_name)
+        cached_fingerprint = cached_fingerprints.get(repo_name)
 
-        if not cached_repo_data or cached_repo_data['status'] != 'valid':
+        if current_fingerprint != cached_fingerprint:
+            logger.debug(f"Repo '{repo_name}' marked as stale due to fingerprint mismatch or missing cache")
             stale_repos.append(repo_metadata)
         else:
-            valid_repos_meta.append(repo_metadata)
+            valid_repos.append(repo_metadata)
 
-    # Hydrate valid repos from per-repo cache to ensure we return full bundles, not metadata
-    valid_repos_full = []
-    reclassified_stale = []
-    for repo_metadata in valid_repos_meta:
+    # Hydrate valid repositories from per-repo cache
+    hydrated_valid_repos = []
+    for repo_metadata in valid_repos:
         repo_name = repo_metadata.get('name')
         repo_cache_key = f"repo_context_{username}_{repo_name}"
         cached_repo = cache_manager.get(repo_cache_key)
-        if cached_repo and cached_repo['status'] == 'valid' and isinstance(cached_repo.get('data'), dict):
-            valid_repos_full.append(cached_repo['data'])
+        if cached_repo and isinstance(cached_repo.get('data'), dict):
+            hydrated_valid_repos.append(cached_repo['data'])
         else:
-            # If hydration fails, reclassify as stale to refresh
-            reclassified_stale.append(repo_metadata)
+            logger.warning(f"Repo '{repo_name}' missing or invalid in per-repo cache, reclassifying as stale")
+            stale_repos.append(repo_metadata)
 
-    if reclassified_stale:
-        logger.warning(f"Reclassifying {len(reclassified_stale)} repos as stale due to missing per-repo cache")
-        stale_repos.extend(reclassified_stale)
-
-    logger.info(f"Found {len(stale_repos)} stale and {len(valid_repos_full)} valid (hydrated) repositories out of {len(all_repos_metadata)} for '{username}'")
-    logger.debug(f"Stale repositories type: {type(stale_repos)} - Cached bundle type: {type(cached_bundle['data'])}")
-    logger.debug(f"{json.dumps(cached_bundle, indent=2)}")
-
+    # Return results
+    logger.info(f"Found {len(stale_repos)} stale and {len(hydrated_valid_repos)} valid repositories for user '{username}'")
     return {
         'stale_repos': stale_repos,
-        'cached_bundle': valid_repos_full  # Always return hydrated bundles here
+        'cached_bundle': hydrated_valid_repos
     }
 
 @app.activity_trigger(input_name="activityContext")
@@ -223,13 +242,14 @@ def fetch_repo_context_bundle_activity(activityContext):
     repo_name = repo_metadata.get('name')
 
     # Initialize managers
-    _, file_manager, repo_manager = _get_github_managers(username)
-    file_type_analyzer = FileTypeAnalyzer()
+    _, _, repo_manager = _get_github_managers(username)
+
+    # Generate fingerprint for this repository
+    fingerprint = cache_manager.generate_repo_fingerprint(repo_metadata)
 
     # Fetch .repo-context.json
     repo_context = repo_manager.get_file_content(repo=repo_name, path='.repo-context.json', username=username)
     if repo_context and isinstance(repo_context, str):
-        import json
         try:
             repo_context = json.loads(repo_context)
         except Exception:
@@ -247,6 +267,7 @@ def fetch_repo_context_bundle_activity(activityContext):
     architecture_content = repo_manager.get_file_content(repo=repo_name, path='ARCHITECTURE.md', username=username) or ""
 
     # Analyze file types
+    file_type_analyzer = FileTypeAnalyzer()
     file_extensions = repo_manager.get_all_file_types(repo_name, username)
     file_types = file_type_analyzer.analyze_repository_files(file_extensions)
 
@@ -257,12 +278,14 @@ def fetch_repo_context_bundle_activity(activityContext):
         'readme_content': readme_content,
         'skills_index_content': skills_index_content,
         'architecture_content': architecture_content,
-        'file_types': file_types
+        'file_types': file_types,
+        'fingerprint': fingerprint
     }
 
     # Save to cache
     repo_cache_key = f"repo_context_{username}_{repo_name}"
-    cache_manager.save(repo_cache_key, result, ttl=43200)  # Cache for 12 hours
+    cache_manager.save(repo_cache_key, result, ttl=None, fingerprint=fingerprint) # No TTL for repo context
+    logger.info(f"Saved repository '{repo_name}' with fingerprint: {fingerprint}")
 
     return result
 
@@ -279,7 +302,8 @@ def merge_repo_results_activity(activityContext):
     _, _, _ = _get_github_managers(username)
 
     # Create lookup for fresh results by repository name
-    fresh_repo_lookup = {result.get('name'): result for result in fresh_results if result.get('name')}
+    fresh_repo_lookup = {result.get('repo_metadata', {}).get('name'): result 
+                         for result in fresh_results if result.get('repo_metadata', {}).get('name')}
 
     # Start with cached bundle and update with fresh results
     merged_results = []
@@ -287,7 +311,7 @@ def merge_repo_results_activity(activityContext):
 
     # Update cached repos with fresh data where available
     for cached_repo in cached_bundle:
-        repo_name = cached_repo.get('name')
+        repo_name = cached_repo.get('repo_metadata', {}).get('name')
         if repo_name in fresh_repo_lookup:
             # Use fresh data
             merged_results.append(fresh_repo_lookup[repo_name])
@@ -300,24 +324,30 @@ def merge_repo_results_activity(activityContext):
 
     # Add any new repositories that weren't in the cached bundle
     for fresh_repo in fresh_results:
-        repo_name = fresh_repo.get('name')
+        repo_name = fresh_repo.get('repo_metadata', {}).get('name')
         if repo_name and repo_name not in processed_repo_names:
             merged_results.append(fresh_repo)
             logger.debug(f"Added new repository '{repo_name}' to bundle")
 
     # Cache individual repository results
     for fresh_repo in fresh_results:
-        repo_name = fresh_repo.get('name')
+        repo_name = fresh_repo.get('repo_metadata', {}).get('name')
         if repo_name:
             repo_cache_key = f"repo_context_{username}_{repo_name}"
-            cache_manager.save(repo_cache_key, fresh_repo, ttl=43200)  # Cache for 12 hours
+            fingerprint = fresh_repo.get('fingerprint')
+            cache_manager.save(repo_cache_key, fresh_repo, ttl=None, fingerprint=fingerprint)  # Use None for TTL
 
-    # Cache the complete merged bundle
+    # Cache the complete merged bundle - this never expires as we use fingerprints
     bundle_cache_key = f"repos_bundle_context_{username}"
     if merged_results:
-        cache_manager.save(bundle_cache_key, merged_results, ttl=86400)  # 24 hours
+        import hashlib
+        # Generate bundle fingerprint as a hash of all repo fingerprints
+        repo_fingerprints = [repo.get('fingerprint', '') for repo in merged_results]
+        bundle_fingerprint = hashlib.md5(json.dumps(sorted(repo_fingerprints)).encode()).hexdigest()
+        
+        cache_manager.save(bundle_cache_key, merged_results, ttl=None, fingerprint=bundle_fingerprint)
         logger.info(f"Cached merged bundle with {len(merged_results)} repositories under key: {bundle_cache_key}")
-
+        logger.info(f"Bundle fingerprint: {bundle_fingerprint}")
     return merged_results
 
 @app.route(route="ai", methods=["POST"])
@@ -343,17 +373,11 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         cache_key = f"repos_bundle_context_{username}"
         cached_results = cache_manager.get(cache_key)
         logger.debug(f"Cached results for user '{username}': {cached_results is not None}")
+        
         all_repos_bundle = None
-
-        if cached_results and cached_results['status'] == 'valid':
+        if cached_results and isinstance(cached_results.get('data'), list):
             all_repos_bundle = cached_results['data']
             logger.info(f"Using valid cached results for user '{username}'")
-        elif cached_results and cached_results['status'] == 'expired':
-            logger.info(f"Cached results expired for user '{username}', attempting orchestration fallback")
-            all_repos_bundle = None
-        else:
-            logger.info(f"No valid cached results found for user '{username}', attempting orchestration fallback")
-            all_repos_bundle = None
 
         if not all_repos_bundle and instance_id:
             orchestration_status = get_orchestration_status(instance_id, status_query_url)

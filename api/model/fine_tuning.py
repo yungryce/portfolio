@@ -1,5 +1,5 @@
 from typing import Tuple, List, Dict, Any, Optional
-from github.cache_client import GitHubCache
+from Samples.cache_client import GitHubCache
 from sentence_transformers import SentenceTransformer, InputExample, losses
 from torch.utils.data import DataLoader
 import logging

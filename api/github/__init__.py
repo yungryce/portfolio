@@ -9,7 +9,7 @@ This package provides integration with the GitHub API, including:
 """
 
 from github.github_api import GitHubAPI
-from github.cache_client import GitHubCache
+from Samples.cache_client import GitHubCache
 from github.cache_manager import CacheManager, cache_manager
 from github.github_file_manager import GitHubFileManager
 from github.github_repo_manager import GitHubRepoManager

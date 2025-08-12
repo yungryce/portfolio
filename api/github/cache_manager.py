@@ -166,7 +166,7 @@ class CacheManager:
             logger.warning(f"Error retrieving cache entry for key {cache_key}: {str(e)}")
             return {'status': 'error', 'data': None, 'metadata': None}
 
-    def save(self, cache_key: str, data: Any, ttl: Optional[int] = None):
+    def save(self, cache_key: str, data: Any, ttl: Optional[int] = None, fingerprint: Optional[str] = None) -> bool:
         """
         Save data to cache with optional TTL.
         
@@ -186,6 +186,11 @@ class CacheManager:
                 'data': data,
                 'cached_at': datetime.now().isoformat()
             }
+            
+            # Store fingerprint if provided
+            if fingerprint:
+                metadata['fingerprint'] = fingerprint
+                cache_data['fingerprint'] = fingerprint
             
             if ttl is None:
                 # Non-expiring cache
@@ -287,6 +292,30 @@ class CacheManager:
                 return result
             return wrapper
         return decorator
+
+    def generate_repo_fingerprint(self, repo_metadata: Dict[str, Any]) -> str:
+        """
+        Generate a fingerprint for a repository based on its metadata.
+        
+        Args:
+            repo_metadata: Repository metadata dictionary
+            
+        Returns:
+            A string hash that uniquely identifies the repository state
+        """
+        # Extract key fields that indicate changes
+        fingerprint_data = {
+            'id': repo_metadata.get('id'),
+            'updated_at': repo_metadata.get('updated_at'),
+            'pushed_at': repo_metadata.get('pushed_at'),
+            'size': repo_metadata.get('size'),
+            'default_branch': repo_metadata.get('default_branch'),
+            'language': repo_metadata.get('language')
+        }
+        
+        # Convert to JSON string and hash
+        fingerprint_json = json.dumps(fingerprint_data, sort_keys=True)
+        return hashlib.md5(fingerprint_json.encode()).hexdigest()
 
     def cleanup_expired_cache(self, batch_size: int = 100, dry_run: bool = False) -> Dict[str, Any]:
         """
