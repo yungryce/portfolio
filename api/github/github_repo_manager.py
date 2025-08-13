@@ -12,7 +12,7 @@ from fa_helpers import trim_processed_repo
 logger = logging.getLogger('portfolio.api')
 
 class GitHubRepoManager:
-    def __init__(self, api: GitHubAPI, file_manager: GitHubFileManager, username: Optional[str] = None):
+    def __init__(self, api: GitHubAPI, username: Optional[str] = None):
         """Initialize the GitHubRepoManager with API, cache, and file manager."""
         self.api = api
         self.username = username
@@ -120,34 +120,47 @@ class GitHubRepoManager:
         Returns a flat list of file paths (including nested files).
         """
         username = username or self.username
+        if not username:
+            raise ValueError("Username is required")
 
         def _fetch_tree(path: str = "") -> List[str]:
             files: List[str] = []
             try:
-                contents = self.file_manager.list_directory(username, repo_name, path)
-                for item in contents:
-                    if item.get('type') == 'file':
-                        files.append(item.get('path'))
-                    elif item.get('type') == 'dir' and recursive:
-                        sub_path = item.get('path')
-                        files.extend(_fetch_tree(sub_path))
-                    elif isinstance(contents, dict) and contents.get('type') == 'file':
-                        files.append(contents.get('path'))
+                path_segment = path if path else ""
+                endpoint = f"repos/{username}/{repo_name}/contents/{path_segment}"
+                contents = self.api.make_request('GET', endpoint)
+
+                # If directory: contents is a list of items
+                if isinstance(contents, list):
+                    for item in contents:
+                        if not isinstance(item, dict):
+                            continue
+                        item_type = item.get('type')
+                        item_path = item.get('path')
+                        if item_type == 'file' and item_path:
+                            files.append(item_path)
+                        elif item_type == 'dir' and item_path and recursive:
+                            files.extend(_fetch_tree(item_path))
+                # If single file: contents is an object
+                elif isinstance(contents, dict) and contents.get('type') == 'file':
+                    file_path = contents.get('path')
+                    if file_path:
+                        files.append(file_path)
             except Exception as e:
                 logger.warning(f"Error fetching tree for {repo_name} at '{path}': {str(e)}")
             return files
 
         return _fetch_tree("")
 
-    @cache_manager.cache_decorator(cache_key_func=lambda repo_name, username: f"file_types:{username}:{repo_name}", ttl=3600)
-    def get_all_file_types(self, repo_name: str, username: Optional[str] = None) -> Dict[str, int]:
+    def get_all_file_types(self, repo_name: str, username: str = None) -> Dict[str, int]:
         """
         Recursively retrieve all file types/extensions in a repository.
         """
-        if not username:
-            raise ValueError("Username is required")
-        endpoint = f"repos/{username}/{repo_name}/languages"
-        languages = self.api.make_request('GET', endpoint)
-        if not isinstance(languages, dict):
-            raise ValueError("Invalid response format for file types")
-        return languages
+        username = username or self.username
+        file_types = {}
+        files = self.get_repository_tree(repo_name, username=username, recursive=True)
+        for file_path in files:
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext:
+                file_types[ext] = file_types.get(ext, 0) + 1
+        return file_types
