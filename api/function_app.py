@@ -12,6 +12,7 @@ from github.github_api import GitHubAPI
 from github.cache_manager import cache_manager
 from github.github_file_manager import GitHubFileManager
 from github.github_repo_manager import GitHubRepoManager
+from github.fingerprint_manager import FingerprintManager
 
 # AI imports
 from ai.type_analyzer import FileTypeAnalyzer
@@ -67,39 +68,35 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
 
         if not force_refresh:
             cache_entry = cache_manager.get(bundle_cache_key)
-            if cache_entry:
+            if cache_entry['data']:
                 logger.info(f"Cache exists for user '{username}', cache info: {len(cache_entry['data'])} repositories")
 
                 # Get current repository list and calculate fingerprints
                 _, _, repo_manager = _get_github_managers(username)
                 current_repos = repo_manager.get_all_repos_metadata(include_languages=False)
+                
                 current_fingerprints = {
-                    repo.get('name'): cache_manager.generate_repo_fingerprint(repo)
+                    repo.get('name'): FingerprintManager.generate_metadata_fingerprint(repo)
                     for repo in current_repos if repo.get('name')
                 }
-
-                # Compare fingerprints with cached bundle
-                cached_fingerprints = {
-                    repo.get('repo_metadata', {}).get('name'): repo.get('fingerprint')
-                    for repo in cache_entry['data'] if repo.get('repo_metadata', {}).get('name')
-                }
-
-                # Detect changes in existing repositories
-                changed_repos = [
-                    repo_name for repo_name, fingerprint in current_fingerprints.items()
-                    if cached_fingerprints.get(repo_name) != fingerprint
-                ]
-
-                if not changed_repos:
-                    # Return cached response with additional metadata
-                    bundle_fingerprint = cache_entry.get('metadata', {}).get('fingerprint', 'unknown')
+                
+                # Generate a current bundle fingerprint
+                current_repo_fingerprints = list(current_fingerprints.values())
+                current_bundle_fingerprint = FingerprintManager.generate_bundle_fingerprint(current_repo_fingerprints)
+                
+                # Compare with cached bundle fingerprint
+                cached_bundle_fingerprint = cache_entry.get('metadata', {}).get('fingerprint')
+                
+                if cached_bundle_fingerprint and cached_bundle_fingerprint == current_bundle_fingerprint:
+                    logger.info("Bundle fingerprints match - using cached data without detailed comparison")
+                    # Return cached response with bundle fingerprint
                     return create_success_response({
                         "status": "cached",
-                        "message": "Using cached repository data",
+                        "message": "Using cached repository data (fingerprint match)",
                         "timestamp": datetime.now().isoformat(),
                         "cache_key": bundle_cache_key,
                         "repos_count": len(cache_entry['data']) if isinstance(cache_entry['data'], list) else 0,
-                        "bundle_fingerprint": bundle_fingerprint,
+                        "bundle_fingerprint": cached_bundle_fingerprint,
                         "cache_info": {
                             "last_modified": cache_entry.get('last_modified'),
                             "size_bytes": cache_entry.get('size_bytes'),
@@ -116,7 +113,7 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
         logger.info(f"Started repo_context_orchestrator for user '{username}', instance ID: {instance_id}")
 
         # Return a status-check response for the orchestration
-        response = create_success_response(req, instance_id)
+        response = client.create_check_status_response(req, instance_id)
         logger.info(f"Check status response: {response.get_body().decode()}")
         return response
 
@@ -178,14 +175,14 @@ def get_stale_repos_activity(activityContext):
     # Fetch cached bundle
     bundle_cache_key = f"repos_bundle_context_{username}"
     cached_bundle = cache_manager.get(bundle_cache_key)
-    logger.info(f"Bundle cache status for '{username}': {cached_bundle.get('status')}")
+    # logger.info(f"Bundle cache status for '{username}': {cached_bundle.get('status')}")
 
     # Fetch current repository metadata
     all_repos_metadata = repo_manager.get_all_repos_metadata(include_languages=True)
 
     # Calculate fingerprints for current repositories
     current_fingerprints = {
-        repo.get('name'): cache_manager.generate_repo_fingerprint(repo)
+        repo.get('name'): FingerprintManager.generate_metadata_fingerprint(repo)
         for repo in all_repos_metadata if repo.get('name')
     }
 
@@ -245,18 +242,12 @@ def fetch_repo_context_bundle_activity(activityContext):
     _, _, repo_manager = _get_github_managers(username)
 
     # Generate fingerprint for this repository
-    fingerprint = cache_manager.generate_repo_fingerprint(repo_metadata)
+    fingerprint = FingerprintManager.generate_metadata_fingerprint(repo_metadata)
 
     # Fetch .repo-context.json
     repo_context = repo_manager.get_file_content(repo=repo_name, path='.repo-context.json', username=username)
-    if repo_context and isinstance(repo_context, str):
-        try:
-            repo_context = json.loads(repo_context)
-        except Exception:
-            repo_context = {}
-    else:
-        repo_context = {}
-
+    repo_context = json.loads(repo_context) if repo_context and isinstance(repo_context, str) else {}
+    
     # Fetch README.md
     readme_content = repo_manager.get_file_content(repo=repo_name, path='README.md', username=username) or ""
 
@@ -268,18 +259,22 @@ def fetch_repo_context_bundle_activity(activityContext):
 
     # Analyze file types
     file_type_analyzer = FileTypeAnalyzer()
-    file_extensions = repo_manager.get_all_file_types(repo_name, username)
-    file_types = file_type_analyzer.analyze_repository_files(file_extensions)
+    file_types = repo_manager.get_all_file_types(repo_name, username)
+    categorized_types = file_type_analyzer.analyze_repository_files(file_types)
 
     # Combine results
     result = {
-        'repo_metadata': repo_metadata,
-        'repo_context': repo_context,
-        'readme_content': readme_content,
-        'skills_index_content': skills_index_content,
-        'architecture_content': architecture_content,
+        "name": repo_name,
+        'metadata': repo_metadata,
+        'repoContext': repo_context,
+        'readme': readme_content,
+        'skills_index': skills_index_content,
+        'architecture': architecture_content,
         'file_types': file_types,
-        'fingerprint': fingerprint
+        "categorized_types": categorized_types,
+        'fingerprint': fingerprint,
+        "languages": repo_metadata.get("languages", {}) if repo_metadata else {},
+        'has_documentation': bool(repo_context) and bool(readme_content)
     }
 
     # Save to cache
@@ -343,7 +338,7 @@ def merge_repo_results_activity(activityContext):
         import hashlib
         # Generate bundle fingerprint as a hash of all repo fingerprints
         repo_fingerprints = [repo.get('fingerprint', '') for repo in merged_results]
-        bundle_fingerprint = hashlib.md5(json.dumps(sorted(repo_fingerprints)).encode()).hexdigest()
+        bundle_fingerprint = FingerprintManager.generate_bundle_fingerprint(repo_fingerprints)
         
         cache_manager.save(bundle_cache_key, merged_results, ttl=None, fingerprint=bundle_fingerprint)
         logger.info(f"Cached merged bundle with {len(merged_results)} repositories under key: {bundle_cache_key}")

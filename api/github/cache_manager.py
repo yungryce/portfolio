@@ -274,7 +274,10 @@ class CacheManager:
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
                 # Generate cache key based on function arguments
-                cache_key = cache_key_func(*args, **kwargs)
+                try:
+                    cache_key = cache_key_func(*args[1:], **kwargs)
+                except TypeError:
+                    cache_key = cache_key_func(*args, **kwargs)
                 
                 # Check cache
                 cache_result = self.get(cache_key)
@@ -292,30 +295,6 @@ class CacheManager:
                 return result
             return wrapper
         return decorator
-
-    def generate_repo_fingerprint(self, repo_metadata: Dict[str, Any]) -> str:
-        """
-        Generate a fingerprint for a repository based on its metadata.
-        
-        Args:
-            repo_metadata: Repository metadata dictionary
-            
-        Returns:
-            A string hash that uniquely identifies the repository state
-        """
-        # Extract key fields that indicate changes
-        fingerprint_data = {
-            'id': repo_metadata.get('id'),
-            'updated_at': repo_metadata.get('updated_at'),
-            'pushed_at': repo_metadata.get('pushed_at'),
-            'size': repo_metadata.get('size'),
-            'default_branch': repo_metadata.get('default_branch'),
-            'language': repo_metadata.get('language')
-        }
-        
-        # Convert to JSON string and hash
-        fingerprint_json = json.dumps(fingerprint_data, sort_keys=True)
-        return hashlib.md5(fingerprint_json.encode()).hexdigest()
 
     def cleanup_expired_cache(self, batch_size: int = 100, dry_run: bool = False) -> Dict[str, Any]:
         """

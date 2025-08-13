@@ -1,8 +1,10 @@
 from typing import Tuple, List, Dict, Any, Optional
-from Samples.cache_client import GitHubCache
+from github.cache_manager import cache_manager
+from github.fingerprint_manager import FingerprintManager
 from sentence_transformers import SentenceTransformer, InputExample, losses
 from torch.utils.data import DataLoader
 import logging
+import datetime
 import os
 import tempfile
 import zipfile
@@ -24,7 +26,7 @@ class SemanticModel:
         """
         logger.info(f"Initializing SemanticModel")
         self.model = None
-        self.cache_client = GitHubCache(use_cache=True)
+        # self.cache_client = GitHubCache(use_cache=True)
 
     def _ensure_base_model(self):
         """
@@ -48,43 +50,6 @@ class SemanticModel:
         if self.model is None:
             self._ensure_base_model()
         return self.model
-    
-    def _generate_repo_fingerprint(self, repos_bundle: List[Dict]) -> str:
-        """
-        Generates a unique fingerprint of repositories to determine if retraining is needed.
-        
-        Args:
-            repos_bundle: List of repository context bundles
-            
-        Returns:
-            str: SHA-256 hash representing the current state of repositories
-        """
-        import hashlib
-        import json
-        
-        # Extract essential data for fingerprinting
-        fingerprint_data = []
-        for repo in repos_bundle:
-            if not repo.get("has_documentation", False):
-                continue
-                
-            # Include repo name, last modified, and other key metadata
-            repo_data = {
-                "name": repo.get("name", ""),
-                "last_modified": repo.get("last_updated", ""),
-                # Include hashes of key content fields to detect changes
-                "readme_hash": hashlib.sha256(repo.get("readme", "").encode()).hexdigest()[:16],
-                "skills_hash": hashlib.sha256(repo.get("skills_index", "").encode()).hexdigest()[:16],
-                "arch_hash": hashlib.sha256(repo.get("architecture", "").encode()).hexdigest()[:16]
-            }
-            fingerprint_data.append(repo_data)
-        
-        # Sort to ensure consistent order
-        fingerprint_data.sort(key=lambda x: x["name"])
-        
-        # Generate hash from the serialized data
-        fingerprint_str = json.dumps(fingerprint_data, sort_keys=True)
-        return hashlib.sha256(fingerprint_str.encode()).hexdigest()
         
     def ensure_model_ready(self, all_repos_bundle: List[Dict]) -> bool:
         """
@@ -98,8 +63,6 @@ class SemanticModel:
         Returns:
             bool: True if model is ready for use, False otherwise
         """
-        import datetime
-
         # Filter documented repositories
         documented_repos = [repo for repo in all_repos_bundle if repo.get("has_documentation", False)]
         if not documented_repos:
@@ -107,7 +70,7 @@ class SemanticModel:
             return False
     
         # Generate fingerprint of current repositories
-        fingerprint = self._generate_repo_fingerprint(documented_repos)
+        fingerprint = FingerprintManager.generate_content_fingerprint(documented_repos)
         logger.info(f"Generated repository fingerprint: {fingerprint[:8]}...")
         
         # Check local disk cache first
@@ -122,10 +85,11 @@ class SemanticModel:
             except Exception as e:
                 logger.warning(f"Failed to load model from disk cache: {str(e)}")
 
+        # Check global cache for the model metadata
         cache_key = "fine_tuned_model_metadata"
-        cache_result = self.cache_client._get_from_cache(cache_key)
+        cache_result = cache_manager.get(cache_key)
 
-        if cache_result['status'] == 'valid':
+        if cache_result['data']:
             model_metadata = cache_result['data']
 
             # Check if we have a model matching the current fingerprint
@@ -135,7 +99,6 @@ class SemanticModel:
                 load_success = self.load_model_from_storage(model_metadata, local_cache_dir)
                 if load_success:
                     return True
-
         
         # No matching model found - train new model
         logger.info(f"No model found with matching fingerprint. Training with {len(documented_repos)} repositories")
@@ -156,10 +119,11 @@ class SemanticModel:
                 "repo_names": [repo.get("name", "Unknown") for repo in documented_repos]
             }
             
-            self.cache_client._save_to_cache(
+            self.cache_manager.save(
                 cache_key, 
-                model_metadata,
-                ttl=None  # No expiration - models valid until repos change
+                model_info,
+                ttl=None,  # No expiration - models valid until repos change
+                fingerprint=fingerprint
             )
             logger.info("Fine-tuned model metadata saved to cache.")
             return True

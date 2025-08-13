@@ -4,15 +4,20 @@ import logging
 from base64 import b64decode
 from .cache_manager import cache_manager
 import hashlib
+import json
 
 logger = logging.getLogger('portfolio.api')
 
-def generate_request_cache_key(method, endpoint, params=None):
+def generate_request_cache_key(method, endpoint, **kwargs):
     """Generate a cache key for a GitHub API request."""
+    params = kwargs.get('params', None)
     normalized_endpoint = endpoint.lstrip('/').replace('/', '_').replace('?', '_').replace('&', '_')
-    if params:
-        param_string = str(params)
-        param_hash = hashlib.md5(param_string.encode()).hexdigest()[:8]
+    if params is not None:
+        try:
+            param_str = json.dumps(params, sort_keys=True)
+        except Exception:
+            param_str = str(params)
+        param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
         return f"request:{method}:{normalized_endpoint}:{param_hash}"
     return f"request:{method}:{normalized_endpoint}"
 

@@ -5,9 +5,8 @@ import requests
 import time
 from typing import Dict, Any, List, Optional
 from .github_api import GitHubAPI
-from .github_file_manager import GitHubFileManager
 from .cache_manager import cache_manager
-from .fa_helpers import trim_processed_repo
+from fa_helpers import trim_processed_repo
 
 
 logger = logging.getLogger('portfolio.api')
@@ -16,7 +15,6 @@ class GitHubRepoManager:
     def __init__(self, api: GitHubAPI, file_manager: GitHubFileManager, username: Optional[str] = None):
         """Initialize the GitHubRepoManager with API, cache, and file manager."""
         self.api = api
-        self.file_manager = file_manager
         self.username = username
 
     @cache_manager.cache_decorator(cache_key_func=lambda username, repo: f"repos:{username}:{repo}", ttl=3600)
@@ -47,7 +45,10 @@ class GitHubRepoManager:
                 repo_data['languages'] = languages
         return repo_data
 
-    @cache_manager.cache_decorator(cache_key_func=lambda username: f"repos:{username}:all", ttl=3600)
+    @cache_manager.cache_decorator(
+    cache_key_func=lambda username=None, per_page=100, include_languages=False: f"repos:{username}:all", 
+    ttl=3600
+    )
     def get_all_repos_metadata(self, username: Optional[str]=None, per_page=100, include_languages: bool=False) -> List[Dict[str, Any]]:
         """Get metadata for all repositories.
 
@@ -63,6 +64,7 @@ class GitHubRepoManager:
         if not username:
             raise ValueError("Username is required")
         endpoint = f"users/{username}/repos"
+        
         repos = self.api.make_request('GET', endpoint, params={'per_page': per_page})
         if not isinstance(repos, list):
             raise ValueError("Invalid response format for repositories metadata")
@@ -119,8 +121,8 @@ class GitHubRepoManager:
         """
         username = username or self.username
 
-        def _fetch_tree(path=""):
-            files = []
+        def _fetch_tree(path: str = "") -> List[str]:
+            files: List[str] = []
             try:
                 contents = self.file_manager.list_directory(username, repo_name, path)
                 for item in contents:

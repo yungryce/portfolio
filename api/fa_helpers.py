@@ -193,7 +193,7 @@ def trim_processed_repo(repo: dict) -> dict:
         'language', 'license', 'allow_forking', 'topics',
         'visibility', 'file_paths', 'languages',
         'total_language_bytes', 'language_percentages',
-        'languages_sorted', 'relevance_scores',
+        'languages_sorted', 'relevance_scores', 'default_branch',
         'language_relevance_score', 'matched_query_languages'
     ]
     trimmed_repo = {k: v for k, v in repo.items() if k in keys_to_keep}
