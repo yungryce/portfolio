@@ -42,10 +42,9 @@ def _get_github_managers(username=None):
 
     # Initialize components in dependency order
     api = GitHubAPI(token=github_token, username=username)
-    file_manager = GitHubFileManager(api)
-    repo_manager = GitHubRepoManager(api, file_manager, username=username)
+    repo_manager = GitHubRepoManager(api, username=username)
 
-    return api, file_manager, repo_manager
+    return api, repo_manager
 
 
 @app.route(route="orchestrators/repo_context_orchestrator", methods=["POST"])
@@ -72,7 +71,7 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
                 logger.info(f"Cache exists for user '{username}', cache info: {len(cache_entry['data'])} repositories")
 
                 # Get current repository list and calculate fingerprints
-                _, _, repo_manager = _get_github_managers(username)
+                _, repo_manager = _get_github_managers(username)
                 current_repos = repo_manager.get_all_repos_metadata(include_languages=False)
                 
                 current_fingerprints = {
@@ -170,7 +169,7 @@ def get_stale_repos_activity(activityContext):
     Returns both stale repositories and existing cached bundle.
     """
     username = activityContext
-    _, _, repo_manager = _get_github_managers(username)
+    _, repo_manager = _get_github_managers(username)
 
     # Fetch cached bundle
     bundle_cache_key = f"repos_bundle_context_{username}"
@@ -239,7 +238,7 @@ def fetch_repo_context_bundle_activity(activityContext):
     repo_name = repo_metadata.get('name')
 
     # Initialize managers
-    _, _, repo_manager = _get_github_managers(username)
+    _, repo_manager = _get_github_managers(username)
 
     # Generate fingerprint for this repository
     fingerprint = FingerprintManager.generate_metadata_fingerprint(repo_metadata)
@@ -293,8 +292,6 @@ def merge_repo_results_activity(activityContext):
     username = input_data.get('username')
     fresh_results = input_data.get('fresh_results', [])
     cached_bundle = input_data.get('cached_bundle', [])
-
-    _, _, _ = _get_github_managers(username)
 
     # Create lookup for fresh results by repository name
     fresh_repo_lookup = {result.get('repo_metadata', {}).get('name'): result 
@@ -360,7 +357,6 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         status_query_url = request_body.get('status_query_url')
 
         # Initialize AI assistant with updated managers
-        _, _, _ = _get_github_managers(username)
         from ai.ai_assistant import AIAssistant
         ai_assistant = AIAssistant(username=username)
 
@@ -399,7 +395,7 @@ def get_user_repos(req: func.HttpRequest) -> func.HttpResponse:
     HTTP endpoint to fetch all repositories for a user.
     """
     username = req.route_params.get('username')
-    _, _, repo_manager = _get_github_managers(username)
+    _, repo_manager = _get_github_managers(username)
 
     try:
         repos = repo_manager.get_all_repos_metadata(include_languages=True)
@@ -418,7 +414,7 @@ def get_single_repo(req: func.HttpRequest) -> func.HttpResponse:
             return create_error_response("Username and repository name are required", 400)
 
         # Use repo manager directly
-        _, _, repo_manager = _get_github_managers(username)
+        _, repo_manager = _get_github_managers(username)
         repo_data = repo_manager.get_repo_metadata(username=username, repo=repo, include_languages=True)
 
         if not repo_data:
@@ -440,8 +436,8 @@ def get_repo_files(req: func.HttpRequest) -> func.HttpResponse:
             return create_error_response("Username and repository name are required", 400)
 
         # Use file manager directly
-        _, file_manager, _ = _get_github_managers(username)
-        files = file_manager.get_file_content(username=username, repo=repo, path=path)
+        _, repo_manager = _get_github_managers(username)
+        files = repo_manager.get_file_content(username=username, repo=repo, path=path)
 
         return create_success_response({"files": files})
     except Exception as e:
@@ -456,7 +452,7 @@ def get_user_repos_with_context(req: func.HttpRequest) -> func.HttpResponse:
             return create_error_response("Username is required", 400)
 
         # Use repo manager directly
-        _, _, repo_manager = _get_github_managers(username)
+        _, repo_manager = _get_github_managers(username)
         repos = repo_manager.get_all_repos_with_context(username=username, include_languages=True)
 
         return create_success_response(repos)
@@ -484,9 +480,6 @@ def cache_cleanup_timer(myTimer: func.TimerRequest) -> None:
         if not github_token:
             logger.error('GitHub token not configured, skipping cache cleanup')
             return
-
-        # Initialize managers
-        _, _, _ = _get_github_managers(username)
 
         # Get cache statistics before cleanup
         stats_before = cache_manager.get_cache_statistics()
@@ -567,7 +560,7 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
             return create_error_response("GitHub token not configured", 500)
 
         # Initialize managers
-        _, _, repo_manager = _get_github_managers(username)
+        _, repo_manager = _get_github_managers(username)
 
         # Create AI Assistant with repo manager
         from ai.ai_assistant import AIAssistant
