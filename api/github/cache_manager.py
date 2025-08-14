@@ -120,7 +120,7 @@ class CacheManager:
                 return {
                     'status': 'valid',
                     'data': data.get('data'),
-                    'metadata': metadata,
+                    'fingerprint': metadata.get('fingerprint'),
                     'no_expiry': True,
                     'last_modified': properties.last_modified.isoformat(),
                     'size_bytes': properties.size
@@ -136,7 +136,6 @@ class CacheManager:
                     return {
                         'status': 'valid',
                         'data': data.get('data'),
-                        'metadata': metadata,
                         'expires_at': expires_at.isoformat(),
                         'time_until_expiry_seconds': int(time_until_expiry),
                         'last_modified': properties.last_modified.isoformat(),
@@ -190,7 +189,6 @@ class CacheManager:
             # Store fingerprint if provided
             if fingerprint:
                 metadata['fingerprint'] = fingerprint
-                cache_data['fingerprint'] = fingerprint
             
             if ttl is None:
                 # Non-expiring cache

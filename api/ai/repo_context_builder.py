@@ -1,6 +1,5 @@
 from github.github_api import GitHubAPI
 from Samples.cache_client import GitHubCache
-from github.github_file_manager import GitHubFileManager
 from github.github_repo_manager import GitHubRepoManager
 from typing import Dict, Any, List
 import logging
@@ -16,8 +15,7 @@ class RepoContextBuilder:
         github_token = os.getenv('GITHUB_TOKEN')
         api = GitHubAPI(token=github_token, username=username)
         cache = GitHubCache(use_cache=True)
-        file_manager = GitHubFileManager(api, cache)
-        self.repo_manager = GitHubRepoManager(api, cache, file_manager, username=username)
+        self.repo_manager = GitHubRepoManager(api, cache, username=username)
         self.username = username
 
     def build_tiered_context(self, top_repos: List[Dict], max_repos: int = 3) -> Dict[str, Any]:

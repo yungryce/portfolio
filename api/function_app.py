@@ -10,7 +10,6 @@ from fa_helpers import create_success_response, create_error_response, get_orche
 # Updated imports - use individual managers instead of GitHubClient
 from github.github_api import GitHubAPI
 from github.cache_manager import cache_manager
-from github.github_file_manager import GitHubFileManager
 from github.github_repo_manager import GitHubRepoManager
 from github.fingerprint_manager import FingerprintManager
 
@@ -84,7 +83,7 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
                 current_bundle_fingerprint = FingerprintManager.generate_bundle_fingerprint(current_repo_fingerprints)
                 
                 # Compare with cached bundle fingerprint
-                cached_bundle_fingerprint = cache_entry.get('metadata', {}).get('fingerprint')
+                cached_bundle_fingerprint = cache_entry.get('fingerprint')
                 
                 if cached_bundle_fingerprint and cached_bundle_fingerprint == current_bundle_fingerprint:
                     logger.info("Bundle fingerprints match - using cached data without detailed comparison")
