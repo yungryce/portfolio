@@ -1,150 +1,90 @@
-# Centralized Caching Instructions for Portfolio API
+# Caching Refactoring Instructions for Portfolio API
 
 ## Overview
-This document provides a unified approach to managing caching across the Portfolio API. The goal is to centralize caching logic, ensure consistency, and simplify maintenance. The caching system will handle three levels of caching:
+Refactor the Portfolio API caching system to eliminate per request caching and TTL-based storage and focus on fingerprint-based caching for two primary storage levels. This aligns with the copilot instructions and simplifies cache management by removing time-based expiration.
 
-1. **Low-Level Request Caching**: Caches responses from external APIs (e.g., GitHub API).
-2. **Bundle Caching**: Caches repository bundles (individual and aggregated) during orchestration.
-3. **Metadata Caching**: Caches metadata for trained models.
+## Storage Architecture (After Refactoring)
 
-## Centralized Caching System
-All caching will be managed centrally using a single `CacheManager` class. This class will:
-- Handle all cache operations (get, save, delete).
-- Support dynamic TTL (e.g., `ttl=None` for no expiration).
-- Provide a consistent interface for all caching levels.
-- Ensure backward compatibility to avoid breaking changes.
+### Current Three Levels (Before)
+1. **GitHub Request Level** (REMOVE): Individual API requests cached with TTL
+2. **Repository Bundling** (KEEP): Combined bundle and per-repo bundles during orchestration  
+3. **Model Bundling** (KEEP): AI model references and bundles after training
 
-### Key Features
-1. **Dynamic TTL**:
-   - `ttl=None`: Cache entries do not expire and are updated only when changes are detected.
-   - `ttl=<seconds>`: Cache entries expire after the specified duration.
+### Target Two Levels (After)
+1. **Repository Bundling**: Fingerprint-based caching for `repo_context_orchestrator` and `http_start`
+2. **Model Bundling**: Fingerprint-based caching for `SemanticModel` training and metadata
 
-2. **Change Detection**:
-   - For bundles: Use repository fingerprints to detect changes.
-   - For models: Use repository fingerprints and metadata to detect changes.
+## Key Refactoring Rules
 
-3. **Centralized Logic**:
-   - All caching logic will be moved to the `CacheManager` class.
-   - Existing caching calls will be refactored to use this class.
+### 1. Remove GitHub Request Level Caching
+- **Target**: Remove `@cache_manager.cache_decorator` from `make_request` in `github_api.py`
+- **Reason**: Repository and model level caching provide sufficient performance
+- **Impact**: Simplifies request flow, reduces cache complexity
 
-4. **Backward Compatibility**:
-   - Existing cache keys and structures will remain unchanged.
-   - Transition will be seamless without breaking existing functionality.
+### 2. Repository Bundle Caching (Fingerprint-Based)
+- **Location**: `repo_context_orchestrator`, `http_start`, activity functions
+- **Cache Keys**: `repos_bundle_context_{username}`, `repo_context_{username}_{repo}`
+- **Fingerprint Logic**: Use `FingerprintManager.generate_bundle_fingerprint()` for change detection
+- **No TTL**: Cache entries persist until fingerprint changes indicate repository updates
+- **Container**: `github-cache` (unified container for all caching)
 
-## Implementation Plan
+### 3. Model Bundle Caching (Fingerprint-Based)  
+- **Location**: `SemanticModel` class methods
+- **Cache Keys**: `fine_tuned_model_metadata`, `model_{fingerprint}`
+- **Fingerprint Logic**: Use `FingerprintManager.generate_content_fingerprint()` for model training data
+- **No TTL**: Model cache valid until training data fingerprint changes
+- **Container**: `github-cache` (unified with repository caching)
 
-### 1. Create `CacheManager` Class
-The `CacheManager` class will be responsible for all caching operations. It will:
-- Use Azure Blob Storage for storing cache entries.
-- Support dynamic TTL and no-expiry entries.
-- Provide methods for getting, saving, and deleting cache entries.
-- Include a decorator for abstracting repetitive caching logic.
+## Implementation Steps
 
-#### Example Methods and Decorator
+### Step 1: Remove Request-Level Caching
 ```python
-class CacheManager:
-    def __init__(self, container_name: str, default_ttl: int = 21600):
-        self.container_name = container_name
-        self.default_ttl = default_ttl
-        self.blob_service_client = BlobServiceClient.from_connection_string(os.getenv('AzureWebJobsStorage'))
+# BEFORE: github_api.py
+@cache_manager.cache_decorator(cache_key_func=generate_request_cache_key, ttl=3600)
+def make_request(self, method, endpoint, **kwargs):
 
-    def get(self, cache_key: str) -> Dict[str, Any]:
-        """Retrieve a cache entry."""
-        # Logic for retrieving cache entry
-
-    def save(self, cache_key: str, data: Any, ttl: Optional[int] = None):
-        """Save a cache entry with optional TTL."""
-        # Logic for saving cache entry
-
-    def delete(self, cache_key: str):
-        """Delete a cache entry."""
-        # Logic for deleting cache entry
-
-    def cache_decorator(self, cache_key_func: Callable, ttl: Optional[int] = None):
-        """Decorator to handle caching logic."""
-        def decorator(func):
-            def wrapper(*args, **kwargs):
-                cache_key = cache_key_func(*args, **kwargs)
-                cached_data = self.get(cache_key)
-                if cached_data:
-                    return cached_data
-                result = func(*args, **kwargs)
-                self.save(cache_key, result, ttl=ttl)
-                return result
-            return wrapper
-        return decorator
+# AFTER: github_api.py  
+def make_request(self, method, endpoint, **kwargs):
 ```
 
-### 2. Refactor Existing Caching Logic
+### Step 2: Update Repository Bundle Caching
+- Remove all `ttl=` parameters from repository caching operations
+- Use `cache_manager.save(key, data, ttl=None)` for persistent storage
+- Implement fingerprint comparison in `http_start` and `get_stale_repos_activity`
+- Ensure bundle cache uses fingerprint-based invalidation
 
-#### Low-Level Request Caching
-- Update `make_request` in `GitHubAPI` to use the `cache_decorator` for caching responses.
-- Cache key: `request:<method>:<endpoint>:<params_hash>`.
+### Step 3: Update Model Bundle Caching
+- Modify `SemanticModel` to use `ttl=None` for all model-related caching
+- Use repository content fingerprints to determine when to retrain models
+- Store model metadata with fingerprint references for validation
 
-#### Example Usage
-```python
-cache_manager = CacheManager(container_name="github-cache")
+### Step 4: Unify Container Usage
+- All caching operations use `github-cache` container
+- Remove any references to separate model containers
+- Maintain existing cache key patterns for backward compatibility
 
-def generate_request_cache_key(method, endpoint, params):
-    return f"request:{method}:{endpoint}:{hashlib.md5(str(params).encode()).hexdigest()}"
+## Important Constraints
 
-class GitHubAPI:
-    @cache_manager.cache_decorator(cache_key_func=generate_request_cache_key, ttl=3600)
-    def make_request(self, method: str, endpoint: str, params: Dict[str, Any]):
-        # Logic for making API request
-        pass
-```
+### Preserve Existing Function Intent
+- **Do Not Modify**: Core business logic of orchestration, model training, or data processing
+- **Maintain**: All existing cache key patterns and data structures
+- **Keep**: Current fingerprint generation and comparison logic
 
-#### Bundle Caching
-- Update `repo_context_orchestrator` to use the `cache_decorator` for caching repository bundles.
-- Cache key: `bundle:<username>:<repo_name>` for individual bundles.
-- Cache key: `bundle:<username>:all` for aggregated bundles.
+### Cache Manager Compatibility
+- Use existing `CacheManager` methods: `get()`, `save()`, `delete()`
+- Remove all `ttl=<number>` parameters, use `ttl=None` for persistent storage
+- Maintain current cache status responses: `valid`, `missing`, `disabled`, `error`
 
-#### Example Usage
-```python
-def generate_bundle_cache_key(username, repo_name=None):
-    return f"bundle:{username}:{repo_name or 'all'}"
+## Testing Requirements
+- Verify repository bundle caching works with fingerprint changes
+- Confirm model training triggers only when content fingerprints change  
+- Ensure cache cleanup still functions without TTL dependencies
+- Test cache statistics and health check endpoints
 
-class RepoContextOrchestrator:
-    @cache_manager.cache_decorator(cache_key_func=generate_bundle_cache_key, ttl=None)
-    def get_bundle(self, username: str, repo_name: Optional[str] = None):
-        # Logic for generating repository bundle
-        pass
-```
-
-#### Metadata Caching
-- Update `SemanticModel` to use the `cache_decorator` for caching model metadata.
-- Cache key: `model_metadata:<fingerprint>`.
-
-#### Example Usage
-```python
-def generate_metadata_cache_key(fingerprint):
-    return f"model_metadata:{fingerprint}"
-
-class SemanticModel:
-    @cache_manager.cache_decorator(cache_key_func=generate_metadata_cache_key, ttl=None)
-    def generate_metadata(self, fingerprint: str):
-        # Logic for generating model metadata
-        pass
-```
-
-### 3. Support Dynamic TTL
-- Modify `CacheManager` to handle `ttl=None` for no-expiry entries.
-- Ensure backward compatibility by defaulting to `default_ttl` if `ttl` is not provided.
-
-### 4. Transition Plan
-- Implement `CacheManager` without modifying existing functionality.
-- Gradually refactor existing caching logic to use `CacheManager` and its decorator.
-- Test each refactored component to ensure no breaking changes.
-
-## Testing and Validation
-- Unit tests for `CacheManager` methods and decorator.
-- Integration tests for refactored components.
-- End-to-end tests to ensure no breaking changes.
-
-## Summary
-This centralized caching approach will:
-- Simplify caching logic using decorators.
-- Ensure consistency across all caching levels.
-- Support dynamic TTL and no-expiry entries.
-- Maintain backward compatibility during the transition.
+## Success Criteria
+1. No TTL-based cache expiration anywhere in the codebase
+2. Repository bundles cache until fingerprint changes detected
+3. Model bundles cache until training data fingerprint changes
+4. All caching uses unified `github-cache` container
+5. Performance maintained or improved with simplified caching logic
+6. Existing API contracts and responses unchanged

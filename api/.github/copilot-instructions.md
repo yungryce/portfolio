@@ -6,8 +6,10 @@ Purpose: Help AI agents contribute productively to this Azure Functions (Python)
 ### Big picture architecture
 - Entry point: `function_app.py` defines an Azure Durable Functions app (`DFApp`) with HTTP routes, an orchestrator, activities, a timer, and helpers from `fa_helpers.py`.
 - GitHub integration: A small “managers” stack wires dependencies in order:
-    - `github/github_api.py` (raw GitHub REST calls) → `github/cache_client.py` (Azure Blob cache) → `github/github_file_manager.py` (file/dir access) → `github/github_repo_manager.py` (repo metadata + context).
-- Caching: `GitHubCache` stores JSON in Azure Blob Storage container `github-cache` with TTL, status, and cleanup utilities.
+    - `github/github_api.py` (raw GitHub REST calls) → `github/cache_manager.py` (Azure Blob cache) → `github/github_repo_manager.py` (repo metadata + context).
+- Caching: `CacheManager` stores JSON in Azure Blob Storage container `github-cache` with fingerprint metadata, status, and cleanup utilities.
+- Fingerprint management: `FingerprintManager` handles content fingerprinting for change detection and cache invalidation.
+- Github management: `GithubRepoManager` handles github operations management for all repositories
 - AI enrichment: `ai/` modules score repositories and build query context using sentence-transformers and Groq via the OpenAI SDK pointed at Groq’s base URL.
 
 High-level data flow
@@ -16,10 +18,11 @@ High-level data flow
 3) AI ranks top repos and builds tiered context; result or status is returned via HTTP helpers with caching headers.
 
 ### Key files to read first
-- `function_app.py` — routes, orchestrator `repo_context_orchestrator`, activities: `get_stale_repos_activity`, `fetch_repo_context_bundle_activity`, `merge_repo_results_activity`, timer `cache_cleanup_timer`.
+- `function_app.py` — routes, orchestrator `repo_context_orchestrator`, activities: `get_stale_repos_activity`, `fetch_repo_context_bundle_activity`, `merge_repo_results_activity`.
 - `fa_helpers.py` — `create_success_response`, `create_error_response`, `get_orchestration_status`, `trim_processed_repo`.
-- `github/` — managers and cache (`GitHubCache`).
-- `ai/` — `ai_assistant.py`, `semantic_scorer.py`, `type_analyzer.py`, `ai_context_builder.py`, `helpers.py`.
+- `github/` — manager (`GithubRepoManager`), cache (`CacheManager`) and fingerprint (`FingerprintManager`).
+- `ai/` — `ai_assistant.py`, `semantic_scorer.py`, `type_analyzer.py`, `ai_context_builder.py`.
+- `model/` - model tuning `fine_tuning.py`
 
 ### HTTP surface (function_app.py)
 - POST `/api/orchestrators/repo_context_orchestrator` — start orchestration; honors `{ username, force_refresh }`. If bundle cache is valid, returns cached payload immediately.
@@ -35,31 +38,29 @@ High-level data flow
 
 Route notes
 - Azure Functions app-level prefix `/api` is implied by Functions runtime.
-- Timer `cache_cleanup_timer` schedule is `0 0 0 * * *` (daily at 00:00). Comment says “hourly” but cron is daily — adjust here if you truly want hourly.
+- All routes intends to use bundles returned after orchestration. Not yet implemented
 
 ### Caching conventions (github/cache_client.py)
-- Container: `github-cache`. Default TTL: 6h; per-repo saves often use 12h; bundle saves often use 24h (see call sites).
-- Key shapes you’ll see:
+- Container: `github-cache`. 
     - Bundle: `repos_bundle_context_{username}`
     - Per-repo: `repo_context_{username}_{repo}`
-    - Raw GitHub content: normalized endpoint plus param-hash (e.g., `repos_user_repo_contents__md5hash`).
-- `_get_from_cache` returns `status` in `{ valid, expired, missing, disabled, error }` and metadata including `expires_at`, `time_until_expiry_seconds`, `size_bytes`.
-- Cleanup: `cleanup_expired_cache(batch_size, dry_run)` and `get_cache_statistics()` back endpoints and the timer.
+    - model-tuning: `fine_tuned_model_metadata`, `{model_id}.zip`
+- `get` returns `status` in `{ valid, invalid, missing, disabled, error }` and metadata including `fingerprint`, `size_bytes`.
 - If `AzureWebJobsStorage` is missing, cache is disabled gracefully.
 
 ### Manager pattern (dependency order)
 ```py
 from github.github_api import GitHubAPI
-from github.cache_client import GitHubCache
-from github.github_file_manager import GitHubFileManager
+from github.cache_manager import CacheManager
 from github.github_repo_manager import GitHubRepoManager
+from github.fingerprint_manager import FingerprintManager
 
 def _get_github_managers(username=None):
         api = GitHubAPI(token=os.getenv('GITHUB_TOKEN'), username=username)
-        cache = GitHubCache(use_cache=True)
-        file_manager = GitHubFileManager(api, cache)
-        repo_manager = GitHubRepoManager(api, cache, file_manager, username=username)
-        return api, cache, file_manager, repo_manager
+        cache = CacheManager(use_cache=True)
+        repo_manager = GitHubRepoManager(api, cache, username=username)
+        fingerprint_manager = FingerPrintManager()
+        return api, cache, repo_manager, fingerprint_manager
 ```
 
 ### AI pipeline highlights (ai/)
@@ -84,15 +85,14 @@ def _get_github_managers(username=None):
 ### Project-specific patterns and gotchas
 - Bundle-first: endpoints prefer the bundle cache; orchestration only fans out for stale/missing repos.
 - `.repo-context.json` drives AI context; missing/invalid JSON is tolerated with warnings and empty context.
-- File listings: `GitHubFileManager.get_file_content` returns either decoded file text or a directory listing (list of metadata dicts) — check type before use.
+- File listings: `GitHubRepoManager.get_file_content` returns either decoded file text or a directory listing (list of metadata dicts) — check type before use.
 - Durable status: when invoking AI right after orchestration, pass `instance_id` and `status_query_url` so the AI endpoint can fetch results if not cached.
 - Security: use env vars for tokens/keys; never hardcode. `local.settings.json` is for local dev only — scrub secrets before commit.
 
 ### Handy examples tied to this repo
 - Fetch a repo file’s text: `repo_manager.get_file_content('some-repo', 'README.md', username)`.
 - Get all repos with context: `repo_manager.get_all_repos_with_context(username, include_languages=True)`.
-- Kick off orchestration (HTTP): POST `/api/orchestrators/repo_context_orchestrator` with `{ "username": "yungryce" }`.
-- Clean the cache: POST `/api/github/cache/cleanup` with `{ "dry_run": true }`.
+- Kick off orchestration (HTTP): POST `http_start` and `/api/orchestrators/repo_context_orchestrator` with `{ "username": "yungryce" }`.
 
 Feedback needed
 - Are any endpoints undocumented or renamed? Is the timer cadence intended to be hourly? If you need edits to activity inputs/outputs documented more formally (contracts), tell me and I’ll add them.

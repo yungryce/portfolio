@@ -86,10 +86,10 @@ class SemanticModel:
                 logger.warning(f"Failed to load model from disk cache: {str(e)}")
 
         # Check global cache for the model metadata
-        cache_key = "fine_tuned_model_metadata"
+        cache_key = cache_manager.generate_cache_key(kind='model', fingerprint=None)
         cache_result = cache_manager.get(cache_key)
 
-        if cache_result['data']:
+        if cache_result['status'] == 'valid' and cache_result['data']:
             model_metadata = cache_result['data']
 
             # Check if we have a model matching the current fingerprint
@@ -111,7 +111,7 @@ class SemanticModel:
         if success:
             model_info = {
                 "storage_type": "blob",
-                "container": "ai-models",
+                "container": cache_manager.container_name,
                 "blob_name": f"{model_path}.zip",
                 "fingerprint": fingerprint,
                 "training_timestamp": datetime.datetime.now().isoformat(),
@@ -119,7 +119,7 @@ class SemanticModel:
                 "repo_names": [repo.get("name", "Unknown") for repo in documented_repos]
             }
             
-            self.cache_manager.save(
+            cache_manager.save(
                 cache_key, 
                 model_info,
                 ttl=None,  # No expiration - models valid until repos change
@@ -274,29 +274,18 @@ class SemanticModel:
                         arcname = os.path.relpath(file_path, temp_model_path)
                         zipf.write(file_path, arcname)
             
-            # Upload zip to Azure Blob Storage
-            connection_string = os.getenv('AzureWebJobsStorage')
-            if not connection_string:
-                logger.error("AzureWebJobsStorage connection string not found")
+            # Upload zip to Azure Blob Storage using the same blob service client as cache_manager
+            if not cache_manager.blob_service_client:
+                logger.error("Blob service client not available")
                 return False
                 
-            blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-            
-            # Use a dedicated container for models
-            container_name = "ai-models"
-            container_client = blob_service_client.get_container_client(container_name)
-            
-            # Create container if it doesn't exist
-            try:
-                container_client.create_container()
-                logger.info(f"Created models container: {container_name}")
-            except Exception as e:
-                if "ContainerAlreadyExists" not in str(e):
-                    logger.warning(f"Container creation issue: {str(e)}")
-            
-            # Upload the model zip file to blob storage
+            # Use the standard github-cache container
+            container_name = cache_manager.container_name
             blob_name = f"{model_id}.zip"
-            blob_client = container_client.get_blob_client(blob_name)
+            blob_client = cache_manager.blob_service_client.get_blob_client(
+                container=container_name,
+                blob=blob_name
+            )
             
             with open(zip_path, "rb") as data:
                 blob_client.upload_blob(

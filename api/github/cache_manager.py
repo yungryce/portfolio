@@ -34,16 +34,48 @@ class CacheManager:
     def __init__(self, container_name: str = "github-cache", default_ttl: int = 21600, use_cache: bool = True) -> None:
         """
         Initialize the cache manager with Azure Blob Storage backend.
-        
+
         Args:
             container_name: The name of the blob container to use. Defaults to "github-cache".
-            default_ttl: Default time-to-live in seconds. Defaults to 6 hours (21600 seconds).
+            default_ttl: Deprecated. Kept for backward compatibility; not used for new entries.
             use_cache: Whether to enable caching functionality. Defaults to True.
         """
         self.container_name = container_name
+        # default_ttl kept for backward compatibility but not used by default
         self.default_ttl = default_ttl
         self.use_cache = use_cache
         self._init_cache()
+        
+    @staticmethod
+    def generate_cache_key(*args, **kwargs):
+        """
+        Bundle-level cache key generator.
+        Produces keys for:
+          - user bundle:   repos_bundle_context_{username}
+          - repo bundle:   repo_context_{username}_{repo}
+          - model bundle:  fine_tuned_model_metadata or model_{fingerprint}
+        
+        Args:
+            kind/scope: The type of bundle ('repo', 'model', or 'bundle')
+            username: GitHub username
+            repo: Repository name (for repo bundles)
+            fingerprint: Content fingerprint (for model bundles)
+            
+        Returns:
+            A cache key string appropriate for the bundle type
+        """
+        kind = kwargs.get('kind') or kwargs.get('scope') or 'bundle'
+        username = kwargs.get('username') or 'yungryce'
+        repo = kwargs.get('repo')
+        fingerprint = kwargs.get('fingerprint')
+
+        if kind == 'repo' and repo:
+            safe_repo = str(repo).replace('/', '_').replace(' ', '_')
+            return f"repo_context_{username}_{safe_repo}"
+        if kind == 'model':
+            return f"model_{fingerprint}" if fingerprint else "fine_tuned_model_metadata"
+        # default: user bundle
+        return f"repos_bundle_context_{username}"
     
     def _init_cache(self) -> None:
         """
@@ -112,55 +144,40 @@ class CacheManager:
                 return {'status': 'missing', 'data': None, 'metadata': None}
 
             properties = blob_client.get_blob_properties()
-            metadata = properties.metadata
+            metadata = properties.metadata or {}
 
-            # Check if non-expiring cache
-            if metadata.get('no_expiry') == 'True':
-                data = json.loads(blob_client.download_blob().readall())
-                return {
-                    'status': 'valid',
-                    'data': data.get('data'),
-                    'fingerprint': metadata.get('fingerprint'),
-                    'no_expiry': True,
-                    'last_modified': properties.last_modified.isoformat(),
-                    'size_bytes': properties.size
-                }
-
-            # Check expiration for TTL-based cache
-            current_time = datetime.now()
-            if 'expires_at' in metadata:
-                expires_at = datetime.fromisoformat(metadata['expires_at'])
-                time_until_expiry = (expires_at - current_time).total_seconds()
-                if expires_at > current_time:
-                    data = json.loads(blob_client.download_blob().readall())
-                    return {
-                        'status': 'valid',
-                        'data': data.get('data'),
-                        'expires_at': expires_at.isoformat(),
-                        'time_until_expiry_seconds': int(time_until_expiry),
-                        'last_modified': properties.last_modified.isoformat(),
-                        'size_bytes': properties.size
-                    }
-                else:
-                    blob_client.delete_blob()
+            # If legacy expires_at exists, honor it
+            expires_at_str = metadata.get('expires_at')
+            if expires_at_str:
+                try:
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                except Exception:
+                    # If malformed, treat as expired and delete
+                    expires_at = datetime.min
+                if datetime.now() > expires_at:
+                    try:
+                        blob_client.delete_blob()
+                    except Exception:
+                        pass
                     return {
                         'status': 'expired',
                         'data': None,
                         'metadata': metadata,
-                        'expires_at': expires_at.isoformat(),
-                        'time_until_expiry_seconds': 0,
+                        'expires_at': expires_at_str,
                         'last_modified': properties.last_modified.isoformat(),
                         'size_bytes': properties.size
                     }
-            else:
-                logger.warning(f"Cache key {cache_key} missing expires_at metadata")
-                return {
-                    'status': 'error',
-                    'data': None,
-                    'metadata': metadata,
-                    'last_modified': properties.last_modified.isoformat(),
-                    'size_bytes': properties.size
-                }
+
+            # Otherwise treat as valid (no explicit no_expiry and not expired)
+            data = json.loads(blob_client.download_blob().readall())
+            return {
+                'status': 'valid',
+                'data': data.get('data'),
+                'fingerprint': metadata.get('fingerprint'),
+                'no_expiry': metadata.get('no_expiry') == 'True',
+                'last_modified': properties.last_modified.isoformat(),
+                'size_bytes': properties.size
+            }
         except Exception as e:
             logger.warning(f"Error retrieving cache entry for key {cache_key}: {str(e)}")
             return {'status': 'error', 'data': None, 'metadata': None}
@@ -190,17 +207,11 @@ class CacheManager:
             if fingerprint:
                 metadata['fingerprint'] = fingerprint
             
-            if ttl is None:
-                # Non-expiring cache
-                metadata['no_expiry'] = 'True'
-                cache_data['ttl'] = None
-            else:
-                # TTL-based cache
-                ttl = ttl or self.default_ttl
-                expires_at = (datetime.now() + timedelta(seconds=ttl)).isoformat()
+            # Honor TTL for backward compatibility; default to non-expiring
+            if ttl is not None:
+                expires_at = (datetime.now() + timedelta(seconds=int(ttl))).isoformat()
                 metadata['expires_at'] = expires_at
-                cache_data['ttl'] = ttl
-            
+
             blob_client = self.blob_service_client.get_blob_client(
                 container=self.container_name, 
                 blob=cache_key
@@ -271,11 +282,9 @@ class CacheManager:
         def decorator(func):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
-                # Generate cache key based on function arguments
-                try:
-                    cache_key = cache_key_func(*args[1:], **kwargs)
-                except TypeError:
-                    cache_key = cache_key_func(*args, **kwargs)
+
+                # Generate cache key using only kwargs
+                cache_key = cache_key_func(**kwargs)
                 
                 # Check cache
                 cache_result = self.get(cache_key)
@@ -289,7 +298,8 @@ class CacheManager:
                 
                 # Save result to cache
                 self.save(cache_key, result, ttl=ttl)
-                
+                logger.debug(f"Saved result to cache for key: {cache_key}")
+
                 return result
             return wrapper
         return decorator
@@ -398,7 +408,7 @@ class CacheManager:
                 )
                 
                 properties = blob_client.get_blob_properties()
-                metadata = properties.metadata
+                metadata = properties.metadata or {}
                 
                 # Skip non-expiring cache entries
                 if metadata.get('no_expiry') == 'True':
@@ -406,18 +416,19 @@ class CacheManager:
                 
                 # Check if expired
                 if 'expires_at' in metadata:
-                    expires_at = datetime.fromisoformat(metadata['expires_at'])
+                    try:
+                        expires_at = datetime.fromisoformat(metadata['expires_at'])
+                    except Exception:
+                        expires_at = datetime.min
                     if expires_at <= current_time:
                         expired += 1
                         if not dry_run:
                             blob_client.delete_blob()
                             deleted += 1
                 else:
-                    # No expiration metadata, check creation time as fallback
-                    creation_time = properties.creation_time
-                    age_seconds = (current_time - creation_time).total_seconds()
-                    
-                    # If older than 30 days and no expiration set, consider expired
+                    # No expiration metadata: fallback on age > 30 days
+                    last_modified = properties.last_modified
+                    age_seconds = (current_time - last_modified).total_seconds()
                     if age_seconds > 30 * 24 * 60 * 60:
                         expired += 1
                         if not dry_run:

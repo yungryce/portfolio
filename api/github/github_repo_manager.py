@@ -5,6 +5,7 @@ import requests
 import time
 from typing import Dict, Any, List, Optional
 from .github_api import GitHubAPI
+from .fingerprint_manager import FingerprintManager
 from .cache_manager import cache_manager
 from fa_helpers import trim_processed_repo
 
@@ -17,7 +18,7 @@ class GitHubRepoManager:
         self.api = api
         self.username = username
 
-    @cache_manager.cache_decorator(cache_key_func=lambda username, repo: f"repos:{username}:{repo}", ttl=3600)
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, **kwargs: f"repo_metadata:{username}:{repo}")
     def get_repo_metadata(self, username: Optional[str]=None, repo: Optional[str]=None, include_languages: bool=False) -> Dict[str, Any]:
         """Get metadata for a specific repository.
 
@@ -45,10 +46,7 @@ class GitHubRepoManager:
                 repo_data['languages'] = languages
         return repo_data
 
-    @cache_manager.cache_decorator(
-    cache_key_func=lambda username=None, per_page=100, include_languages=False: f"repos:{username}:all", 
-    ttl=3600
-    )
+    @cache_manager.cache_decorator(cache_key_func=lambda username=None, **kwargs: f"repos_metadata:{username}:all")
     def get_all_repos_metadata(self, username: Optional[str]=None, per_page=100, include_languages: bool=False) -> List[Dict[str, Any]]:
         """Get metadata for all repositories.
 
@@ -75,8 +73,8 @@ class GitHubRepoManager:
                     if isinstance(languages, dict):
                         repo['languages'] = languages
         return repos
-    
-    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, path: f"file_content:{username}:{repo}:{path}", ttl=3600)
+
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, path, **kwargs: f"file_content:{username}:{repo}:{path}")
     def get_file_content(self, username: Optional[str], repo: str, path: str) -> Optional[str]:
         """
         Fetch the content of a file from a repository using the underlying file_manager.
@@ -94,25 +92,28 @@ class GitHubRepoManager:
         if isinstance(file_data, dict) and file_data.get('type') == 'file':
             return self.api.decode_file_content(file_data)
         return None
-
-    @cache_manager.cache_decorator(cache_key_func=lambda username, repo: f"repos_with_context:{username}:{repo}", ttl=None)
+    
+    @cache_manager.cache_decorator(cache_key_func=lambda username, **kwargs: cache_manager.generate_cache_key(kind='bundle', username=username))
     def get_all_repos_with_context(self, username: Optional[str], include_languages: bool = True):
         """
         Get all repositories with enhanced context including .repo-context.json and file paths.
-        This replaces the old get_all_repos_with_files method with better naming.
         """
         if not username:
             raise ValueError("Username is required")
         username = str(username)  # Ensure username is a string
         repos = self.get_all_repos_metadata(username, include_languages=include_languages)
         repos_with_context = [trim_processed_repo(repo) for repo in repos if isinstance(repo, dict)]
+        
+        # Generate fingerprint for the bundle
+        fingerprint = FingerprintManager.generate_bundle_fingerprint([
+            FingerprintManager.generate_metadata_fingerprint(repo)
+            for repo in repos_with_context if isinstance(repo, dict)
+        ])
+        
+        # Add fingerprint to cache metadata when saving
+        # Note: The cache_decorator will handle this automatically
+        
         return repos_with_context
-
-    # Keep the old method name for backward compatibility
-    def get_all_repos_with_files(self, username=None, include_languages=True):
-        """Deprecated: Use get_all_repos_with_context instead."""
-        logger.warning("get_all_repos_with_files is deprecated. Use get_all_repos_with_context instead.")
-        return self.get_all_repos_with_context(username, include_languages)
 
     def get_repository_tree(self, repo_name: str, username: Optional[str] = None, recursive: bool = False) -> List[str]:
         """

@@ -2,24 +2,10 @@ import os
 import requests
 import logging
 from base64 import b64decode
-from .cache_manager import cache_manager
-import hashlib
-import json
+from fa_helpers import handle_github_error
+
 
 logger = logging.getLogger('portfolio.api')
-
-def generate_request_cache_key(method, endpoint, **kwargs):
-    """Generate a cache key for a GitHub API request."""
-    params = kwargs.get('params', None)
-    normalized_endpoint = endpoint.lstrip('/').replace('/', '_').replace('?', '_').replace('&', '_')
-    if params is not None:
-        try:
-            param_str = json.dumps(params, sort_keys=True)
-        except Exception:
-            param_str = str(params)
-        param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
-        return f"request:{method}:{normalized_endpoint}:{param_hash}"
-    return f"request:{method}:{normalized_endpoint}"
 
 class GitHubAPI:
     def __init__(self, token=None, username=None):
@@ -27,7 +13,7 @@ class GitHubAPI:
         self.username = username or 'yungryce'
         self.headers = {'Authorization': f'token {self.token}'} if self.token else {}
 
-    @cache_manager.cache_decorator(cache_key_func=generate_request_cache_key, ttl=3600)
+    # @cache_manager.cache_decorator(cache_key_func=generate_request_cache_key, ttl=3600)
     def make_request(self, method, endpoint, headers=None, params=None, data=None, accept_raw=False, timeout=30):
         full_url = f"https://api.github.com/{endpoint.lstrip('/')}"
         request_headers = self.headers.copy()

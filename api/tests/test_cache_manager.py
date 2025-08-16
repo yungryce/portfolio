@@ -73,27 +73,6 @@ class TestCacheManager(unittest.TestCase):
         self.assertEqual(result['status'], 'valid')
         self.assertEqual(result['data'], {'test': 'data'})
     
-    def test_get_cache_expired(self):
-        """Test retrieving data from cache when it's expired."""
-        # Mock the blob client to simulate an expired cache entry
-        self.blob_client_mock.exists.return_value = True
-        
-        # Set up properties mock with expired timestamp
-        properties_mock = MagicMock()
-        properties_mock.metadata = {
-            'expires_at': (datetime.now() - timedelta(hours=1)).isoformat()
-        }
-        properties_mock.last_modified = datetime.now() - timedelta(hours=2)
-        properties_mock.size = 1024
-        self.blob_client_mock.get_blob_properties.return_value = properties_mock
-        
-        # Get from cache
-        result = self.cache_manager.get("test_key")
-        
-        # Verify
-        self.assertEqual(result['status'], 'expired')
-        self.assertIsNone(result['data'])
-        self.blob_client_mock.delete_blob.assert_called_once()
     
     def test_get_no_expiry(self):
         """Test retrieving data from cache that has no expiration."""
@@ -124,19 +103,6 @@ class TestCacheManager(unittest.TestCase):
         self.assertEqual(result['data'], {'test': 'data'})
         self.assertTrue(result.get('no_expiry'))
     
-    def test_save_with_ttl(self):
-        """Test saving data to cache with TTL."""
-        # Call save with TTL
-        success = self.cache_manager.save("test_key", {"test": "data"}, ttl=3600)
-        
-        # Verify
-        self.assertTrue(success)
-        self.blob_client_mock.upload_blob.assert_called_once()
-        
-        # Verify the uploaded content
-        args, kwargs = self.blob_client_mock.upload_blob.call_args
-        self.assertIn('metadata', kwargs)
-        self.assertIn('expires_at', kwargs['metadata'])
     
     def test_save_no_expiry(self):
         """Test saving data to cache with no expiration."""
@@ -207,55 +173,6 @@ class TestCacheManager(unittest.TestCase):
         self.assertEqual(result2, {'cached': True, 'value': 42})
         self.assertEqual(function_called[0], 1)  # Still 1, function not called again
     
-    def test_cleanup_expired_cache(self):
-        """Test cleanup of expired cache entries."""
-        # Mock list_blobs to return some test blobs
-        blob1 = MagicMock()
-        blob1.name = "test_blob1"
-        
-        blob2 = MagicMock()
-        blob2.name = "test_blob2"
-        
-        self.container_client_mock.list_blobs.return_value = [blob1, blob2]
-        
-        # Set up the properties for the first blob (expired)
-        blob1_client = MagicMock()
-        blob1_properties = MagicMock()
-        blob1_properties.metadata = {
-            'expires_at': (datetime.now() - timedelta(hours=1)).isoformat()
-        }
-        blob1_client.get_blob_properties.return_value = blob1_properties
-        blob1_client.exists.return_value = True
-        
-        # Set up the properties for the second blob (not expired)
-        blob2_client = MagicMock()
-        blob2_properties = MagicMock()
-        blob2_properties.metadata = {
-            'expires_at': (datetime.now() + timedelta(hours=1)).isoformat()
-        }
-        blob2_client.get_blob_properties.return_value = blob2_properties
-        blob2_client.exists.return_value = True
-        
-        # Mock get_blob_client to return appropriate client
-        def get_blob_client(container, blob):
-            if blob == "test_blob1":
-                return blob1_client
-            else:
-                return blob2_client
-        
-        self.blob_service_client_mock.get_blob_client.side_effect = get_blob_client
-        
-        # Call cleanup
-        result = self.cache_manager.cleanup_expired_cache(batch_size=10, dry_run=False)
-        
-        # Verify
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["total_blobs"], 2)
-        self.assertEqual(result["expired_count"], 1)
-        self.assertEqual(result["deleted_count"], 1)
-        blob1_client.delete_blob.assert_called_once()
-        blob2_client.delete_blob.assert_not_called()
-
 
 if __name__ == "__main__":
     unittest.main()
