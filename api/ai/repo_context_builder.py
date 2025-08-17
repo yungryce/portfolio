@@ -1,6 +1,3 @@
-from github.github_api import GitHubAPI
-from Samples.cache_client import GitHubCache
-from github.github_repo_manager import GitHubRepoManager
 from typing import Dict, Any, List
 import logging
 import os
@@ -11,26 +8,30 @@ class RepoContextBuilder:
     """
     Builds graduated AI context for top repositories.
     """
-    def __init__(self, username):
-        github_token = os.getenv('GITHUB_TOKEN')
-        api = GitHubAPI(token=github_token, username=username)
-        cache = GitHubCache(use_cache=True)
-        self.repo_manager = GitHubRepoManager(api, cache, username=username)
-        self.username = username
+    def __init__(self):
+        pass
 
     def build_tiered_context(self, top_repos: List[Dict], max_repos: int = 3) -> Dict[str, Any]:
         """
-        Builds a context dict for the top repositories, retrieving README.md, SKILLS-INDEX.md,
-        and ARCHITECTURE.md using the repo_manager for each repo. Returns all retrieved files,
-        processed repo_context (with scoring metadata), and is suitable for AI context building.
+        Builds a context dict for the top repositories using pre-fetched content from repo bundles.
+        Returns structured context suitable for AI context building with tiered importance.
+        
+        Args:
+            top_repos: List of repository bundles with pre-fetched content and scoring
+            max_repos: Maximum number of repositories to include in context
+        
+        Returns:
+            Dictionary with primary_repo, secondary_repo, and tertiary_repo context
         """
         context = {}
         for i, repo in enumerate(top_repos[:max_repos]):
             repo_name = repo.get("name")
-            # Retrieve files using repo_manager
-            readme = self.repo_manager.get_file_content(repo_name, "README.md") or ""
-            skills_index = self.repo_manager.get_file_content(repo_name, "SKILLS-INDEX.md") or ""
-            architecture = self.repo_manager.get_file_content(repo_name, "ARCHITECTURE.md") or ""
+            
+            # Extract pre-fetched content directly from repo bundle
+            readme = repo.get("readme", "")
+            skills_index = repo.get("skills_index", "")
+            architecture = repo.get("architecture", "")
+            
             # Compose context for each repo
             repo_context = {
                 "name": repo_name,
@@ -47,6 +48,7 @@ class RepoContextBuilder:
                     "file_types": repo.get("file_types", {})
                 }
             }
+            
             # Assign to tiered context
             if i == 0:
                 context['primary_repo'] = repo_context
@@ -54,6 +56,7 @@ class RepoContextBuilder:
                 context['secondary_repo'] = repo_context
             elif i == 2:
                 context['tertiary_repo'] = repo_context
+        
         return context
 
     def _build_summary_context(self, repo: Dict) -> Dict:
@@ -64,5 +67,4 @@ class RepoContextBuilder:
 
     def _build_mention_context(self, repo: Dict) -> Dict:
         return {"name": repo.get("name")}
-    
-   
+

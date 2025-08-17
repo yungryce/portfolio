@@ -71,7 +71,7 @@ class CacheManager:
 
         if kind == 'repo' and repo:
             safe_repo = str(repo).replace('/', '_').replace(' ', '_')
-            return f"repo_context_{username}_{safe_repo}"
+            return f"repo_level_bundle_{username}_{safe_repo}"
         if kind == 'model':
             return f"model_{fingerprint}" if fingerprint else "fine_tuned_model_metadata"
         # default: user bundle

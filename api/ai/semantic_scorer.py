@@ -142,32 +142,21 @@ class SemanticScorer:
             logger.debug(f"Skipping context scoring for {repo_bundle.get('name', 'Unknown')} due to empty or meaningless context string.")
             return 0.0
 
-        # Enrich the query with domain terms
-        enriched_query = self.enrich_query_with_domain(query)
-        
         # Get the current model (tuned or base)
         model = self.semantic_model.get_model()
 
-        # Semantic similarity between original query and context
-        query_emb = model.encode([enriched_query])
+        # Encode both query and context string
+        query_emb = model.encode([query])
         context_emb = model.encode([context_str])
-        semantic_score_query_context = cosine_similarity(query_emb, context_emb)[0][0]
 
-        # Semantic similarity between enriched query and context
-        enriched_query_emb = model.encode([enriched_query])
-        semantic_score_enriched_context = cosine_similarity(enriched_query_emb, context_emb)[0][0]
-
-        # Aggregate scores with dynamic weighting
-        if semantic_score_query_context > 0.5:
-            aggregated_score = (semantic_score_query_context * 0.7) + (semantic_score_enriched_context * 0.3)
-        else:
-            aggregated_score = (semantic_score_query_context * 0.4) + (semantic_score_enriched_context * 0.6)
+        # Compute cosine similarity between query and context
+        similarity = cosine_similarity(query_emb, context_emb)[0][0]
 
         # Log the scores
         project_name = repo_bundle.get("repoContext", {}).get("project_identity", {}).get("name")
-        logger.debug(f"Context similarity score for: '{project_name}'= {semantic_score_query_context}, enriched query score: {semantic_score_enriched_context}, aggregated score: {aggregated_score}")
+        logger.debug(f"Context similarity score for: '{project_name}'= {similarity}")
 
-        return aggregated_score
+        return similarity
 
     def score_language_matches(self, query: str, repo_languages: Dict) -> float:
         """
@@ -222,10 +211,10 @@ class SemanticScorer:
         # Extract structured fields from repo-context.json
         identity = repo_bundle.get("repoContext", {}).get("project_identity", {})
         tech_stack = repo_bundle.get("repoContext", {}).get("tech_stack", {})
-        skills = repo_bundle.get("repoContext", {}).get("skill_manifest", {})
-        outcomes = repo_bundle.get("repoContext", {}).get("outcomes", {})
-        metadata = repo_bundle.get("repoContext", {}).get("metadata", {})
-        assessment = repo_bundle.get("repoContext", {}).get("assessment", {})
+        # skills = repo_bundle.get("repoContext", {}).get("skill_manifest", {})
+        # outcomes = repo_bundle.get("repoContext", {}).get("outcomes", {})
+        # metadata = repo_bundle.get("repoContext", {}).get("metadata", {})
+        # assessment = repo_bundle.get("repoContext", {}).get("assessment", {})
 
         # Build natural language representation
         if identity.get('name'):
@@ -246,37 +235,37 @@ class SemanticScorer:
         if tech_stack.get("development_tools"):
             lines.append(f"Development tools used: {', '.join(tech_stack['development_tools'])}.")
 
-        if skills.get("technical"):
-            lines.append(f"Technical skills demonstrated include {', '.join(skills['technical'])}.")
-        if skills.get("domain"):
-            lines.append(f"Domain-specific knowledge areas: {', '.join(skills['domain'])}.")
-        if skills.get("competency_level"):
-            lines.append(f"Competency level: {skills['competency_level']}.")
+        # if skills.get("technical"):
+        #     lines.append(f"Technical skills demonstrated include {', '.join(skills['technical'])}.")
+        # if skills.get("domain"):
+        #     lines.append(f"Domain-specific knowledge areas: {', '.join(skills['domain'])}.")
+        # if skills.get("competency_level"):
+        #     lines.append(f"Competency level: {skills['competency_level']}.")
 
-        if outcomes.get("deliverables"):
-            lines.append(f"Deliverables include {', '.join(outcomes['deliverables'])}.")
-        if outcomes.get("skills_acquired"):
-            lines.append(f"Skills acquired: {', '.join(outcomes['skills_acquired'])}.")
-        if outcomes.get("primary"):
-            lines.append(f"Primary outcomes: {', '.join(outcomes['primary'])}.")
+        # if outcomes.get("deliverables"):
+        #     lines.append(f"Deliverables include {', '.join(outcomes['deliverables'])}.")
+        # if outcomes.get("skills_acquired"):
+        #     lines.append(f"Skills acquired: {', '.join(outcomes['skills_acquired'])}.")
+        # if outcomes.get("primary"):
+        #     lines.append(f"Primary outcomes: {', '.join(outcomes['primary'])}.")
 
-        if assessment.get("difficulty"):
-            lines.append(f"Difficulty level: {assessment['difficulty']}.")
-        if assessment.get("evaluation_criteria"):
-            lines.append(f"Evaluation criteria: {', '.join(assessment['evaluation_criteria'])}.")
+        # if assessment.get("difficulty"):
+        #     lines.append(f"Difficulty level: {assessment['difficulty']}.")
+        # if assessment.get("evaluation_criteria"):
+        #     lines.append(f"Evaluation criteria: {', '.join(assessment['evaluation_criteria'])}.")
 
-        if metadata.get("tags"):
-            lines.append(f"Tags: {', '.join(metadata['tags'])}.")
-        if metadata.get("maintainer"):
-            lines.append(f"Maintainer: {metadata['maintainer']}.")
-        if metadata.get("license"):
-            lines.append(f"License: {metadata['license']}.")
+        # if metadata.get("tags"):
+        #     lines.append(f"Tags: {', '.join(metadata['tags'])}.")
+        # if metadata.get("maintainer"):
+        #     lines.append(f"Maintainer: {metadata['maintainer']}.")
+        # if metadata.get("license"):
+        #     lines.append(f"License: {metadata['license']}.")
 
-        # Add README, SKILLS-INDEX, and ARCHITECTURE content
-        for key in ["readme", "skills_index", "architecture"]:
-            content = repo_bundle.get(key)
-            if content:
-                lines.append(f"{key.capitalize()}: {content.strip()}")
+        # # Add README, SKILLS-INDEX, and ARCHITECTURE content
+        # for key in ["readme", "skills_index", "architecture"]:
+        #     content = repo_bundle.get(key)
+        #     if content:
+        #         lines.append(f"{key.capitalize()}: {content.strip()}")
 
         flattened_context = "\n".join(lines)
         logger.debug(f"Flattened context: {flattened_context[:50]}")  # Log first 500 characters

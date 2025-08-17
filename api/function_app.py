@@ -132,9 +132,15 @@ def repo_context_orchestrator(context):
     repos_data = yield context.call_activity('get_stale_repos_activity', username)
 
     if not repos_data['stale_repos'] and repos_data['cached_bundle']:
-        logger.info(f"No stale repositories found for user '{username}', returning cached bundle")
-        logger.info(f"Cached bundle contains {len(repos_data['cached_bundle'])} repositories")
-        return repos_data['cached_bundle']
+        logger.info(f"No stale repositories found for user '{username}', persisting/hydrating cached bundle via merge")
+        # Route through merge to ensure bundle cache is saved/updated with a fingerprint
+        merged_results = yield context.call_activity('merge_repo_results_activity', {
+            'username': username,
+            'fresh_results': [],  # nothing new to add
+            'cached_bundle': repos_data['cached_bundle']
+        })
+        logger.info(f"Cached bundle contains {len(merged_results)} repositories")
+        return merged_results
 
     logger.info(f"Processing {len(repos_data['stale_repos'])} stale repositories for user '{username}'")
 
@@ -185,12 +191,13 @@ def get_stale_repos_activity(activityContext):
         for repo in all_repos_metadata if repo.get('name')
     }
 
-    # Extract fingerprints from cached bundle
+    # Extract fingerprints from cached bundle (only if valid)
+    bundle_ok = cached_bundle.get('status') == 'valid' and isinstance(cached_bundle.get('data'), list)
     cached_fingerprints = {
         repo.get('metadata', {}).get('name'): repo.get('fingerprint')
         for repo in (cached_bundle.get('data') or [])
-        if repo.get('metadata', {}).get('name')
-    }
+        if bundle_ok and repo.get('metadata', {}).get('name')
+    } if bundle_ok else {}
 
     # Identify stale and valid repositories
     stale_repos = []
@@ -203,13 +210,25 @@ def get_stale_repos_activity(activityContext):
         current_fingerprint = current_fingerprints.get(repo_name)
         cached_fingerprint = cached_fingerprints.get(repo_name)
 
+        # If bundle didn’t have it or mismatch, try per-repo cache before declaring stale
         if current_fingerprint != cached_fingerprint:
-            if cached_fingerprint is None:
-                logger.info(f"Repo '{repo_name}' is stale due to missing cache entry.")
+            repo_cache_key = cache_manager.generate_cache_key(kind='repo', username=username, repo=repo_name)
+            per_repo_entry = cache_manager.get(repo_cache_key)
+            per_repo_status = per_repo_entry.get('status')
+            per_repo_fp = per_repo_entry.get('fingerprint')
+
+            if per_repo_status == 'valid' and per_repo_fp == current_fingerprint:
+                valid_repos.append(repo_metadata)
+                continue
+
+            # No usable per-repo cache; mark stale with clear diagnostics
+            if cached_fingerprint is None and per_repo_status != 'valid':
+                logger.info(f"Repo '{repo_name}' is stale: no bundle fingerprint and per-repo cache status={per_repo_status}.")
             else:
                 logger.warning(
                     f"Fingerprint mismatch for repo '{repo_name}': "
-                    f"current='{current_fingerprint}', cached='{cached_fingerprint}'"
+                    f"current='{current_fingerprint}', bundle='{cached_fingerprint}', per_repo='{per_repo_fp}', "
+                    f"per_repo_status='{per_repo_status}'"
                 )
             stale_repos.append(repo_metadata)
         else:
@@ -357,7 +376,7 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
             return create_error_response("Request body must contain 'query' field", 400)
 
         query = request_body['query']
-        username = request_body.get('username', 'yungryce')
+        username = request_body.get('username')
         instance_id = request_body.get('instance_id')
         status_query_url = request_body.get('status_query_url')
 

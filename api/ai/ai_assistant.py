@@ -7,7 +7,6 @@ from ai.repo_context_builder import RepoContextBuilder
 from ai.ai_context_builder import AIContextBuilder
 from model.fine_tuning import SemanticModel
 from ai.semantic_scorer import SemanticScorer
-from Samples.cache_client import GitHubCache
 
 logger = logging.getLogger('portfolio.api')
 
@@ -17,16 +16,16 @@ class AIAssistant:
     Main AI coordinator for portfolio queries.
     Orchestrates repository scoring, context building, and AI query processing.
     """
-    def __init__(self, username: str = 'yungryce'):
+    def __init__(self, username: str = None):
         logger.info(f"Initializing AI Assistant for user: {username}")
+
         self.username = username
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.semantic_model = SemanticModel()
         self.semantic_scorer = SemanticScorer(self.semantic_model)
         self.file_type_analyzer = FileTypeAnalyzer()
         self.ai_context_builder = AIContextBuilder()
-        self.context_builder = RepoContextBuilder(username=username)
-        self.cache_client = GitHubCache(use_cache=True)
+        self.context_builder = RepoContextBuilder()
 
         logger.info(f"AI Assistant initialized for user: {self.username}")
 
@@ -51,12 +50,14 @@ class AIAssistant:
         if not isinstance(categorized, dict):
             categorized = {}
 
-        context_score = self.semantic_scorer.score_context_similarity(query, repo_bundle)
-        language_score = self.semantic_scorer.score_language_matches(query, repo_languages)
-        type_score = self.file_type_analyzer.calculate_type_score(categorized)
+        context_score = float(self.semantic_scorer.score_context_similarity(query, repo_bundle))
+        language_score = float(self.semantic_scorer.score_language_matches(query, repo_languages))
+        type_score = float(self.file_type_analyzer.calculate_type_score(categorized))
+        logger.debug(f"Calculated scores for repository '{repo_name}': "
+                     f"Context: {context_score}, Language: {language_score}, Type: {type_score}")
 
         # Aggregate total score
-        total_score = self.semantic_scorer.aggregate_scores(context_score, language_score, type_score)
+        total_score = float(self.semantic_scorer.aggregate_scores(context_score, language_score, type_score))
 
         # Prepare metadata
         score_metadata = {
