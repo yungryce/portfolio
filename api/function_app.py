@@ -482,7 +482,7 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
             logger.debug(f"Top repo score details: {json.dumps(scores_only, indent=2)}")
 
         # Step 2: Process with AI assistant using pre-scored repositories
-        from Samples.ai_assistant import AIAssistant
+        from ai.ai_assistant import AIAssistant
         ai_assistant = AIAssistant(username=username)
         response = ai_assistant.process_scored_repositories(query, scored_repos)
 

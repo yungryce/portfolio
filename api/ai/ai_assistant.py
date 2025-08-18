@@ -1,4 +1,5 @@
 import json
+import os
 import logging
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
@@ -6,7 +7,7 @@ from .helpers import count_tokens, truncate_text
 
 logger = logging.getLogger('portfolio.api')
 
-class AIContextBuilder:
+class AIAssistant:
     """
     Builds rich context from tiered repository context for AI processing and handles Groq API calls.
     """
@@ -14,10 +15,12 @@ class AIContextBuilder:
     MAX_TOKENS = 8000  # Safe limit for context window
     MAX_CONTEXT_CHARS = 25000  # Character limit for context
 
-    def __init__(self, groq_api_key: Optional[str] = None):
-        self.groq_api_key = groq_api_key
+    def __init__(self, username: str = None):
+        logger.info(f"Initializing AI Assistant for user: {username}")
+
+        self.username = username
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.openai_client = self._initialize_openai_client()
-        logger.info("AIContextBuilder initialized.")
 
     def _initialize_openai_client(self) -> Optional[OpenAI]:
         """Initialize OpenAI client for Groq with validation."""
@@ -55,14 +58,13 @@ class AIContextBuilder:
             top_repos = scored_repos[:max_repos]
             
             # Build tiered context for AI
-            context = self.ai_context_builder.build_tiered_context(top_repos, max_repos=max_repos)
+            context = self.build_tiered_context(top_repos, max_repos=max_repos)
             
             # Generate AI system message with context
-            system_message = self.ai_context_builder.build_rules_context(context)
-            
+            system_message = self.build_rules_context(context)
+
             # Get LLM response
-            groq_api_key = os.getenv("GROQ_API_KEY")
-            if not groq_api_key:
+            if not self.groq_api_key:
                 logger.warning("Groq API key not configured - AI processing disabled")
                 repositories_used = [
                     {"name": repo.get("name", "Unknown"), "relevance_score": repo.get("total_relevance_score", 0)}

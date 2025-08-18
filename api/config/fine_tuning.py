@@ -15,6 +15,18 @@ from sklearn.decomposition import PCA
 
 logger = logging.getLogger('portfolio.api')
 
+
+def keyword_overlap_score(query: str, context_str: str) -> float:
+    """
+    Compute keyword overlap between query and context using regex tokenization.
+    Returns ratio of overlapping unique words (case-insensitive, ignores punctuation).
+    """
+    query_tokens = set(re.findall(r'\b\w+\b', query.lower()))
+    context_tokens = set(re.findall(r'\b\w+\b', context_str.lower()))
+    overlap = query_tokens & context_tokens
+    if not query_tokens:
+        return 0.0
+    return len(overlap) / len(query_tokens)
 class SemanticModel:
     """
     A class to handle semantic scoring using a fine-tuned Sentence Transformer model.
