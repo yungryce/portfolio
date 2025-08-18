@@ -8,10 +8,10 @@ from datetime import datetime
 from fa_helpers import create_success_response, create_error_response, get_orchestration_status, trim_processed_repo
 
 # Updated imports - use individual managers instead of GitHubClient
-from github.github_api import GitHubAPI
-from github.cache_manager import cache_manager
-from github.github_repo_manager import GitHubRepoManager
-from github.fingerprint_manager import FingerprintManager
+from config.github_api import GitHubAPI
+from config.cache_manager import cache_manager
+from config.github_repo_manager import GitHubRepoManager
+from config.fingerprint_manager import FingerprintManager
 
 # AI imports
 from ai.type_analyzer import FileTypeAnalyzer
@@ -140,6 +140,14 @@ def repo_context_orchestrator(context):
             'cached_bundle': repos_data['cached_bundle']
         })
         logger.info(f"Cached bundle contains {len(merged_results)} repositories")
+        
+        # Train semantic model as background activity even if using cached results
+        yield context.call_activity('train_semantic_model_activity', {
+            'username': username,
+            'repos_bundle': merged_results,
+            'training_params': {'batch_size': 8, 'max_pairs': 150, 'epochs': 2, 'warmup_steps': 50}
+        })
+        
         return merged_results
 
     logger.info(f"Processing {len(repos_data['stale_repos'])} stale repositories for user '{username}'")
@@ -160,6 +168,13 @@ def repo_context_orchestrator(context):
         'username': username,
         'fresh_results': stale_results,
         'cached_bundle': repos_data['cached_bundle']
+    })
+    
+    # Train semantic model as a background activity after orchestration completes
+    yield context.call_activity('train_semantic_model_activity', {
+        'username': username,
+        'repos_bundle': merged_results,
+        'training_params': {'batch_size': 8, 'max_pairs': 150, 'epochs': 2, 'warmup_steps': 50}
     })
 
     logger.info(f"Completed repo context orchestration for user '{username}': "
@@ -366,6 +381,49 @@ def merge_repo_results_activity(activityContext):
         logger.info(f"Bundle fingerprint: {bundle_fingerprint}")
     return merged_results
 
+@app.activity_trigger(input_name="activityContext")
+def train_semantic_model_activity(activityContext):
+    """
+    Activity function that ensures the semantic model is ready for use.
+    This runs after orchestration completes to prepare models asynchronously.
+    """
+    logger.info("Starting semantic model training activity")
+    try:
+        # Extract parameters
+        username = activityContext.get('username')
+        repos_bundle = activityContext.get('repos_bundle', [])
+        
+        # Additional optimization: Only train if we have enough repositories
+        documented_repos = [repo for repo in repos_bundle if repo.get("has_documentation", False)]
+        if len(documented_repos) < 3:
+            logger.info(f"Not enough documented repositories ({len(documented_repos)}) for meaningful training")
+            return False
+            
+        # Initialize semantic model
+        from config.fine_tuning import SemanticModel
+        semantic_model = SemanticModel()
+        
+        # Consider passing training parameters through context
+        training_params = activityContext.get('training_params', {})
+        batch_size = training_params.get('batch_size', 8)
+        max_pairs = training_params.get('max_pairs', 150)
+        
+        # Use parameters when training
+        model_ready = semantic_model.ensure_model_ready(
+            repos_bundle, 
+            train_if_missing=True,
+            training_params={
+                'batch_size': batch_size,
+                'max_pairs': max_pairs
+            }
+        )
+        
+        logger.info(f"Semantic model training {'succeeded' if model_ready else 'failed'}")
+        return model_ready
+    except Exception as e:
+        logger.error(f"Error training semantic model: {str(e)}", exc_info=True)
+        return False
+
 @app.route(route="ai", methods=["POST"])
 def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
     logger.info("=-=-Received portfolio query request=-=-")
@@ -379,10 +437,6 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         username = request_body.get('username')
         instance_id = request_body.get('instance_id')
         status_query_url = request_body.get('status_query_url')
-
-        # Initialize AI assistant with updated managers
-        from ai.ai_assistant import AIAssistant
-        ai_assistant = AIAssistant(username=username)
 
         # Try to get cached results first
         cache_key = cache_manager.generate_cache_key(kind='bundle', username=username)
@@ -404,8 +458,33 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         elif not all_repos_bundle:
             return create_error_response("No repo context results available. Provide instance_id or wait for orchestration.", 400)
 
-        # Process the query
-        response = ai_assistant.process_query_results(query, all_repos_bundle)
+        # Step 1: Score repositories with the new service
+        from ai.repo_scoring_service import RepoScoringService
+        scoring_service = RepoScoringService(username=username)
+        scored_repos = scoring_service.score_repositories(query, all_repos_bundle)
+
+        # Log first repository score details for debugging
+        if scored_repos and len(scored_repos) > 0:
+            import json
+            top_repo = scored_repos[0]
+            top_repo_name = top_repo.get("name", "Unknown")
+            top_score = top_repo.get("total_relevance_score", 0)
+            logger.info(f"Top repository for query: {top_repo_name} with score {top_score}")
+            
+            # Pretty print detailed scores for the first repository
+            scores_only = {
+                "name": top_repo.get("name"),
+                "context_score": top_repo.get("context_score"),
+                "language_score": top_repo.get("language_score"),
+                "type_score": top_repo.get("type_score"),
+                "total_relevance_score": top_repo.get("total_relevance_score")
+            }
+            logger.debug(f"Top repo score details: {json.dumps(scores_only, indent=2)}")
+
+        # Step 2: Process with AI assistant using pre-scored repositories
+        from Samples.ai_assistant import AIAssistant
+        ai_assistant = AIAssistant(username=username)
+        response = ai_assistant.process_scored_repositories(query, scored_repos)
 
         return create_success_response(response)
     except Exception as e:
@@ -584,7 +663,7 @@ def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
         repo_manager = _get_github_managers(username)
 
         # Create AI Assistant with repo manager
-        from ai.ai_assistant import AIAssistant
+        from Samples.ai_assistant import AIAssistant
         ai_assistant = AIAssistant(username=username, repo_manager=repo_manager)
 
         # Get repository with context

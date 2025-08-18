@@ -3,8 +3,9 @@ from sentence_transformers import SentenceTransformer, InputExample, losses
 from torch.utils.data import DataLoader
 import logging
 import re
-from model.fine_tuning import SemanticModel
+from config.fine_tuning import SemanticModel
 from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 from data_filter import extract_language_terms, technical_terms_structured
         
 logger = logging.getLogger('portfolio.api')
@@ -131,28 +132,19 @@ class SemanticScorer:
     def score_context_similarity(self, query: str, repo_bundle: Dict) -> float:
         """
         Scores the similarity between the query and the repository context using semantic embeddings.
-        Also incorporates scoring between enriched query and the context string.
-
-        Returns:
-            float: Aggregated similarity score.
         """
-        
         context_str = self.flatten_repo_context_to_natural_language(repo_bundle)
         if not context_str or context_str.strip() == "" or "None" in context_str:
             logger.debug(f"Skipping context scoring for {repo_bundle.get('name', 'Unknown')} due to empty or meaningless context string.")
             return 0.0
 
-        # Get the current model (tuned or base)
-        model = self.semantic_model.get_model()
+        # Encode with whitening + L2 normalization for better spread
+        q_emb = self.semantic_model.encode([query], apply_whitening=True, normalize=True)
+        c_emb = self.semantic_model.encode([context_str], apply_whitening=True, normalize=True)
 
-        # Encode both query and context string
-        query_emb = model.encode([query])
-        context_emb = model.encode([context_str])
+        # Dot product equals cosine for normalized vectors
+        similarity = float(np.dot(q_emb[0], c_emb[0]))
 
-        # Compute cosine similarity between query and context
-        similarity = cosine_similarity(query_emb, context_emb)[0][0]
-
-        # Log the scores
         project_name = repo_bundle.get("repoContext", {}).get("project_identity", {}).get("name")
         logger.debug(f"Context similarity score for: '{project_name}'= {similarity}")
 
@@ -163,10 +155,8 @@ class SemanticScorer:
         Returns a normalized score [0, 1] based on the proportion of query language matches
         to the number of query language terms. Ignores size.
         """
-        logger.debug(f"Scoring language matches for: {repo_languages}")
         query_terms = [t.lower() for t in extract_language_terms(query)]
         if not query_terms:
-            logger.debug(f"No language terms found in query: '{query}'")
             return 0.0
         repo_langs = [lang.lower() for lang in repo_languages.keys()]
         matches = set(query_terms) & set(repo_langs)
@@ -199,6 +189,10 @@ class SemanticScorer:
         Converts the repository context bundle (including .repo-context.json, README.md,
         SKILLS-INDEX.md, ARCHITECTURE.md) into a natural-language-like paragraph
         for sentence-transformer embedding and fine-tuning.
+    
+        Note: This method is similar to SemanticModel._flatten_repo_bundle_for_training
+        but maintained separately to allow flexible field inclusion. Keep the core
+        fields in sync with the corresponding method in fine_tuning.py.
 
         Args:
             repo_bundle (Dict): Repository context bundle.
@@ -268,5 +262,4 @@ class SemanticScorer:
         #         lines.append(f"{key.capitalize()}: {content.strip()}")
 
         flattened_context = "\n".join(lines)
-        logger.debug(f"Flattened context: {flattened_context[:50]}")  # Log first 500 characters
         return flattened_context

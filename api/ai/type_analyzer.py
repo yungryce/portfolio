@@ -39,5 +39,4 @@ class FileTypeAnalyzer:
         if max_possible == 0:
             return 0.0
         type_score = min(raw_score / max_possible, 1.0)
-        logger.debug(f"Calculated type score: {type_score} from categorized files: {categorized_files}")
         return type_score

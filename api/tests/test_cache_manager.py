@@ -5,7 +5,7 @@ import time
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
-from github.cache_manager import CacheManager
+from config.cache_manager import CacheManager
 
 class TestCacheManager(unittest.TestCase):
     """Tests for the CacheManager class."""
