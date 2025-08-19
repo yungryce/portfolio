@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { GithubFilesService } from './github-files.service';
-import { FEATURED_REPOSITORIES } from '../projects/projects-config';
+import { FEATURED_REPOSITORIES } from '../projects-old/projects-config';
 
 @Injectable({
   providedIn: 'root'

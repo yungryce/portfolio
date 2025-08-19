@@ -3,10 +3,7 @@ import os
 import datetime
 from typing import Dict, List, Optional, Any
 from ai.type_analyzer import FileTypeAnalyzer
-from ai.repo_context_builder import RepoContextBuilder
-from ai.ai_assistant import AIContextBuilder
 from config.fine_tuning import SemanticModel
-from ai.semantic_scorer import SemanticScorer
 
 logger = logging.getLogger('portfolio.api')
 
@@ -22,10 +19,7 @@ class AIAssistant:
         self.username = username
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.semantic_model = SemanticModel()
-        self.semantic_scorer = SemanticScorer(self.semantic_model)
         self.file_type_analyzer = FileTypeAnalyzer()
-        self.ai_context_builder = AIContextBuilder()
-        self.context_builder = RepoContextBuilder()
 
         logger.info(f"AI Assistant initialized for user: {self.username}")
 
@@ -53,8 +47,6 @@ class AIAssistant:
         context_score = float(self.semantic_scorer.score_context_similarity(query, repo_bundle))
         language_score = float(self.semantic_scorer.score_language_matches(query, repo_languages))
         type_score = float(self.file_type_analyzer.calculate_type_score(categorized))
-        logger.debug(f"Calculated scores for repository '{repo_name}': "
-                     f"Context: {context_score}, Language: {language_score}, Type: {type_score}")
 
         # Aggregate total score
         total_score = float(self.semantic_scorer.aggregate_scores(context_score, language_score, type_score))

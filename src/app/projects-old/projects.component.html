@@ -1,0 +1,184 @@
+<div class="projects-container">
+  <div class="header-section mb-8">
+    <h1 class="text-3xl font-bold mb-4">Featured Projects</h1>
+    <p class="text-gray-400 mb-6">
+      A curated collection of projects showcasing various technical skills and competencies.
+    </p>
+  </div>
+  
+  <div *ngIf="loading" class="projects-grid">
+    <div *ngFor="let item of [1,2,3,4,5]" class="project-card skeleton">
+      <div class="skeleton-header"></div>
+      <div class="skeleton-content"></div>
+      <div class="skeleton-tech-stack"></div>
+    </div>
+  </div>
+  
+  <div *ngIf="error" class="error-message">
+    <p>Failed to load projects. Please try again later.</p>
+  </div>
+  
+  <div *ngIf="!loading && !error" class="projects-grid">
+    <div *ngFor="let repo of repositories" class="project-card" role="article" [attr.aria-labelledby]="'project-title-' + repo.name">
+      
+      <!-- Project Header -->
+      <div class="project-header mb-4">
+        <div class="flex justify-between items-start mb-2">
+          <h2 class="text-xl font-bold" [id]="'project-title-' + repo.name">
+            {{ repo.repoContext?.project_identity?.name || repo.name }}
+          </h2>
+          <div class="project-type-badge" 
+               [style.background-color]="getCompetencyColor(getCompetencyLevel(repo))"
+               [attr.aria-label]="'Project type: ' + getProjectType(repo)">
+            {{ getProjectType(repo) }}
+          </div>
+        </div>
+        
+        <div class="project-meta flex items-center gap-4 text-sm text-gray-400">
+          <span class="scope-badge">{{ getProjectScope(repo) }}</span>
+          <span class="competency-level">{{ getCompetencyLevel(repo) }}</span>
+          <span class="stars">⭐ {{ repo.stargazers_count }}</span>
+        </div>
+      </div>
+
+      <!-- Project Description -->
+      <p class="project-description mb-4">
+        {{ getProjectDescription(repo) }}
+      </p>
+
+      <!-- Technical Details -->
+      <div class="tech-details mb-4">
+        
+        <!-- Primary Tech Stack -->
+        <div class="tech-stack mb-3">
+          <h3 class="text-sm font-semibold uppercase mb-2 text-gray-300">Primary Stack</h3>
+          <div class="tech-badges">
+            <span *ngFor="let tech of getPrimaryTechStack(repo)" 
+                  class="tech-badge primary">
+              {{ tech }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Secondary Technologies (if available) -->
+        <div *ngIf="hasSecondaryTechStack(repo)" class="secondary-stack mb-3">
+          <h3 class="text-sm font-semibold uppercase mb-2 text-gray-300">Tools & Libraries</h3>
+          <div class="tech-badges">
+            <span *ngFor="let tech of getSecondaryTechStack(repo)" 
+                  class="tech-badge secondary">
+              {{ tech }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Project Metrics -->
+      <div class="project-metrics mb-4">
+        <div class="metrics-grid">
+          
+          <!-- Difficulty Rating -->
+          <div class="metric-item">
+            <div class="metric-label">Difficulty</div>
+            <div class="metric-value">
+              <ng-container *ngIf="!isDifficultyLoading(repo.name); else difficultyLoading">
+                <span class="difficulty-rating" 
+                      [style.color]="getDifficultyColor(repo.name)"
+                      [title]="getDifficultyTooltip(repo.name)">
+                  {{ getDifficultyRating(repo) }}
+                </span>
+                <span *ngIf="getDifficultyScore(repo.name) > 0" class="difficulty-score">
+                  ({{ getDifficultyScore(repo.name) }}/100)
+                </span>
+              </ng-container>
+              <ng-template #difficultyLoading>
+                <div class="loading-indicator">
+                  <span class="loading-spinner"></span>
+                  <span class="loading-text">Analyzing...</span>
+                </div>
+              </ng-template>
+            </div>
+          </div>
+
+          <!-- Estimated Hours -->
+          <div class="metric-item" *ngIf="getEstimatedHours(repo) > 0">
+            <div class="metric-label">Est. Hours</div>
+            <div class="metric-value">{{ getEstimatedHours(repo) }}h</div>
+          </div>
+
+          <!-- Language -->
+          <div class="metric-item" *ngIf="repo.language">
+            <div class="metric-label">Language</div>
+            <div class="metric-value">{{ repo.language }}</div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Topics/Tags from GitHub -->
+      <div *ngIf="repo.topics?.length" class="github-topics mb-4">
+        <div class="topic-tags">
+          <span *ngFor="let topic of repo.topics.slice(0, 4)" class="topic-tag">
+            {{ topic }}
+          </span>
+          <span *ngIf="repo.topics.length > 4" class="topic-tag more">
+            +{{ repo.topics.length - 4 }} more
+          </span>
+        </div>
+      </div>
+
+      <!-- Action Links -->
+      <div class="project-actions">
+        <a [href]="repo.html_url" target="_blank" class="action-link github-link">
+          <i class="fab fa-github"></i> View Code
+        </a>
+        <a *ngIf="repo.homepage" [href]="repo.homepage" target="_blank" class="action-link demo-link">
+          <i class="fas fa-external-link-alt"></i> Live Demo
+        </a>
+        <a [routerLink]="['/projects', repo.name, 'about']" class="action-link about-link">
+          <i class="fas fa-book-open"></i> Learn More
+        </a>
+      </div>
+
+      <!-- Add detailed difficulty breakdown if available -->
+      <div *ngIf="getDifficultyAnalysis(repo.name) as analysis" class="difficulty-breakdown">
+        <div class="breakdown-item" *ngFor="let reason of analysis.reasoning">
+          <small class="text-muted">{{ reason }}</small>
+        </div>
+        <div class="confidence-indicator">
+          <small class="text-muted">
+            Confidence: {{ (analysis.confidence * 100) | number:'1.0-0' }}%
+          </small>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Summary Stats -->
+  <div *ngIf="!loading && !error && repositories.length > 0" class="summary-stats mt-12">
+    <h3 class="text-lg font-semibold mb-4">Portfolio Summary</h3>
+    <div class="stats-grid">
+      <div class="stat-item">
+        <div class="stat-value">{{ repositories.length }}</div>
+        <div class="stat-label">Featured Projects</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">{{ getTotalDevelopmentHours() }}h</div>
+        <div class="stat-label">Total Development Time</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">{{ getTotalStars() }}</div>
+        <div class="stat-label">GitHub Stars</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">{{ getCompletedProjects() }}</div>
+        <div class="stat-label">Completed Projects</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">{{ getActiveProjects() }}</div>
+        <div class="stat-label">Active Projects</div>
+      </div>
+    </div>
+  </div>
+
+</div>
