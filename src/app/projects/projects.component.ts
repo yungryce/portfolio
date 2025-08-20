@@ -1,171 +1,163 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterModule } from '@angular/router';
 import { RepoBundleService, RepoBundleResponse } from '../services/repo-bundle.service';
 import { Observable, map } from 'rxjs';
 
-interface RepositoryData {
+interface RepoCardVM {
   name: string;
-  metadata: {
-    name: string;
-    description?: string;
-    html_url: string;
-    fork: boolean;
-    created_at: string;
-    updated_at: string;
-    pushed_at: string;
-    stargazers_count: number;
-  };
-  languages: Record<string, number>;
-  categorized_types: Record<string, string[]>;
-  readme: string;
-  has_documentation: boolean;
+  updatedAt?: string;
+  type: string;
+  description: string;
+  primaryStack: string[];
+  languagesPct: { k: string; pct: number }[];
+  htmlUrl?: string;
+  isFork?: boolean;
 }
 
 @Component({
   selector: 'app-projects',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, RouterModule],
   templateUrl: './projects.component.html',
   styleUrls: ['./projects.component.css']
 })
 export class ProjectsComponent implements OnInit {
   private repoBundleService = inject(RepoBundleService);
   repoBundle$!: Observable<RepoBundleResponse>;
-  filteredRepos$!: Observable<RepositoryData[]>;
-  username = 'yungryce'; // Default username
-  
+  filteredRepos$!: Observable<RepoCardVM[]>;
+  username = 'yungryce';
+
   // Filter options
   showForks = false;
   selectedLanguage = '';
   selectedTechnology = '';
   searchTerm = '';
-  
+
   // Sorting
-  sortBy = 'updated'; // Options: 'name', 'stars', 'updated'
-  sortDirection = 'desc'; // 'asc' or 'desc'
-  
+  sortBy = 'updated';
+  sortDirection = 'desc';
+
   // Available filter options
   allLanguages: string[] = [];
   allTechnologies: string[] = [];
 
+  theme: 'light' | 'dark' = 'light';
+
   ngOnInit(): void {
+    this.initTheme();
     this.loadRepoBundle();
+  }
+
+  // THEME: init, toggle, apply
+  private initTheme(): void {
+    const saved = (localStorage.getItem('theme') as 'light' | 'dark') || null;
+    this.theme = saved ?? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    this.applyTheme();
+  }
+  toggleTheme(): void {
+    this.theme = this.theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('theme', this.theme);
+    this.applyTheme();
+  }
+  private applyTheme(): void {
+    const root = document.documentElement;
+    if (this.theme === 'dark') root.classList.add('dark');
+    else root.classList.remove('dark');
+    root.setAttribute('data-theme', this.theme);
   }
 
   loadRepoBundle(): void {
     this.repoBundle$ = this.repoBundleService.getUserBundle(this.username);
-    
-    // Apply filtering and sorting
     this.filteredRepos$ = this.repoBundle$.pipe(
       map(bundle => {
-        // Extract all unique languages and technologies
-        this.extractFilterOptions(bundle.data);
-        
-        // Apply filters
-        return this.filterAndSortRepos(bundle.data);
+        const vms = (bundle?.data ?? []).map(r => this.toCardVM(r));
+        this.extractFilterOptionsFromVM(vms);
+        return this.filterAndSortVMs(vms);
       })
     );
   }
-  
-  private extractFilterOptions(repos: RepositoryData[]): void {
+
+  private toCardVM(r: any): RepoCardVM {
+    const pid = r?.repoContext?.project_identity ?? {};
+    const type = r?.repoContext?.type ?? pid?.type ?? 'Unknown';
+    const description = r?.repoContext?.description ?? pid?.description ?? 'No description';
+    const langs = r?.languages ?? {};
+    const total = Object.values(langs).reduce((a: number, b: any) => a + Number(b), 0) || 1;
+    const languagesPct = Object.entries(langs)
+      .map(([k, v]) => ({ k, pct: Math.round((Number(v) / total) * 100) }))
+      .sort((a, b) => b.pct - a.pct);
+
+    return {
+      name: r?.name ?? r?.metadata?.name ?? 'unknown',
+      updatedAt: r?.metadata?.updated_at ?? r?.metadata?.pushed_at,
+      type,
+      description,
+      primaryStack: r?.repoContext?.tech_stack?.primary ?? [],
+      languagesPct,
+      htmlUrl: r?.metadata?.html_url,
+      isFork: !!r?.metadata?.fork,
+    };
+  }
+
+  private extractFilterOptionsFromVM(vms: RepoCardVM[]): void {
     const languages = new Set<string>();
     const technologies = new Set<string>();
-    
-    repos.forEach(repo => {
-      // Extract languages
-      if (repo.languages) {
-        Object.keys(repo.languages).forEach(lang => languages.add(lang));
-      }
-      
-      // Extract technologies
-      if (repo.categorized_types) {
-        Object.values(repo.categorized_types).forEach(techArray => {
-          techArray.forEach(tech => technologies.add(tech));
-        });
-      }
+    vms.forEach(vm => {
+      (vm.languagesPct ?? []).forEach(l => languages.add(l.k));
+      (vm.primaryStack ?? []).forEach(tech => technologies.add(tech));
     });
-    
     this.allLanguages = Array.from(languages).sort();
     this.allTechnologies = Array.from(technologies).sort();
   }
-  
-  private filterAndSortRepos(repos: RepositoryData[]): RepositoryData[] {
-    // Apply filters
-    let result = repos.filter(repo => {
-      // Filter by fork status
-      if (!this.showForks && repo.metadata.fork) {
-        return false;
+
+  private filterAndSortVMs(vms: RepoCardVM[]): RepoCardVM[] {
+    let result = vms.filter(vm => {
+      if (!this.showForks && vm.isFork) return false;
+      if (this.searchTerm) {
+        const q = this.searchTerm.toLowerCase();
+        const hits =
+          vm.name.toLowerCase().includes(q) ||
+          vm.description.toLowerCase().includes(q) ||
+          vm.type.toLowerCase().includes(q) ||
+          (vm.primaryStack || []).some(t => t.toLowerCase().includes(q));
+        if (!hits) return false;
       }
-      
-      // Filter by search term
-      if (this.searchTerm && !this.matchesSearchTerm(repo, this.searchTerm)) {
-        return false;
+      if (this.selectedLanguage) {
+        const hasLang = (vm.languagesPct || []).some(l => l.k === this.selectedLanguage);
+        if (!hasLang) return false;
       }
-      
-      // Filter by language
-      if (this.selectedLanguage && 
-          (!repo.languages || !Object.keys(repo.languages).includes(this.selectedLanguage))) {
-        return false;
+      if (this.selectedTechnology) {
+        const hasTech = (vm.primaryStack || []).includes(this.selectedTechnology);
+        if (!hasTech) return false;
       }
-      
-      // Filter by technology
-      if (this.selectedTechnology && !this.hasTechnology(repo, this.selectedTechnology)) {
-        return false;
-      }
-      
       return true;
     });
-    
-    // Then sort
-    result = this.sortRepos(result, this.sortBy, this.sortDirection);
-    
+    result = this.sortVMs(result, this.sortBy, this.sortDirection);
     return result;
   }
-  
-  private matchesSearchTerm(repo: RepositoryData, term: string): boolean {
-    const lowerTerm = term.toLowerCase();
-    return (
-      repo.metadata.name.toLowerCase().includes(lowerTerm) ||
-      (repo.metadata.description && repo.metadata.description.toLowerCase().includes(lowerTerm))
-    );
-  }
-  
-  private hasTechnology(repo: RepositoryData, tech: string): boolean {
-    if (!repo.categorized_types) return false;
-    
-    return Object.values(repo.categorized_types).some(
-      techArray => techArray.includes(tech)
-    );
-  }
-  
-  private sortRepos(repos: RepositoryData[], sortBy: string, direction: string): RepositoryData[] {
-    return [...repos].sort((a, b) => {
-      let comparison = 0;
-      
+
+  private sortVMs(vms: RepoCardVM[], sortBy: string, direction: string): RepoCardVM[] {
+    return [...vms].sort((a, b) => {
+      let cmp = 0;
       switch (sortBy) {
         case 'name':
-          comparison = a.metadata.name.localeCompare(b.metadata.name);
-          break;
-        case 'stars':
-          comparison = a.metadata.stargazers_count - b.metadata.stargazers_count;
+          cmp = a.name.localeCompare(b.name);
           break;
         case 'updated':
-        default:
-          comparison = new Date(a.metadata.pushed_at).getTime() - 
-                       new Date(b.metadata.pushed_at).getTime();
+        default: {
+          const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const bt = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          cmp = at - bt;
           break;
+        }
       }
-      
-      return direction === 'asc' ? comparison : -comparison;
+      return direction === 'asc' ? cmp : -cmp;
     });
   }
-  
-  // Template helper methods
-  applyFilters(): void {
-    this.loadRepoBundle();
-  }
-  
+
+  applyFilters(): void { this.loadRepoBundle(); }
   resetFilters(): void {
     this.showForks = false;
     this.selectedLanguage = '';
@@ -175,8 +167,6 @@ export class ProjectsComponent implements OnInit {
     this.sortDirection = 'desc';
     this.loadRepoBundle();
   }
-  
-  objectKeys(obj: any): string[] {
-    return obj ? Object.keys(obj) : [];
-  }
+
+  trackByName = (_: number, vm: RepoCardVM) => vm.name;
 }

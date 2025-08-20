@@ -10,7 +10,7 @@ import { RouterModule } from '@angular/router';
   styleUrls: ['./home.component.css']
 })
 export class HomeComponent {
-  title = 'Chigbu Joshua';
+  title = 'Home';
   
   // You can add methods here if needed for any dynamic content
 }

@@ -98,6 +98,8 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
                 
                 if cached_bundle_fingerprint and cached_bundle_fingerprint == current_bundle_fingerprint:
                     logger.info("Combined bundle fingerprints match")
+                    logger.debug(f"First repository in bundle: {json.dumps(cache_entry['data'][1], indent=2)}")
+                    
                     # Return cached response with bundle fingerprint
                     return create_success_response({
                         "status": "cached",
@@ -606,23 +608,26 @@ def health_check(req: func.HttpRequest) -> func.HttpResponse:
     }
 
     return create_success_response(health_data, cache_control="no-cache")
-
+    
 @app.route(route="bundles/{username}", methods=["GET"])
-def get_repo_bundle(req: func.HttpRequest, username: str) -> func.HttpResponse:
+def get_repo_bundle(req: func.HttpRequest) -> func.HttpResponse:
     """
     Retrieve a single user's repository bundle from the cache (Azure Blob via cache_manager).
     """
     try:
-        target_user = username or 'yungryce'
-        bundle_cache_key = cache_manager.generate_cache_key(kind='bundle', username=target_user)
+        username = req.route_params.get('username')
+        if not username:
+            return create_error_response("Username required", 400)
+
+        bundle_cache_key = cache_manager.generate_cache_key(kind='bundle', username=username)
         result = cache_manager.get(bundle_cache_key)
 
         status = result.get('status')
         if status != 'valid' or result.get('data') is None:
-            return create_error_response(f"No valid bundle found for '{target_user}'", 404)
+            return create_error_response(f"No valid bundle found for '{username}'", 404)
 
         payload = {
-            "username": target_user,
+            "username": username,
             "fingerprint": result.get('fingerprint'),
             "last_modified": result.get('last_modified'),
             "size_bytes": result.get('size_bytes'),
@@ -634,7 +639,7 @@ def get_repo_bundle(req: func.HttpRequest, username: str) -> func.HttpResponse:
         return create_error_response(f"Failed to retrieve bundle: {str(e)}", 500)
     
 @app.route(route="bundles/{username}/{repo}", methods=["GET"])
-def get_single_repo_bundle(req: func.HttpRequest, username: str, repo: str) -> func.HttpResponse:
+def get_single_repo_bundle(req: func.HttpRequest) -> func.HttpResponse:
     """
     Retrieve a single repository bundle from the cache.
     
@@ -646,23 +651,23 @@ def get_single_repo_bundle(req: func.HttpRequest, username: str, repo: str) -> f
         HTTP response with the repository bundle or error
     """
     try:
-        target_user = username or 'yungryce'
-        target_repo = repo
-        
-        if not target_repo:
-            return create_error_response("Repository name is required", 400)
+        username = req.route_params.get('username')
+        repo = req.route_params.get('repo')
+
+        if not username or not repo:
+            return create_error_response("Username and repository name are required", 400)
             
         # Generate cache key for this specific repository
-        repo_cache_key = cache_manager.generate_cache_key(kind='repo', username=target_user, repo=target_repo)
+        repo_cache_key = cache_manager.generate_cache_key(kind='repo', username=username, repo=repo)
         result = cache_manager.get(repo_cache_key)
         
         status = result.get('status')
         if status != 'valid' or result.get('data') is None:
-            return create_error_response(f"No valid repository data found for '{target_repo}' by user '{target_user}'", 404)
+            return create_error_response(f"No valid repository data found for '{repo}' by user '{username}'", 404)
         
         payload = {
-            "username": target_user,
-            "repo": target_repo,
+            "username": username,
+            "repo": repo,
             "fingerprint": result.get('fingerprint'),
             "last_modified": result.get('last_modified'),
             "size_bytes": result.get('size_bytes'),

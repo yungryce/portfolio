@@ -1,13 +1,13 @@
 import { TestBed } from '@angular/core/testing';
 
-import { GithubService } from './github.service';
+import { RepoBundleService } from './repo-bundle.service';
 
-describe('GithubService', () => {
-  let service: GithubService;
+describe('RepoBundleService', () => {
+  let service: RepoBundleService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({});
-    service = TestBed.inject(GithubService);
+    service = TestBed.inject(RepoBundleService);
   });
 
   it('should be created', () => {
