@@ -1,25 +1,7 @@
 <div class="container mx-auto px-4 py-8 bg-[var(--bg)] text-[var(--fg)] transition-colors">
-  <!-- Top bar with theme toggle -->
-  <div class="flex items-center justify-between mb-6">
+  <!-- Top bar -->
+  <div class="mb-6">
     <h1 class="text-3xl font-extrabold tracking-tight">Projects</h1>
-    <button
-      type="button"
-      class="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] text-[var(--fg)] hover:bg-[var(--soft)] transition-colors"
-      (click)="toggleTheme()"
-      [attr.aria-pressed]="theme === 'dark'"
-      aria-label="Toggle dark mode"
-      title="Toggle dark mode"
-    >
-      <span class="inline-block h-4 w-4" aria-hidden="true">
-        <svg *ngIf="theme==='light'" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Zm0 4a1 1 0 0 1-1-1v-1a1 1 0 1 1 2 0v1a1 1 0 0 1-1 1Zm0-18a1 1 0 0 1-1-1V2a1 1 0 1 1 2 0v1a1 1 0 0 1-1 1Zm10 9a1 1 0 0 1-1 1h-1a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1ZM4 12a1 1 0 0 1-1 1H2a1 1 0 1 1 0-2h1a1 1 0 0 1 1 1Zm13.657 6.657a1 1 0 0 1-1.414 0l-.707-.707a1 1 0 1 1 1.414-1.414l.707.707a1 1 0 0 1 0 1.414ZM7.464 7.464A1 1 0 0 1 6.05 6.05l.707-.707A1 1 0 1 1 8.17 6.757l-.707.707Zm9.193-2.121a1 1 0 0 1 1.414 0l.707.707a1 1 0 1 1-1.414 1.414l-.707-.707a1 1 0 0 1 0-1.414ZM6.757 16.828a1 1 0 1 1 1.414 1.415l-.707.707a1 1 0 0 1-1.414-1.414l.707-.708Z"/>
-        </svg>
-        <svg *ngIf="theme==='dark'" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3c.2 0 .4 0 .59.02a1 1 0 0 1 .59 1.78A7 7 0 1 0 19.2 11.6a1 1 0 0 1 1.78.59c.02.19.02.39.02.6Z"/>
-        </svg>
-      </span>
-      <span class="text-sm font-medium">{{ theme === 'dark' ? 'Dark' : 'Light' }} mode</span>
-    </button>
   </div>
 
   <ng-container *ngIf="repoBundle$ | async as bundle; else loading">
@@ -27,45 +9,47 @@
     <div class="p-4 rounded-lg shadow mb-6 border border-[var(--border)] bg-[var(--card)]">
       <h2 class="text-xl font-semibold mb-3">Filter Projects</h2>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        <div>
-          <label for="search" class="block text-sm font-medium text-[var(--muted)] mb-1">Search</label>
-          <input id="search" [(ngModel)]="searchTerm" placeholder="Search projects..."
-                 class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
-        </div>
+      <div class="overflow-x-auto">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          <div>
+            <label for="search" class="block text-sm font-medium text-[var(--muted)] mb-1">Search</label>
+            <input id="search" [(ngModel)]="searchTerm" placeholder="Search projects..."
+                   class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
+          </div>
 
-        <div>
-          <label for="language" class="block text-sm font-medium text-[var(--muted)] mb-1">Language</label>
-          <select id="language" [(ngModel)]="selectedLanguage"
-                  class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
-            <option value="">All Languages</option>
-            <option *ngFor="let lang of allLanguages" [value]="lang">{{ lang }}</option>
-          </select>
-        </div>
-
-        <div>
-          <label for="technology" class="block text-sm font-medium text-[var(--muted)] mb-1">Technology</label>
-          <select id="technology" [(ngModel)]="selectedTechnology"
-                  class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
-            <option value="">All Technologies</option>
-            <option *ngFor="let tech of allTechnologies" [value]="tech">{{ tech }}</option>
-          </select>
-        </div>
-
-        <div>
-          <label for="sortBy" class="block text-sm font-medium text-[var(--muted)] mb-1">Sort By</label>
-          <div class="flex gap-2">
-            <select id="sortBy" [(ngModel)]="sortBy"
-                    class="flex-1 px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
-              <option value="updated">Last Updated</option>
-              <option value="name">Name</option>
+          <div>
+            <label for="language" class="block text-sm font-medium text-[var(--muted)] mb-1">Language</label>
+            <select id="language" [(ngModel)]="selectedLanguage"
+                    class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
+              <option value="">All Languages</option>
+              <option *ngFor="let lang of allLanguages" [value]="lang">{{ lang }}</option>
             </select>
-            <button (click)="sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'"
-                    class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] hover:bg-[var(--soft)]"
-                    [attr.aria-label]="'Toggle sort direction to ' + (sortDirection === 'asc' ? 'descending' : 'ascending')">
-              <span *ngIf="sortDirection === 'asc'">↑</span>
-              <span *ngIf="sortDirection === 'desc'">↓</span>
-            </button>
+          </div>
+
+          <div>
+            <label for="technology" class="block text-sm font-medium text-[var(--muted)] mb-1">Technology</label>
+            <select id="technology" [(ngModel)]="selectedTechnology"
+                    class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
+              <option value="">All Technologies</option>
+              <option *ngFor="let tech of allTechnologies" [value]="tech">{{ tech }}</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="sortBy" class="block text-sm font-medium text-[var(--muted)] mb-1">Sort By</label>
+            <div class="flex gap-2">
+              <select id="sortBy" [(ngModel)]="sortBy"
+                      class="flex-1 px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
+                <option value="updated">Last Updated</option>
+                <option value="name">Name</option>
+              </select>
+              <button (click)="sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'"
+                      class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] hover:bg-[var(--soft)]"
+                      [attr.aria-label]="'Toggle sort direction to ' + (sortDirection === 'asc' ? 'descending' : 'ascending')">
+                <span *ngIf="sortDirection === 'asc'">↑</span>
+                <span *ngIf="sortDirection === 'desc'">↓</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

@@ -43,29 +43,8 @@ export class ProjectsComponent implements OnInit {
   allLanguages: string[] = [];
   allTechnologies: string[] = [];
 
-  theme: 'light' | 'dark' = 'light';
-
   ngOnInit(): void {
-    this.initTheme();
     this.loadRepoBundle();
-  }
-
-  // THEME: init, toggle, apply
-  private initTheme(): void {
-    const saved = (localStorage.getItem('theme') as 'light' | 'dark') || null;
-    this.theme = saved ?? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    this.applyTheme();
-  }
-  toggleTheme(): void {
-    this.theme = this.theme === 'dark' ? 'light' : 'dark';
-    localStorage.setItem('theme', this.theme);
-    this.applyTheme();
-  }
-  private applyTheme(): void {
-    const root = document.documentElement;
-    if (this.theme === 'dark') root.classList.add('dark');
-    else root.classList.remove('dark');
-    root.setAttribute('data-theme', this.theme);
   }
 
   loadRepoBundle(): void {

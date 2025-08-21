@@ -259,7 +259,6 @@ class AIAssistant:
             return "I'm sorry, but the AI service is not configured. Please check the Groq API key."
         try:
             logger.info(f"Request ID: {request_id} - Calling Groq API")
-            return 1
             response = self.openai_client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=[

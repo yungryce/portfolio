@@ -1,31 +1,4 @@
-/* Theme tokens (CSS variables) */
-:root {
-  --bg: #ffffff;
-  --fg: #0f172a;         /* slate-900 */
-  --muted: #64748b;     /* slate-500 */
-  --border: #e2e8f0;    /* slate-200 */
-  --card: #f8fafc;      /* slate-50 */
-  --soft: #eef2ff;      /* indigo-50 */
-  --primary: #2563eb;   /* blue-600 */
-  --primary-foreground: #ffffff;
-  --chip-bg: #e2e8f0;   /* slate-200 */
-  --chip-fg: #0f172a;   /* slate-900 */
-  --ring: #60a5fa;      /* blue-400 */
-}
-
-:root.dark {
-  --bg: #0b1020;
-  --fg: #e5e7eb;         /* slate-200 */
-  --muted: #94a3b8;      /* slate-400 */
-  --border: #1f2937;     /* slate-800 */
-  --card: #0f172a;       /* slate-900 */
-  --soft: #111827;       /* slate-900 (muted) */
-  --primary: #60a5fa;    /* blue-400 */
-  --primary-foreground: #0b1020;
-  --chip-bg: #1f2937;    /* slate-800 */
-  --chip-fg: #e5e7eb;    /* slate-200 */
-  --ring: #60a5fa;
-}
+/* Remove component-scoped :root tokens to avoid conflicts; use global tokens from styles.css */
 
 /* Typography and layout polish */
 .container { line-height: 1.6; }

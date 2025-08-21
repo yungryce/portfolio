@@ -678,3 +678,58 @@ def get_single_repo_bundle(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Failed to retrieve repository bundle for '{repo}' by '{username}': {str(e)}", exc_info=True)
         return create_error_response(f"Failed to retrieve repository bundle: {str(e)}", 500)
 
+@app.route(route="surveys", methods=["GET"])
+def list_survey_images(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List survey rating screenshots from Azure Blob Storage container 'surveys'.
+    Optional query: ?theme=light|dark
+    Filenames: {slug}-{theme}.{ext} (e.g., csat-5-light.png).
+    """
+    try:
+        theme = (req.params.get('theme') or '').strip().lower()
+        if theme not in ('', 'light', 'dark'):
+            return create_error_response("Invalid theme. Use 'light' or 'dark'.", 400)
+
+        def infer_theme(name: str) -> str:
+            n = name.lower()
+            if any(t in n for t in ["-dark.", "_dark.", ".dark."]): return "dark"
+            if any(t in n for t in ["-light.", "_light.", ".light."]): return "light"
+            parts = n.replace("\\", "/").split("/")
+            if "dark" in parts: return "dark"
+            if "light" in parts: return "light"
+            return "unknown"
+
+        def infer_slug(name: str) -> str:
+            import os
+            base = os.path.basename(name)
+            stem, _ = os.path.splitext(base)
+            for suf in ("-dark", "_dark", ".dark", "-light", "_light", ".light"):
+                if stem.endswith(suf): return stem[: -len(suf)]
+            return stem
+
+        container = "surveys"
+        client = cache_manager.get_container_client(container)
+        items = []
+        for blob in client.list_blobs():
+            bname = getattr(blob, "name", "")
+            if not bname:
+                continue
+            t = infer_theme(bname)
+            if theme and t != theme:
+                continue
+            items.append({
+                # "name": infer_slug(bname),
+                "theme": t,
+                "path": bname,
+                "url": cache_manager.make_blob_sas_url(container, bname)
+            })
+
+        items.sort(key=lambda x: x["theme"])
+        return create_success_response({
+            "count": len(items),
+            "theme": theme or "all",
+            "items": items
+        }, cache_control="public, max-age=600")
+    except Exception as e:
+        logger.error(f"Failed to list survey images: {str(e)}", exc_info=True)
+        return create_error_response(f"Failed to list survey images: {str(e)}", 500)

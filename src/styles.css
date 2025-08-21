@@ -13,39 +13,67 @@
   --font-size-base: 1rem;
 }
 
-/* Global theme tokens (available to all pages) */
-html {
-  --bg: #ffffff;
-  --fg: #0b1020;         /* slate-900 */
-  --muted: #64748b;     /* slate-500 */
-  --border: #e2e8f0;    /* slate-200 */
-  --card: #f8fafc;      /* slate-50 */
-  --soft: #eef2ff;      /* indigo-50 */
-  --primary: #2563eb;   /* blue-600 */
-  --primary-foreground: #ffffff;
-  --chip-bg: #e2e8f0;   /* slate-200 */
-  --chip-fg: #0f172a;   /* slate-900 */
-  --ring: #60a5fa;      /* blue-400 */
+/* Global theme tokens */
+:root {
+  /* Surfaces */
+  --bg: #f4f3f3;           /* light base */
+  --bg-soft: #E0EBDC;      /* soft background banding */
+  --card: #ffffff;         /* cards/surfaces */
+  --border: #dfdfdf;
+
+  /* Text */
+  --fg: #1A1A43;           /* primary text */
+  --muted: #a2a8d3;        /* secondary text */
+  --heading: #38598b;      /* headings */
+
+  /* Accents */
+  --primary: #CA5C36;        /* buttons/primary accent (sparingly) */
+  --primary-foreground: #fff6f6;
+  --accent: #096B72;         /* secondary accent */
+  --accent-foreground: #fff6f6;
+
+  /* Chips, rings */
+  --chip-bg: #e7eaf6;
+  --chip-fg: #080829;
+  --ring: #A4B0F5;
 }
 
-html.dark {
-  --bg: #0b1020;
-  --fg: #e5e7eb;         /* slate-200 */
-  --muted: #94a3b8;      /* slate-400 */
-  --border: #1f2937;     /* slate-800 */
-  --card: #0f172a;       /* slate-900 */
-  --soft: #111827;       /* slate-900 (muted) */
-  --primary: #60a5fa;    /* blue-400 */
-  --primary-foreground: #0b1020;
-  --chip-bg: #1f2937;    /* slate-800 */
-  --chip-fg: #e5e7eb;    /* slate-200 */
-  --ring: #60a5fa;
+:root.dark {
+  --bg: #0a0b10;        /* darker, more neutral */
+  --bg-soft: #12131a;   /* subtle elevation */
+  --card: #151622;      /* neutral card surface */
+  --border: #26293a;    /* neutral border */
+
+  --fg: #E0EBDC;
+  --muted: #a2a8d3;
+  --heading: #A4B0F5;
+
+  --primary: #CA5C36;
+  --primary-foreground: #080829;
+  --accent: #297373;
+  --accent-foreground: #fff6f6;
+
+  --chip-bg: #323262;
+  --chip-fg: #E0EBDC;
+  --ring: #A4B0F5;
 }
 
+/* Global primitives */
+html, body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif;
+}
+
+/* Replace the base layer to use global tokens (remove forced dark html bg) */
 @layer base {
   html {
-    background-color: var(--color-github-dark);
-    color: var(--color-github-gray);
+    background-color: var(--bg);
+    color: var(--fg);
   }
 
   body {
@@ -55,7 +83,7 @@ html.dark {
   }
 
   h1, h2, h3, h4, h5, h6 {
-    color: var(--color-github-light);
+    color: var(--heading);
     margin-bottom: 0.5rem;
   }
 
@@ -65,18 +93,45 @@ html.dark {
   }
 
   hr {
-    border-color: var(--color-github-border);
+    border-color: var(--border);
     margin: 1.5rem 0;
   }
 
-  p {
-    margin-bottom: 1rem;
-  }
-  
-  em {
-    color: var(--color-github-radical);
-    font-style: italic;
-  }
+  p { margin-bottom: 1rem; }
+  em { color: var(--accent); font-style: italic; }
+}
+
+/* Utility helpers for buttons (optional) */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: .5rem .75rem;
+  border-radius: .5rem;
+  border: 1px solid var(--border);
+}
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.btn-ghost {
+  background: var(--bg);
+  color: var(--fg);
+}
+.btn-card {
+  background: var(--card);
+  color: var(--fg);
+}
+
+/* Card and soft sections */
+.section-soft {
+  background: var(--bg-soft);
+}
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 @layer components {
@@ -220,4 +275,12 @@ html.dark {
   .border-github {
     border: 1px solid var(--color-github-border);
   }
+}
+
+/* Navbar palette (intentionally not theme-toggled) */
+:root {
+  --color-github-dark: #0b0d14;   /* navbar bg */
+  --color-github-border: #26293a; /* navbar border */
+  --color-github-light: #E0EBDC;  /* active/hover link + focus ring */
+  --color-github-gray: #c3c8e6;   /* default link/icon in navbar */
 }

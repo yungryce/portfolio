@@ -3,9 +3,9 @@ import json
 import hashlib
 import logging
 import functools
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Union, List, Callable
-from azure.storage.blob import BlobServiceClient, ContentSettings
+from azure.storage.blob import BlobServiceClient, ContentSettings, generate_blob_sas, BlobSasPermissions
 from azure.core.exceptions import HttpResponseError, ClientAuthenticationError
 
 logger = logging.getLogger('portfolio.api')
@@ -510,6 +510,38 @@ class CacheManager:
                 "total_entries": 0,
                 "total_size_bytes": 0
             }
+
+    def get_container_client(self, container_name: str):
+        if not self.blob_service_client:
+            raise RuntimeError("Blob service not configured")
+        return self.blob_service_client.get_container_client(container_name)
+
+    def make_blob_sas_url(self, container_name: str, blob_name: str, minutes: int = 60) -> str:
+        """
+        Build a read-only URL for a blob. If credentials are unavailable (public container),
+        returns the public URL without SAS.
+        """
+        if not self.blob_service_client:
+            raise RuntimeError("Blob service not configured")
+        account = self.blob_service_client.account_name
+        base = f"https://{account}.blob.core.windows.net/{container_name}/{blob_name}"
+        # Try to append SAS if we have an account key
+        try:
+            account_key = getattr(self.blob_service_client.credential, "account_key", None)
+            if not account_key:
+                return base
+            # from datetime import datetime, timedelta, timezone
+            sas = generate_blob_sas(
+                account_name=account,
+                container_name=container_name,
+                blob_name=blob_name,
+                account_key=account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.now(timezone.utc) + timedelta(minutes=minutes),
+            )
+            return f"{base}?{sas}"
+        except Exception:
+            return base
 
 # Create a global instance of CacheManager
 cache_manager = CacheManager()
