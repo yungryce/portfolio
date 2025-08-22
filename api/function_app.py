@@ -47,7 +47,7 @@ def _get_github_managers(username=None):
     return repo_manager
 
 
-@app.route(route="orchestrators/repo_context_orchestrator", methods=["POST"])
+@app.route(route="orchestrator_start", methods=["POST"])
 @app.durable_client_input(client_name="client")
 async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
     """
@@ -58,8 +58,25 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
     try:
         # Parse request body
         request_body = req.get_json() or {}
-        username = request_body.get('username', 'yungryce')
-        force_refresh = request_body.get('force_refresh', False)
+
+        # Check if the request is from a GitHub webhook
+        if "repository" in request_body:
+            logger.info("Processing GitHub webhook payload")
+            repo_data = request_body.get("repository", {})
+            username = repo_data.get("owner", {}).get("login")
+            repo_name = repo_data.get("name")
+
+            if not username or not repo_name:
+                return create_error_response("Invalid GitHub webhook payload: missing username or repo name", 400)
+
+            logger.info(f"Webhook triggered for repo '{repo_name}' by user '{username}'")
+            force_refresh = True  # Always force refresh for webhooks
+        else:
+            # Process as a user request
+            logger.info("Processing user request")
+            username = request_body.get("username", "yungryce")
+            force_refresh = request_body.get("force_refresh", False)
+            repo_name = None  # Not applicable for user requests
 
         # Check model cache status
         model_cache_key = cache_manager.generate_cache_key(kind='model')
@@ -491,7 +508,7 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         logger.error(f"Error processing portfolio query: {str(e)}", exc_info=True)
         return create_error_response(f"Failed to process query: {str(e)}", 500)
 
-@app.timer_trigger(schedule="0 0 0 * * *", arg_name="myTimer", run_on_startup=False,
+@app.timer_trigger(schedule="0 */5 * * * *", arg_name="myTimer", run_on_startup=False,
                    use_monitor=True) # Every hour
 def cache_cleanup_timer(myTimer: func.TimerRequest) -> None:
     """

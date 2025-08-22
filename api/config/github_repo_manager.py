@@ -92,28 +92,6 @@ class GitHubRepoManager:
         if isinstance(file_data, dict) and file_data.get('type') == 'file':
             return self.api.decode_file_content(file_data)
         return None
-    
-    @cache_manager.cache_decorator(cache_key_func=lambda username, **kwargs: cache_manager.generate_cache_key(kind='bundle', username=username))
-    def get_all_repos_with_context(self, username: Optional[str], include_languages: bool = True):
-        """
-        Get all repositories with enhanced context including .repo-context.json and file paths.
-        """
-        if not username:
-            raise ValueError("Username is required")
-        username = str(username)  # Ensure username is a string
-        repos = self.get_all_repos_metadata(username, include_languages=include_languages)
-        repos_with_context = [trim_processed_repo(repo) for repo in repos if isinstance(repo, dict)]
-        
-        # Generate fingerprint for the bundle
-        fingerprint = FingerprintManager.generate_bundle_fingerprint([
-            FingerprintManager.generate_metadata_fingerprint(repo)
-            for repo in repos_with_context if isinstance(repo, dict)
-        ])
-        
-        # Add fingerprint to cache metadata when saving
-        # Note: The cache_decorator will handle this automatically
-        
-        return repos_with_context
 
     def get_repository_tree(self, repo_name: str, username: Optional[str] = None, recursive: bool = False) -> List[str]:
         """

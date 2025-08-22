@@ -188,7 +188,7 @@ def trim_processed_repo(repo: dict) -> dict:
         Dictionary with only the relevant keys preserved
     """
     keys_to_keep = [
-        'id', 'name', 'url', 'description', 'fork',
+        'id', 'name', 'html_url', 'description', 'fork',
         'created_at', 'updated_at', 'pushed_at', 'size',
         'language', 'license', 'allow_forking', 'topics',
         'visibility', 'file_paths', 'languages',

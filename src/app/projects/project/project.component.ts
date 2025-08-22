@@ -15,7 +15,6 @@ interface RepoDetailVM {
   primaryStack: string[];
   languagesPct: { k: string; pct: number }[];
   htmlUrl?: string;
-  isFork?: boolean;
   readme?: string;
 }
 
@@ -76,8 +75,7 @@ export class ProjectComponent implements OnInit {
       description,
       primaryStack: r?.repoContext?.tech_stack?.primary ?? [],
       languagesPct,
-      htmlUrl: r?.metadata?.html_url,
-      isFork: !!r?.metadata?.fork,
+      htmlUrl: r?.metadata?.html_url, 
       readme: r?.readme
     };
   }
