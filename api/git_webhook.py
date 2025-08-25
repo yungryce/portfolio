@@ -1,15 +1,26 @@
+#!/usr/bin/env python3.11
 import requests
 import os
+import json
 
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')  # Needs repo + admin:repo_hook scopes
 USERNAME = "yungryce"
-WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'http://localhost:7071/api/orchestrator_start')
+try:
+    with open('./local.settings.json') as f:
+        settings = json.load(f)
+        GITHUB_TOKEN = settings['Values'].get('GITHUB_TOKEN')
+        WEBHOOK_URL = settings['Values'].get('WEBHOOK_URL') # Needs repo + admin:repo_hook scopes
+except Exception:
+    pass
 
 headers = {"Authorization": f"token {GITHUB_TOKEN}"}
 
 # 1. Get all repositories for your account
 repos_url = f"https://api.github.com/user/repos?per_page=100"
 repos = requests.get(repos_url, headers=headers).json()
+
+if isinstance(repos, dict) and "message" in repos:
+    print(f"GitHub API error: {repos['message']}")
+    exit(1)
 
 for repo in repos:
     repo_name = repo["name"]
