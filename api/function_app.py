@@ -389,7 +389,6 @@ def merge_repo_results_activity(activityContext):
         repo_name = fresh_repo.get('metadata', {}).get('name')
         if repo_name and repo_name not in processed_repo_names:
             merged_results.append(fresh_repo)
-            logger.debug(f"Added new-merge repository '{repo_name}' to bundle")
 
     # Cache individual repository results
     for fresh_repo in fresh_results:
@@ -585,7 +584,6 @@ def cleanup_cache(myTimer: func.TimerRequest) -> None:
     and the cache_decorator in CacheManager.
     Runs daily at midnight.
     """
-    logger.info("Starting cleanup of individual blobs...")
     try:
         # Call the cleanup method from CacheManager
         cleanup_results = cache_manager.cleanup_expired_cache(batch_size=100, dry_run=False)

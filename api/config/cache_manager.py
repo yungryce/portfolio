@@ -322,8 +322,6 @@ class CacheManager:
                 "error_count": 0
             }
         
-        logger.info(f"Starting cache cleanup (batch_size={batch_size}, dry_run={dry_run})")
-        
         try:
             # Get container client
             container_client = self.blob_service_client.get_container_client(self.container_name)
@@ -348,8 +346,6 @@ class CacheManager:
             
             # Process blobs in batches
             blob_batch = []
-            
-            logger.info(f"Scanning blobs in container '{self.container_name}'")
             
             for blob in container_client.list_blobs():
                 total_blobs += 1

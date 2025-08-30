@@ -10,7 +10,7 @@ export interface RepoBundleResponse {
   fingerprint?: string;
   last_modified?: string;
   size_bytes?: number;
-  data: any[]; // array of repository bundles
+  data: { has_documentation: boolean }[];
 }
 
 export interface SingleRepoBundleResponse {

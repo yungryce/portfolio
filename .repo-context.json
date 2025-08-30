@@ -1,0 +1,153 @@
+{
+  "project_identity": {
+    "name": "Portfolio Project",
+    "type": "web-application",
+    "scope": "Full-stack portfolio management system",
+    "description": "A portfolio management system with an Angular frontend and Azure Functions backend. It integrates GitHub data, AI-powered insights, and dynamic repository visualization.",
+    "is_independent": true,
+    "version": "1.0.0",
+    "curriculum_stage": "production"
+  },
+  "tech_stack": {
+    "primary": ["Angular 17+", "Azure Functions", "Python 3.11+"],
+    "secondary": ["Tailwind CSS", "TypeScript", "RxJS", "Azure Blob Storage"],
+    "key_libraries": ["@angular/core", "azure-functions", "sentence-transformers"],
+    "development_tools": ["Visual Studio Code", "Azure CLI", "npm", "pytest"],
+    "testing_frameworks": ["Jasmine", "Karma", "pytest"]
+  },
+  "skill_manifest": {
+    "technical": [
+      "Frontend development with Angular",
+      "Backend development with Azure Functions",
+      "Integration of REST APIs",
+      "AI model fine-tuning and embedding",
+      "Data visualization",
+      "Caching and performance optimization",
+      "Error handling and logging",
+      "Unit and integration testing"
+    ],
+    "domain": [
+      "Web development",
+      "Cloud computing",
+      "AI integration",
+      "Portfolio management",
+      "DevOps"
+    ],
+    "competency_level": "intermediate-to-advanced",
+    "prerequisites": [
+      "Basic knowledge of Angular and TypeScript",
+      "Experience with Python and Azure Functions",
+      "Understanding of REST APIs and cloud services"
+    ]
+  },
+  "components": {
+    "main_files": [
+      {
+        "path": "src/main.ts",
+        "purpose": "Entry point for the Angular application",
+        "complexity": "basic"
+      },
+      {
+        "path": "src/app/projects",
+        "purpose": "Repository list and detail views",
+        "complexity": "intermediate"
+      },
+      {
+        "path": "api/function_app.py",
+        "purpose": "Azure Functions backend for API endpoints",
+        "complexity": "advanced"
+      }
+    ],
+    "configuration": [
+      {
+        "type": "environment_variables",
+        "items": ["AzureWebJobsStorage", "GITHUB_TOKEN"],
+        "purpose": "Azure resource authentication and GitHub API access"
+      },
+      {
+        "type": "build_scripts",
+        "items": ["npm run build", "ng build"],
+        "purpose": "Frontend production build"
+      }
+    ]
+  },
+  "topics": [
+    "Angular Development",
+    "Azure Functions",
+    "REST API Integration",
+    "AI Model Training",
+    "Data Visualization",
+    "Caching",
+    "Error Handling",
+    "Testing"
+  ],
+  "projectStructure": {
+    "entryPoint": "src/main.ts",
+    "configFiles": ["angular.json", "tsconfig.json", "api/local.settings.json"],
+    "documentationFiles": ["README.md", "ARCHITECTURE.md", "SKILLS-INDEX.md"],
+    "deploymentFiles": [".github/workflows/*.yml"]
+  },
+  "outcomes": {
+    "primary": [
+      "Develop a full-stack portfolio management system",
+      "Integrate AI-powered insights into repository data",
+      "Provide dynamic and interactive data visualization"
+    ],
+    "skills_acquired": [
+      "Frontend and backend integration",
+      "AI model fine-tuning",
+      "REST API development and consumption",
+      "Cloud resource management"
+    ],
+    "deliverables": [
+      "Production-ready portfolio management system",
+      "Comprehensive documentation",
+      "Unit and integration test coverage"
+    ]
+  },
+  "prerequisites": {
+    "knowledge": [
+      "Angular and TypeScript basics",
+      "Python and Azure Functions",
+      "REST API concepts",
+      "Cloud computing fundamentals"
+    ],
+    "technical": [
+      "Node.js and npm installed",
+      "Python 3.11+ development environment",
+      "Azure CLI configured",
+      "Git version control"
+    ]
+  },
+  "associatedProjects": [],
+  "files": {
+    "total_count": 50,
+    "by_type": {
+      "source_code": 30,
+      "configuration": 5,
+      "documentation": 10,
+      "deployment": 5
+    },
+    "key_files": [
+      "src/main.ts",
+      "src/app/projects",
+      "api/function_app.py",
+      "README.md",
+      "ARCHITECTURE.md"
+    ]
+  },
+  "metadata": {
+    "created_date": "2025-08-30",
+    "last_updated": "2025-08-30",
+    "maintainer": "Chigbu Joshua",
+    "license": "MIT",
+    "repository_type": "production-project",
+    "tags": ["angular", "azure-functions", "portfolio-management", "ai-integration", "data-visualization"],
+    "quality_indicators": {
+      "code_coverage": "high",
+      "documentation_quality": "comprehensive",
+      "test_coverage": "moderate",
+      "production_readiness": "high"
+    }
+  }
+}

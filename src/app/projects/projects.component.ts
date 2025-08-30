@@ -14,6 +14,7 @@ interface RepoCardVM {
   languagesPct: { k: string; pct: number }[];
   htmlUrl?: string;
   isFork?: boolean;
+  hasDocumentation: boolean;
 }
 
 @Component({
@@ -27,6 +28,7 @@ export class ProjectsComponent implements OnInit {
   private repoBundleService = inject(RepoBundleService);
   repoBundle$!: Observable<RepoBundleResponse>;
   filteredRepos$!: Observable<RepoCardVM[]>;
+  filterByDocumentation = false; 
   username = 'yungryce';
 
   // Filter options
@@ -51,14 +53,21 @@ export class ProjectsComponent implements OnInit {
     this.repoBundle$ = this.repoBundleService.getUserBundle(this.username);
     this.filteredRepos$ = this.repoBundle$.pipe(
       map(bundle => {
-        const vms = (bundle?.data ?? []).map(r => this.toCardVM(r));
+        const vms = (bundle?.data ?? [])
+          .map(r => this.toCardVM(r))
+          .filter((vm): vm is RepoCardVM => vm !== null);
         this.extractFilterOptionsFromVM(vms);
         return this.filterAndSortVMs(vms);
       })
     );
   }
 
-  private toCardVM(r: any): RepoCardVM {
+  private toCardVM(r: any): RepoCardVM | null {
+    if (!r?.has_documentation) {
+      console.log('Excluding:', r?.name, 'due to missing documentation');
+      return null; // Exclude repositories without documentation
+    }
+
     const pid = r?.repoContext?.project_identity ?? {};
     const type = r?.repoContext?.type ?? pid?.type ?? 'Unknown';
     const description = r?.repoContext?.description ?? pid?.description ?? 'No description';
@@ -77,6 +86,7 @@ export class ProjectsComponent implements OnInit {
       languagesPct,
       htmlUrl: r?.metadata?.html_url,
       isFork: !!r?.metadata?.fork,
+      hasDocumentation: !!r?.has_documentation,
     };
   }
 

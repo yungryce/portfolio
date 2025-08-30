@@ -24,11 +24,13 @@ High‑level flow
 - POST `/api/ai` — `{ query, username?, instance_id?, status_query_url? }`; uses cached bundle or orchestrator output (requires both `instance_id` and `status_query_url` for best reliability).
 - POST `/api/github/cache/cleanup` — `{ dry_run, batch_size }` to sweep expired entries.
 - GET `/api/health` — returns environment and cache status.
-Note: GitHub GET endpoints in the README aren’t wired in `function_app.py` at present.
+- GET `/api/bundles/{username}` — retrieve cached repository bundle.
+- GET `/api/bundles/{username}/{repo}` — retrieve single repository bundle.
+Note: GitHub GET endpoints in the README aren't wired in `function_app.py` at present.
 
 ### Caching conventions (`config/cache_manager.py`)
 - Azure Blob container: `github-cache`. Disabled gracefully when `AzureWebJobsStorage` is not set.
-- Keys: bundle `repos_bundle_context_{username}`; per‑repo `repo_level_bundle_{username}_{repo}`; model `fine_tuned_model_metadata` or `model_{fingerprint}`.
+- Keys: bundle `repos_bundle_context_{username}`; per‑repo `repo_context_{username}_{repo}`; model `fine_tuned_model_metadata` or `model_{fingerprint}`.
 - `get()` returns `{ status: valid|missing|disabled|error|expired, data, fingerprint?, last_modified?, size_bytes? }`.
 - `save(ttl=None)` persists JSON; fingerprints stored in blob metadata when provided. Legacy tests expect `no_expiry` metadata when `ttl=None` (current code does not set it).
 - Decorator: `@cache_manager.cache_decorator(cache_key_func=..., ttl=...)` caches method results; decorator uses kwargs to build keys.
@@ -39,8 +41,14 @@ from config.github_api import GitHubAPI
 from config.github_repo_manager import GitHubRepoManager
 
 def _get_github_managers(username=None):
-    api = GitHubAPI(token=os.getenv('GITHUB_TOKEN'), username=username)
-    return GitHubRepoManager(api, username=username)  # single manager, not a tuple
+    """Get GitHub managers initialized with proper dependencies."""
+    github_token = os.getenv('GITHUB_TOKEN')
+
+    # Initialize components in dependency order
+    api = GitHubAPI(token=github_token, username=username)
+    repo_manager = GitHubRepoManager(api, username=username)
+
+    return repo_manager
 ```
 Use `GitHubRepoManager.get_all_repos_metadata(..., include_languages=True)` and `get_file_content(repo, path, username)`; repo trees via `get_repository_tree(..., recursive=True)`.
 
@@ -53,18 +61,88 @@ Use `GitHubRepoManager.get_all_repos_metadata(..., include_languages=True)` and 
 
 ### AI pipeline highlights
 - Scoring: `ai/repo_scoring_service.py` computes `context_score` (semantic embeddings), `language_score` (query language matches via `data_filter.extract_language_terms`), and `type_score` (file‑type weighting) → `total_relevance_score`.
-- Assistant: `ai/ai_assistant.py` builds a tiered context from top repos and calls Groq via OpenAI SDK (`GROQ_API_KEY`, base_url `https://api.groq.com/openai/v1`). When the key is missing, it returns a structured “AI disabled” response.
+- Assistant: `ai/ai_assistant.py` builds a tiered context from top repos and calls Groq via OpenAI SDK (`GROQ_API_KEY`, base_url `https://api.groq.com/openai/v1`). When the key is missing, it returns a structured "AI disabled" response.
+
+### Project-specific patterns and conventions
+
+#### Error handling patterns
+```python
+# Always use standardized responses
+return create_success_response({"data": result})
+return create_error_response("Error message", 500)
+
+# For GitHub API errors, use the helper
+from fa_helpers import handle_github_error
+try:
+    result = github_api_call()
+except Exception as e:
+    return handle_github_error(e)
+```
+
+#### Logging patterns
+```python
+# Use structured logging with context
+logger = logging.getLogger('portfolio.api')
+logger.info(f"Processing {len(items)} items for user '{username}'")
+logger.error(f"Failed to process repo '{repo_name}': {str(e)}", exc_info=True)
+```
+
+#### Repository data structure expectations
+```python
+# Repository bundles always contain these keys
+repo_bundle = {
+    "name": "repo-name",
+    "metadata": {...},  # GitHub API metadata
+    "repoContext": {...},  # .repo-context.json content
+    "readme": "markdown content",
+    "skills_index": "markdown content",
+    "architecture": "markdown content",
+    "file_types": {...},  # File extension counts
+    "categorized_types": {...},  # Categorized by type_analyzer
+    "fingerprint": "hash",  # For change detection
+    "languages": {...},  # GitHub language stats
+    "has_documentation": True/False
+}
+```
+
+#### Cache key generation patterns
+```python
+# Use the centralized key generator
+bundle_key = cache_manager.generate_cache_key(kind='bundle', username=username)
+repo_key = cache_manager.generate_cache_key(kind='repo', username=username, repo=repo_name)
+model_key = cache_manager.generate_cache_key(kind='model', fingerprint=model_fingerprint)
+```
+
+#### AI context building patterns
+```python
+# Build tiered context for AI queries
+def build_tiered_context(self, top_repos):
+    context_parts = []
+    for repo in top_repos:
+        # Essential info first
+        context_parts.append(f"Repository: {repo['name']}")
+        context_parts.append(f"Languages: {', '.join(repo.get('languages', {}).keys())}")
+
+        # Then detailed content
+        if repo.get('readme'):
+            context_parts.append(f"README: {repo['readme'][:500]}...")
+        if repo.get('repoContext'):
+            context_parts.append(f"Context: {json.dumps(repo['repoContext'])}")
+
+    return "\n".join(context_parts)
+```
 
 ### Conventions and gotchas
 - Responses: always use `create_success_response`/`create_error_response`; for upstream GitHub failures, prefer `handle_github_error(e)`.
 - Logging: logger name `portfolio.api`; file path from `API_LOG_FILE` (defaults to `api_function_app.log`).
 - Defaults: many paths default `username` to `yungryce`; pass explicitly for multi‑user scenarios.
 - Orchestrator handoff: when chaining to `/api/ai`, include both `instance_id` and `status_query_url`; utility `get_orchestration_status` can poll when only `instance_id` is available.
-- Tests: some legacy tests expect `_get_github_managers` to return tuples and `no_expiry` cache metadata; update mocks/expectations when modifying interfaces.
+- Dependencies: Use `torch==2.2.2+cpu` (CPU-only) and `sentence-transformers==2.6.1` for consistent ML environment.
+- File analysis: Always check `has_documentation` flag before using repository content for AI processing.
 
 ### Local workflows (Linux/bash)
 - Python 3.11+, Azure Functions Core Tools; install deps with `pip install -r requirements.txt`.
-- Required env (local only; don’t commit): `AzureWebJobsStorage`, `GITHUB_TOKEN`, `GROQ_API_KEY`, optional `API_LOG_FILE`.
+- Required env (local only; don't commit): `AzureWebJobsStorage`, `GITHUB_TOKEN`, `GROQ_API_KEY`, optional `API_LOG_FILE`.
 - Run locally: `func start`. Smoke test: `./starter.sh` (starts orchestration, polls, then posts to `/api/ai`).
 - Tests: `pytest` (note legacy expectations as above).
 
@@ -73,7 +151,4 @@ Use `GitHubRepoManager.get_all_repos_metadata(..., include_languages=True)` and 
 - List all repos + languages: `repo_manager.get_all_repos_metadata('yungryce', include_languages=True)`.
 - Score repos for a query (within a function): `RepoScoringService(username).score_repositories(query, bundle)`.
 - Trigger orchestration via HTTP: POST `/api/orchestrators/repo_context_orchestrator` with `{ "username": "yungryce" }`.
-
-Questions or unclear bits? If you need the GitHub GET routes implemented or test expectations aligned (e.g., `no_expiry`), call it out and we’ll adjust the code or tests accordingly.
-
-
+- Cache repository bundle: `cache_manager.save(bundle_key, repo_data, ttl=None, fingerprint=fingerprint)`.

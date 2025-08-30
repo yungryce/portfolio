@@ -26,3 +26,6 @@ Refactoring Guide:
 - `src/assistant`: This displays returned ai response. This consumes `api/function-app.portfolio_query`. Depracating `src/portfolio-assistant`
 
 Update .github/copilot-instructions.md for the user, then ask for feedback on any unclear or incomplete sections to iterate.
+
+
+
