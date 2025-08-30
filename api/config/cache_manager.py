@@ -3,8 +3,8 @@ import json
 import hashlib
 import logging
 import functools
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, Union, List, Callable
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, Optional, Callable
 from azure.storage.blob import BlobServiceClient, ContentSettings, generate_blob_sas, BlobSasPermissions
 from azure.core.exceptions import HttpResponseError, ClientAuthenticationError
 
@@ -209,7 +209,7 @@ class CacheManager:
             
             # Honor TTL for backward compatibility; default to non-expiring
             if ttl is not None:
-                expires_at = (datetime.now() + timedelta(seconds=int(ttl))).isoformat()
+                expires_at = (datetime.now(timezone.utc) + timedelta(seconds=int(ttl))).isoformat()
                 metadata['expires_at'] = expires_at
 
             blob_client = self.blob_service_client.get_blob_client(
@@ -289,16 +289,13 @@ class CacheManager:
                 # Check cache
                 cache_result = self.get(cache_key)
                 if cache_result['status'] == 'valid':
-                    logger.debug(f"Cache hit for key: {cache_key}")
                     return cache_result['data']
                 
                 # Cache miss or expired, call the function
-                logger.debug(f"Cache miss for key: {cache_key}, calling function")
                 result = func(*args, **kwargs)
                 
                 # Save result to cache
                 self.save(cache_key, result, ttl=ttl)
-                logger.debug(f"Saved result to cache for key: {cache_key}")
 
                 return result
             return wrapper
@@ -347,7 +344,7 @@ class CacheManager:
             expired_count = 0
             deleted_count = 0
             error_count = 0
-            current_time = datetime.now()
+            current_time = datetime.now(timezone.utc)
             
             # Process blobs in batches
             blob_batch = []
@@ -419,7 +416,7 @@ class CacheManager:
                     try:
                         expires_at = datetime.fromisoformat(metadata['expires_at'])
                     except Exception:
-                        expires_at = datetime.min
+                        expires_at = datetime.min.replace(tzinfo=timezone.utc)
                     if expires_at <= current_time:
                         expired += 1
                         if not dry_run:
