@@ -3,7 +3,7 @@ import json
 import hashlib
 import logging
 import functools
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Union, List, Callable
 from azure.storage.blob import BlobServiceClient, ContentSettings, generate_blob_sas, BlobSasPermissions
 from azure.core.exceptions import HttpResponseError, ClientAuthenticationError
@@ -530,14 +530,13 @@ class CacheManager:
             account_key = getattr(self.blob_service_client.credential, "account_key", None)
             if not account_key:
                 return base
-            # from datetime import datetime, timedelta, timezone
             sas = generate_blob_sas(
                 account_name=account,
                 container_name=container_name,
                 blob_name=blob_name,
                 account_key=account_key,
                 permission=BlobSasPermissions(read=True),
-                expiry=datetime.now(timezone.utc) + timedelta(minutes=minutes),
+                expiry=datetime.now() + timedelta(minutes=minutes),
             )
             return f"{base}?{sas}"
         except Exception:

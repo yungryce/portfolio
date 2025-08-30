@@ -18,7 +18,7 @@ class GitHubRepoManager:
         self.api = api
         self.username = username
 
-    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, **kwargs: f"repo_metadata:{username}:{repo}")
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, **kwargs: f"repo_metadata:{username}:{repo}", ttl=3600)
     def get_repo_metadata(self, username: Optional[str]=None, repo: Optional[str]=None, include_languages: bool=False) -> Dict[str, Any]:
         """Get metadata for a specific repository.
 
@@ -46,7 +46,7 @@ class GitHubRepoManager:
                 repo_data['languages'] = languages
         return repo_data
 
-    @cache_manager.cache_decorator(cache_key_func=lambda username=None, **kwargs: f"repos_metadata:{username}:all")
+    @cache_manager.cache_decorator(cache_key_func=lambda username=None, **kwargs: f"repos_metadata:{username}:all", ttl=3600)
     def get_all_repos_metadata(self, username: Optional[str]=None, per_page=100, include_languages: bool=False) -> List[Dict[str, Any]]:
         """Get metadata for all repositories.
 
@@ -74,7 +74,7 @@ class GitHubRepoManager:
                         repo['languages'] = languages
         return repos
 
-    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, path, **kwargs: f"file_content:{username}:{repo}:{path}")
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, path, **kwargs: f"file_content:{username}:{repo}:{path}", ttl=3600)
     def get_file_content(self, username: Optional[str], repo: str, path: str) -> Optional[str]:
         """
         Fetch the content of a file from a repository using the underlying file_manager.
