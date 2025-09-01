@@ -38,7 +38,10 @@ export class RepoBundleService {
 
     if (useCache) {
       const cached = this.cache.get<RepoBundleResponse>(cacheKey);
-      if (cached) return of(cached);
+      if (cached) {
+        console.log('Using cached data for:', cacheKey, cached);
+        return of(cached);
+      }
     }
 
     return this.http.get<any>(url).pipe(
