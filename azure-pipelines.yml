@@ -141,9 +141,16 @@ stages:
 
                 - script: |
                     if [ -f staticwebapp.config.json ]; then
-                      cp staticwebapp.config.json dist/staticwebapp.config.json
+                      mkdir -p dist/portfolio/browser
+                      cp staticwebapp.config.json dist/portfolio/browser/staticwebapp.config.json
                     fi
                   displayName: "Include SWA config in dist"
+                  workingDirectory: '$(Build.SourcesDirectory)'
+
+                - script: |
+                    echo "Build output structure:"
+                    find dist -type f | sort
+                  displayName: "Debug: Show build output structure"
                   workingDirectory: '$(Build.SourcesDirectory)'
 
                 - task: AzureStaticWebApp@0
@@ -151,9 +158,9 @@ stages:
                   inputs:
                     azure_static_web_apps_api_token: '$(SWA_TOKEN)'
                     action: 'upload'
-                    app_location: 'dist'   # upload from dist
-                    api_location: ''       # Functions deployed separately
-                    output_location: ''    # not used when skip_app_build=true
+                    app_location: 'dist/portfolio/browser'  # Updated to match Angular output
+                    api_location: ''
+                    output_location: ''
                     skip_app_build: true
                     skip_api_build: true
                     app_build_command: ''   # we already built above, let the task only upload
