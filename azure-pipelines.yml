@@ -125,6 +125,9 @@ stages:
           runOnce:
             deploy:
               steps:
+                - checkout: self    # ensure source is available for npm
+                  fetchDepth: 0
+
                 - task: NodeTool@0
                   inputs:
                     versionSpec: '$(Node_Version)'
