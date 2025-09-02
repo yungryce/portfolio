@@ -151,4 +151,6 @@ stages:
                     app_location: '/'
                     api_location: ''
                     output_location: 'dist'
+                    skip_app_build: true     # Skip Oryx app build, use prebuilt dist
+                    skip_api_build: true     # We deploy the Functions separately
                     app_build_command: ''   # we already built above, let the task only upload
