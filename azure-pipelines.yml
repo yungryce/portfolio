@@ -139,18 +139,21 @@ stages:
                   displayName: "Build Angular (production)"
                   workingDirectory: '$(Build.SourcesDirectory)'
 
-                # SWA note:
-                # - app_location points to repo root (where index.html lives after build pipeline config)
-                # - output_location is the final built assets folder (we standardized to 'dist/')
-                # - api_location left empty to avoid SWA-managed Functions (we deploy Functions separately)
+                - script: |
+                    if [ -f staticwebapp.config.json ]; then
+                      cp staticwebapp.config.json dist/staticwebapp.config.json
+                    fi
+                  displayName: "Include SWA config in dist"
+                  workingDirectory: '$(Build.SourcesDirectory)'
+
                 - task: AzureStaticWebApp@0
                   displayName: "Deploy to Azure Static Web Apps"
                   inputs:
                     azure_static_web_apps_api_token: '$(SWA_TOKEN)'
                     action: 'upload'
-                    app_location: '/'
-                    api_location: ''
-                    output_location: 'dist'
-                    skip_app_build: true     # Skip Oryx app build, use prebuilt dist
-                    skip_api_build: true     # We deploy the Functions separately
+                    app_location: 'dist'   # upload from dist
+                    api_location: ''       # Functions deployed separately
+                    output_location: ''    # not used when skip_app_build=true
+                    skip_app_build: true
+                    skip_api_build: true
                     app_build_command: ''   # we already built above, let the task only upload
