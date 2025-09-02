@@ -139,21 +139,32 @@ stages:
                   displayName: "Build Angular (production)"
                   workingDirectory: '$(Build.SourcesDirectory)'
 
-                - script: |
-                    if [ -f staticwebapp.config.json ]; then
-                      mkdir -p dist/browser
-                      cp staticwebapp.config.json dist/browser/staticwebapp.config.json
-                    fi
-                  displayName: "Include SWA config in dist"
-                  workingDirectory: '$(Build.SourcesDirectory)'
+                # - script: |
+                #     if [ -f staticwebapp.config.json ]; then
+                #       mkdir -p dist/browser
+                #       cp staticwebapp.config.json dist/browser/staticwebapp.config.json
+                #     fi
+                #   displayName: "Include SWA config in dist"
+                #   workingDirectory: '$(Build.SourcesDirectory)'
+
+                # - task: AzureStaticWebApp@0
+                #   displayName: "Deploy to Azure Static Web Apps"
+                #   inputs:
+                #     azure_static_web_apps_api_token: '$(SWA_TOKEN)'
+                #     action: 'upload'
+                #     app_location: 'dist/browser'  # Updated to match actual build output
+                #     api_location: ''
+                #     output_location: ''
+                #     skip_app_build: true
+                #     skip_api_build: true
 
                 - task: AzureStaticWebApp@0
                   displayName: "Deploy to Azure Static Web Apps"
                   inputs:
                     azure_static_web_apps_api_token: '$(SWA_TOKEN)'
                     action: 'upload'
-                    app_location: 'dist/browser'  # Updated to match actual build output
-                    api_location: ''
-                    output_location: ''
+                    app_location: '/'  # Updated to match actual build output
+                    api_location: '/api'
+                    output_location: 'dist/portfolio/browser'
                     skip_app_build: true
                     skip_api_build: true
