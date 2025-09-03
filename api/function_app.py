@@ -17,11 +17,10 @@ from config.fingerprint_manager import FingerprintManager
 from ai.type_analyzer import FileTypeAnalyzer
 
 # Configure logging
-LOG_FILE_PATH = os.getenv("API_LOG_FILE", "api_function_app.log")
 logger = logging.getLogger('portfolio.api')
 logger.setLevel(logging.DEBUG)
 # Do NOT add FileHandler in production
-if os.getenv("AZURE_FUNCTIONS_ENVIRONMENT") == "Development":
+if os.getenv("ENV_SETUP") == "Development":
     file_handler = logging.FileHandler("api_function_app.log", mode='a', encoding='utf-8')
     file_handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
@@ -112,7 +111,7 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
 
                 if cached_bundle_fingerprint and cached_bundle_fingerprint == current_bundle_fingerprint:
                     logger.info("Combined bundle fingerprints match")
-                    logger.debug(f"First repository in bundle: {json.dumps(cache_entry['data'][1], indent=2)}")
+                    # logger.debug(f"First repository in bundle: {json.dumps(cache_entry['data'][1], indent=2)}")
 
                     # Return cached response with bundle fingerprint
                     return create_success_response({
