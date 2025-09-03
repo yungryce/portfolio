@@ -15,9 +15,9 @@ pytest
 pytest-mock
 async-timeout
 # Pin the CPU-only version of torch (no CUDA)
-# torch==2.2.2+cpu
+torch==2.2.2+cpu
 # # Required to find the +cpu wheel
-# -f https://download.pytorch.org/whl/torch_stable.html
+-f https://download.pytorch.org/whl/torch_stable.html
 # Install sentence-transformers without triggering torch reinstallation
 sentence-transformers==2.6.1
 # spacy
