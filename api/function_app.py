@@ -20,16 +20,13 @@ from ai.type_analyzer import FileTypeAnalyzer
 LOG_FILE_PATH = os.getenv("API_LOG_FILE", "api_function_app.log")
 logger = logging.getLogger('portfolio.api')
 logger.setLevel(logging.DEBUG)
-
-# Remove all handlers associated with the logger object (avoid duplicate logs)
-for handler in logger.handlers[:]:
-    logger.removeHandler(handler)
-
-file_handler = logging.FileHandler(LOG_FILE_PATH, mode='a', encoding='utf-8')
-file_handler.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
+# Do NOT add FileHandler in production
+if os.getenv("AZURE_FUNCTIONS_ENVIRONMENT") == "Development":
+    file_handler = logging.FileHandler("api_function_app.log", mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 logger.info("Function app initialized")
