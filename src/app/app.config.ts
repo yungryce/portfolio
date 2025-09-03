@@ -3,7 +3,6 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { MarkdownModule } from 'ngx-markdown';
 import { ConfigService } from './services/config.service';
-import { PreFetchService } from './services/pre-fetch.service';
 import { firstValueFrom } from 'rxjs';
 
 import { routes } from './app.routes';
@@ -18,12 +17,12 @@ export const appConfig: ApplicationConfig = {
     ),
     provideAppInitializer(() => {
       const configService = inject(ConfigService);
-      const preFetchService = inject(PreFetchService);
+      // const preFetchService = inject(PreFetchService);
       
-      // Load config first, then initialize prefetching
-      return firstValueFrom(configService.loadConfig()).then(() => {
-        preFetchService.initialize();
-      });
+      // // Load config first, then initialize prefetching
+      // return firstValueFrom(configService.loadConfig()).then(() => {
+      //   preFetchService.initialize();
+      // });
     })
   ]
 };

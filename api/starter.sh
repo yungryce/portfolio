@@ -127,7 +127,7 @@ ORCH_START_TIME=$(date +%s)
 
 # Request orchestration
 echo -e "${BLUE}Requesting repo context...${NC}"
-START_RESPONSE=$(curl -s -X POST "$API_BASE/api/orchestrators/repo_context_orchestrator" \
+START_RESPONSE=$(curl -s -X POST "$API_BASE/api/orchestrator_start" \
   -H "Content-Type: application/json" \
   -d "$REQUEST_PAYLOAD")
 

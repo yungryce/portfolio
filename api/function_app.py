@@ -20,16 +20,13 @@ from ai.type_analyzer import FileTypeAnalyzer
 LOG_FILE_PATH = os.getenv("API_LOG_FILE", "api_function_app.log")
 logger = logging.getLogger('portfolio.api')
 logger.setLevel(logging.DEBUG)
-
-# Remove all handlers associated with the logger object (avoid duplicate logs)
-for handler in logger.handlers[:]:
-    logger.removeHandler(handler)
-
-file_handler = logging.FileHandler(LOG_FILE_PATH, mode='a', encoding='utf-8')
-file_handler.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
+# Do NOT add FileHandler in production
+if os.getenv("AZURE_FUNCTIONS_ENVIRONMENT") == "Development":
+    file_handler = logging.FileHandler("api_function_app.log", mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 logger.info("Function app initialized")
@@ -47,7 +44,7 @@ def _get_github_managers(username=None):
     return repo_manager
 
 
-@app.route(route="orchestrators/repo_context_orchestrator", methods=["POST"])
+@app.route(route="orchestrator_start", methods=["POST"])
 @app.durable_client_input(client_name="client")
 async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
     """
@@ -58,14 +55,41 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
     try:
         # Parse request body
         request_body = req.get_json() or {}
-        username = request_body.get('username', 'yungryce')
-        force_refresh = request_body.get('force_refresh', False)
 
-        # Check cache status
-        bundle_cache_key = cache_manager.generate_cache_key(kind='bundle', username=username)
-        logger.info(f"Checking cache for user '{username}' with key: {bundle_cache_key}")
+        # Check if the request is from a GitHub webhook
+        if "repository" in request_body:
+            logger.info("Processing GitHub webhook payload")
+            repo_data = request_body.get("repository", {})
+            username = repo_data.get("owner", {}).get("login")
+            repo_name = repo_data.get("name")
+
+            if not username or not repo_name:
+                return create_error_response("Invalid GitHub webhook payload: missing username or repo name", 400)
+
+            logger.info(f"Webhook triggered for repo '{repo_name}' by user '{username}'")
+            force_refresh = True  # Always force refresh for webhooks
+        else:
+            # Process as a user request
+            logger.info("Processing user request")
+            username = request_body.get("username", "yungryce")
+            force_refresh = request_body.get("force_refresh", False)
+            repo_name = None  # Not applicable for user requests
+
+        # Check model cache status
+        model_cache_key = cache_manager.generate_cache_key(kind='model')
+        model_cache_result = cache_manager.get(model_cache_key)
+        model_cache_valid = model_cache_result['status'] == 'valid'
+
+        # If model cache is missing, we should force refresh regardless of repository bundle status
+        if not model_cache_valid:
+            logger.info(f"Model cache missing or invalid (key: {model_cache_key}), forcing orchestration")
+            force_refresh = True
 
         if not force_refresh:
+            # Check cache status
+            bundle_cache_key = cache_manager.generate_cache_key(kind='bundle', username=username)
+            logger.info(f"Checking cache for user '{username}' with key: {bundle_cache_key}")
+
             cache_entry = cache_manager.get(bundle_cache_key)
             if cache_entry['status'] == 'valid' and cache_entry['data']:
                 logger.info(f"Cache exists for user '{username}', cache info: {len(cache_entry['data'])} repositories")
@@ -78,16 +102,18 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
                     repo.get('name'): FingerprintManager.generate_metadata_fingerprint(repo)
                     for repo in current_repos if repo.get('name')
                 }
-                
+
                 # Generate a current bundle fingerprint
                 current_repo_fingerprints = list(current_fingerprints.values())
                 current_bundle_fingerprint = FingerprintManager.generate_bundle_fingerprint(current_repo_fingerprints)
-                
+
                 # Compare with cached bundle fingerprint
                 cached_bundle_fingerprint = cache_entry.get('fingerprint')
-                
+
                 if cached_bundle_fingerprint and cached_bundle_fingerprint == current_bundle_fingerprint:
                     logger.info("Combined bundle fingerprints match")
+                    logger.debug(f"First repository in bundle: {json.dumps(cache_entry['data'][1], indent=2)}")
+
                     # Return cached response with bundle fingerprint
                     return create_success_response({
                         "status": "cached",
@@ -140,14 +166,14 @@ def repo_context_orchestrator(context):
             'cached_bundle': repos_data['cached_bundle']
         })
         logger.info(f"Cached bundle contains {len(merged_results)} repositories")
-        
+
         # Train semantic model as background activity even if using cached results
         yield context.call_activity('train_semantic_model_activity', {
             'username': username,
             'repos_bundle': merged_results,
             'training_params': {'batch_size': 8, 'max_pairs': 150, 'epochs': 2, 'warmup_steps': 50}
         })
-        
+
         return merged_results
 
     logger.info(f"Processing {len(repos_data['stale_repos'])} stale repositories for user '{username}'")
@@ -169,7 +195,7 @@ def repo_context_orchestrator(context):
         'fresh_results': stale_results,
         'cached_bundle': repos_data['cached_bundle']
     })
-    
+
     # Train semantic model as a background activity after orchestration completes
     yield context.call_activity('train_semantic_model_activity', {
         'username': username,
@@ -287,7 +313,7 @@ def fetch_repo_context_bundle_activity(activityContext):
     # Fetch .repo-context.json
     repo_context = repo_manager.get_file_content(repo=repo_name, path='.repo-context.json', username=username)
     repo_context = json.loads(repo_context) if repo_context and isinstance(repo_context, str) else {}
-    
+
     # Fetch README.md
     readme_content = repo_manager.get_file_content(repo=repo_name, path='README.md', username=username) or ""
 
@@ -360,7 +386,6 @@ def merge_repo_results_activity(activityContext):
         repo_name = fresh_repo.get('metadata', {}).get('name')
         if repo_name and repo_name not in processed_repo_names:
             merged_results.append(fresh_repo)
-            logger.debug(f"Added new-merge repository '{repo_name}' to bundle")
 
     # Cache individual repository results
     for fresh_repo in fresh_results:
@@ -375,7 +400,7 @@ def merge_repo_results_activity(activityContext):
     if merged_results:
         repo_fingerprints = [repo.get('fingerprint', '') for repo in merged_results]
         bundle_fingerprint = FingerprintManager.generate_bundle_fingerprint(repo_fingerprints)
-        
+
         cache_manager.save(bundle_cache_key, merged_results, ttl=None, fingerprint=bundle_fingerprint)
         logger.info(f"Cached merged bundle with {len(merged_results)} repositories under key: {bundle_cache_key}")
         logger.info(f"Bundle fingerprint: {bundle_fingerprint}")
@@ -392,37 +417,106 @@ def train_semantic_model_activity(activityContext):
         # Extract parameters
         username = activityContext.get('username')
         repos_bundle = activityContext.get('repos_bundle', [])
-        
+
         # Additional optimization: Only train if we have enough repositories
         documented_repos = [repo for repo in repos_bundle if repo.get("has_documentation", False)]
         if len(documented_repos) < 3:
             logger.info(f"Not enough documented repositories ({len(documented_repos)}) for meaningful training")
             return False
-            
+
         # Initialize semantic model
         from config.fine_tuning import SemanticModel
         semantic_model = SemanticModel()
-        
+
         # Consider passing training parameters through context
         training_params = activityContext.get('training_params', {})
         batch_size = training_params.get('batch_size', 8)
         max_pairs = training_params.get('max_pairs', 150)
-        
+
         # Use parameters when training
         model_ready = semantic_model.ensure_model_ready(
-            repos_bundle, 
+            repos_bundle,
             train_if_missing=True,
             training_params={
                 'batch_size': batch_size,
                 'max_pairs': max_pairs
             }
         )
-        
+
         logger.info(f"Semantic model training {'succeeded' if model_ready else 'failed'}")
         return model_ready
     except Exception as e:
         logger.error(f"Error training semantic model: {str(e)}", exc_info=True)
         return False
+
+@app.route(route="bundles/{username}", methods=["GET"])
+def get_repo_bundle(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Retrieve a single user's repository bundle from the cache (Azure Blob via cache_manager).
+    """
+    try:
+        username = req.route_params.get('username')
+        if not username:
+            return create_error_response("Username required", 400)
+
+        bundle_cache_key = cache_manager.generate_cache_key(kind='bundle', username=username)
+        result = cache_manager.get(bundle_cache_key)
+
+        status = result.get('status')
+        if status != 'valid' or result.get('data') is None:
+            return create_error_response(f"No valid bundle found for '{username}'", 404)
+
+        payload = {
+            "username": username,
+            "fingerprint": result.get('fingerprint'),
+            "last_modified": result.get('last_modified'),
+            "size_bytes": result.get('size_bytes'),
+            "data": result.get('data'),
+        }
+        return create_success_response(payload)
+    except Exception as e:
+        logger.error(f"Failed to retrieve bundle for '{username}': {str(e)}", exc_info=True)
+        return create_error_response(f"Failed to retrieve bundle: {str(e)}", 500)
+
+@app.route(route="bundles/{username}/{repo}", methods=["GET"])
+def get_single_repo_bundle(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Retrieve a single repository bundle from the cache.
+
+    Args:
+        username: GitHub username
+        repo: Repository name
+
+    Returns:
+        HTTP response with the repository bundle or error
+    """
+    try:
+        username = req.route_params.get('username')
+        repo = req.route_params.get('repo')
+
+        if not username or not repo:
+            return create_error_response("Username and repository name are required", 400)
+
+        # Generate cache key for this specific repository
+        repo_cache_key = cache_manager.generate_cache_key(kind='repo', username=username, repo=repo)
+        result = cache_manager.get(repo_cache_key)
+
+        status = result.get('status')
+        if status != 'valid' or result.get('data') is None:
+            return create_error_response(f"No valid repository data found for '{repo}' by user '{username}'", 404)
+
+        payload = {
+            "username": username,
+            "repo": repo,
+            "fingerprint": result.get('fingerprint'),
+            "last_modified": result.get('last_modified'),
+            "size_bytes": result.get('size_bytes'),
+            "data": result.get('data')
+        }
+        return create_success_response(payload)
+    except Exception as e:
+        logger.error(f"Failed to retrieve repository bundle for '{repo}' by '{username}': {str(e)}", exc_info=True)
+        return create_error_response(f"Failed to retrieve repository bundle: {str(e)}", 500)
 
 @app.route(route="ai", methods=["POST"])
 def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
@@ -441,8 +535,8 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         # Try to get cached results first
         cache_key = cache_manager.generate_cache_key(kind='bundle', username=username)
         cached_results = cache_manager.get(cache_key)
-        logger.debug(f"Cached results for user '{username}': {cached_results is not None}")
-        
+        logger.debug(f"Cached results for user '{username}': {cached_results['status'] if cached_results else 'None'}")
+
         all_repos_bundle = None
         if cached_results and isinstance(cached_results.get('data'), list):
             all_repos_bundle = cached_results['data']
@@ -458,311 +552,100 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         elif not all_repos_bundle:
             return create_error_response("No repo context results available. Provide instance_id or wait for orchestration.", 400)
 
-        # Step 1: Score repositories with the new service
+        # Step 1: Score repositories with the optimized service
         from ai.repo_scoring_service import RepoScoringService
         scoring_service = RepoScoringService(username=username)
         scored_repos = scoring_service.score_repositories(query, all_repos_bundle)
 
-        # Log first repository score details for debugging
+        # Log top 3 repositories for debugging
         if scored_repos and len(scored_repos) > 0:
-            import json
-            top_repo = scored_repos[0]
-            top_repo_name = top_repo.get("name", "Unknown")
-            top_score = top_repo.get("total_relevance_score", 0)
-            logger.info(f"Top repository for query: {top_repo_name} with score {top_score}")
-            
-            # Pretty print detailed scores for the first repository
-            scores_only = {
-                "name": top_repo.get("name"),
-                "context_score": top_repo.get("context_score"),
-                "language_score": top_repo.get("language_score"),
-                "type_score": top_repo.get("type_score"),
-                "total_relevance_score": top_repo.get("total_relevance_score")
-            }
-            logger.debug(f"Top repo score details: {json.dumps(scores_only, indent=2)}")
+            logger.info("Top scoring repositories:")
+            for i, repo in enumerate(sorted(scored_repos, key=lambda x: x.get("total_relevance_score", 0), reverse=True)[:3]):
+                logger.info(f"{i+1}. {repo.get('name', 'Unknown')}: Context Score: {repo.get('context_score', 0):.4f}, Total: {repo.get('total_relevance_score', 0):.4f}")
 
-        # Step 2: Process with AI assistant using pre-scored repositories
+        # Step 2: Process with optimized AI assistant using pre-scored repositories
         from ai.ai_assistant import AIAssistant
         ai_assistant = AIAssistant(username=username)
         response = ai_assistant.process_scored_repositories(query, scored_repos)
 
         return create_success_response(response)
     except Exception as e:
-        logger.error(f"Error processing portfolio query: {str(e)}")
+        logger.error(f"Error processing portfolio query: {str(e)}", exc_info=True)
         return create_error_response(f"Failed to process query: {str(e)}", 500)
 
-@app.route(route="github/repos/{username}", methods=["GET"])
-def get_user_repos(req: func.HttpRequest) -> func.HttpResponse:
+
+@app.timer_trigger(schedule="0 */5 * * * *", arg_name="myTimer", run_on_startup=False, use_monitor=True)
+def cleanup_cache(myTimer: func.TimerRequest) -> None:
     """
-    HTTP endpoint to fetch all repositories for a user.
+    Timer trigger to clean up expired individual blobs generated by GitHubRepoManager
+    and the cache_decorator in CacheManager.
+    Runs daily at midnight.
     """
-    username = req.route_params.get('username')
-    repo_manager = _get_github_managers(username)
-
     try:
-        repos = repo_manager.get_all_repos_metadata(username=username, include_languages=True)
-        return create_success_response({"repos": repos})
-    except Exception as e:
-        logger.error(f"Error fetching repositories for user '{username}': {str(e)}")
-        return create_error_response(f"Failed to fetch repositories: {str(e)}", 500)
-
-@app.route(route="github/repos/{username}/{repo}", methods=["GET"])
-def get_single_repo(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        username = req.route_params.get('username')
-        repo = req.route_params.get('repo')
-
-        if not username or not repo:
-            return create_error_response("Username and repository name are required", 400)
-
-        # Use repo manager directly
-        repo_manager = _get_github_managers(username)
-        repo_data = repo_manager.get_repo_metadata(username=username, repo=repo, include_languages=True)
-
-        if not repo_data:
-            return create_error_response(f"Repository {username}/{repo} not found", 404)
-
-        return create_success_response(repo_data)
-    except Exception as e:
-        logger.error(f"Error fetching repository {username}/{repo}: {str(e)}")
-        return create_error_response(f"Failed to fetch repository: {str(e)}", 500)
-
-@app.route(route="github/repos/{username}/{repo}/files", methods=["GET"])
-def get_repo_files(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        username = req.route_params.get('username')
-        repo = req.route_params.get('repo')
-        path = req.params.get('path', '')
-
-        if not username or not repo:
-            return create_error_response("Username and repository name are required", 400)
-
-        # Use file manager directly
-        repo_manager = _get_github_managers(username)
-        files = repo_manager.get_file_content(username=username, repo=repo, path=path)
-
-        return create_success_response({"files": files})
-    except Exception as e:
-        logger.error(f"Error fetching files for {username}/{repo}: {str(e)}")
-        return create_error_response(f"Failed to fetch files: {str(e)}", 500)
-
-@app.route(route="github/repos/{username}/with-context", methods=["GET"])
-def get_user_repos_with_context(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        username = req.route_params.get('username')
-        if not username:
-            return create_error_response("Username is required", 400)
-
-        # Use repo manager directly
-        repo_manager = _get_github_managers(username)
-        repos = repo_manager.get_all_repos_with_context(username=username, include_languages=True)
-
-        return create_success_response(repos)
-    except Exception as e:
-        logger.error(f"Error fetching repositories with context for {username}: {str(e)}")
-        return create_error_response(f"Failed to fetch repositories with context: {str(e)}", 500)
-
-@app.timer_trigger(schedule="0 0 0 * * *", arg_name="myTimer", run_on_startup=False,
-                   use_monitor=True) # Every hour
-def cache_cleanup_timer(myTimer: func.TimerRequest) -> None:
-    """
-    Timer trigger that runs every hour to clean up expired cache blobs.
-    Schedule: "0 0 * * * *" means at minute 0 of every hour.
-    """
-    logger.info('Cache cleanup timer triggered')
-
-    if myTimer.past_due:
-        logger.warning('Cache cleanup timer is running late')
-
-    try:
-        # Get GitHub token
-        github_token = os.getenv('GITHUB_TOKEN')
-        username = 'yungryce'
-
-        if not github_token:
-            logger.error('GitHub token not configured, skipping cache cleanup')
-            return
-
-        # Get cache statistics before cleanup
-        stats_before = cache_manager.get_cache_statistics()
-        logger.info(f"Cache stats before cleanup: {stats_before}")
-
-        # Perform cache cleanup
-        cleanup_results = cache_manager.cleanup_expired_cache(
-            batch_size=100,
-            dry_run=False  # Set to True for testing
-        )
-
-        # Get cache statistics after cleanup
-        stats_after = cache_manager.get_cache_statistics()
-
-        # Log cleanup results
-        logger.info(f"Cache cleanup completed: {cleanup_results}")
-        logger.info(f"Cache stats after cleanup: {stats_after}")
+        # Call the cleanup method from CacheManager
+        cleanup_results = cache_manager.cleanup_expired_cache(batch_size=100, dry_run=False)
 
         # Log summary
         if cleanup_results['status'] == 'completed':
             logger.info(f"Successfully cleaned up {cleanup_results['deleted_count']} expired cache entries")
-
-            # Log space savings
-            if 'total_size_mb' in stats_before and 'total_size_mb' in stats_after:
-                space_saved = stats_before['total_size_mb'] - stats_after['total_size_mb']
-                if space_saved > 0:
-                    logger.info(f"Cache cleanup freed {space_saved:.2f} MB of storage")
         else:
             logger.warning(f"Cache cleanup failed or skipped: {cleanup_results}")
 
     except Exception as e:
-        logger.error(f"Cache cleanup timer failed: {str(e)}", exc_info=True)
+        logger.error(f"Error during cleanup of individual blobs: {str(e)}")
 
-@app.route(route="github/cache/cleanup", methods=["POST"])
-def cleanup_cache(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="surveys", methods=["GET"])
+def list_survey_images(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List survey rating screenshots from Azure Blob Storage container 'surveys'.
+    Optional query: ?theme=light|dark
+    Filenames: {slug}-{theme}.{ext} (e.g., csat-5-light.png).
+    """
     try:
-        # Parse request body for cleanup options
-        body = req.get_json() or {}
-        dry_run = body.get('dry_run', False)
-        batch_size = body.get('batch_size', 100)
+        theme = (req.params.get('theme') or '').strip().lower()
+        if theme not in ('', 'light', 'dark'):
+            return create_error_response("Invalid theme. Use 'light' or 'dark'.", 400)
 
-        # Use cache manager directly
-        result = cache_manager.cleanup_expired_cache(batch_size=batch_size, dry_run=dry_run)
+        def infer_theme(name: str) -> str:
+            n = name.lower()
+            if any(t in n for t in ["-dark.", "_dark.", ".dark."]): return "dark"
+            if any(t in n for t in ["-light.", "_light.", ".light."]): return "light"
+            parts = n.replace("\\", "/").split("/")
+            if "dark" in parts: return "dark"
+            if "light" in parts: return "light"
+            return "unknown"
 
-        return create_success_response(result)
+        def infer_slug(name: str) -> str:
+            import os
+            base = os.path.basename(name)
+            stem, _ = os.path.splitext(base)
+            for suf in ("-dark", "_dark", ".dark", "-light", "_light", ".light"):
+                if stem.endswith(suf): return stem[: -len(suf)]
+            return stem
+
+        container = "surveys"
+        client = cache_manager.get_container_client(container)
+        items = []
+        for blob in client.list_blobs():
+            bname = getattr(blob, "name", "")
+            if not bname:
+                continue
+            t = infer_theme(bname)
+            if theme and t != theme:
+                continue
+            items.append({
+                # "name": infer_slug(bname),
+                "theme": t,
+                "path": bname,
+                "url": cache_manager.make_blob_sas_url(container, bname)
+            })
+
+        items.sort(key=lambda x: x["theme"])
+        return create_success_response({
+            "count": len(items),
+            "theme": theme or "all",
+            "items": items
+        }, cache_control="public, max-age=600")
     except Exception as e:
-        logger.error(f"Error during cache cleanup: {str(e)}")
-        return create_error_response(f"Cache cleanup failed: {str(e)}", 500)
-
-@app.route(route="github/cache/stats", methods=["GET"])
-def get_cache_stats(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        # Use cache manager directly
-        stats = cache_manager.get_cache_statistics()
-
-        return create_success_response(stats)
-    except Exception as e:
-        logger.error(f"Error fetching cache statistics: {str(e)}")
-        return create_error_response(f"Failed to fetch cache statistics: {str(e)}", 500)
-
-
-@app.route(route="repository/{repo}/difficulty", auth_level=func.AuthLevel.ANONYMOUS, methods=["GET"])
-def get_repository_difficulty(req: func.HttpRequest) -> func.HttpResponse:
-    """Get difficulty rating for a specific repository"""
-    logger.info('Processing repository difficulty request')
-
-    try:
-        repo_name = req.route_params.get('repo')
-        if not repo_name:
-            return create_error_response("Missing repository name in URL path", 400)
-        # Get GitHub token
-        github_token = os.getenv('GITHUB_TOKEN')
-        username = 'yungryce'
-
-        if not github_token:
-            return create_error_response("GitHub token not configured", 500)
-
-        # Initialize managers
-        repo_manager = _get_github_managers(username)
-
-        # Create AI Assistant with repo manager
-        from Samples.ai_assistant import AIAssistant
-        ai_assistant = AIAssistant(username=username, repo_manager=repo_manager)
-
-        # Get repository with context
-        repos_with_context = repo_manager.get_all_repos_with_context(username)
-
-        # Find the specific repository
-        target_repo = None
-        for repo in repos_with_context:
-            if repo.get('name') == repo_name:
-                target_repo = repo
-                break
-
-        if not target_repo:
-            return create_error_response(f"Repository '{repo_name}' not found", 404)
-
-        # Process language data first for best analysis
-        from ai.helpers import process_language_data
-        processed_repo = process_language_data(target_repo)
-
-        # Calculate difficulty with enhanced scoring
-        difficulty_data = ai_assistant.calculate_difficulty_score(processed_repo)
-
-        # Extract key repository metrics for context
-        primary_language = processed_repo.get('language', 'Unknown')
-        languages = list(processed_repo.get('languages', {}).keys())[:5]  # Top 5 languages
-
-        # Get topics and technologies for context
-        topics = processed_repo.get('topics', [])
-        tech_stack = processed_repo.get('repoContext', {}).get('tech_stack', {})
-        primary_techs = tech_stack.get('primary', []) if tech_stack else []
-
-        result = {
-            "repository": repo_name,
-            "difficulty_analysis": difficulty_data,
-            "context": {
-                "primary_language": primary_language,
-                "languages": languages,
-                "topics": topics,
-                "primary_technologies": primary_techs
-            },
-            "metadata": {
-                "analyzed_at": datetime.now().isoformat(),
-                "analysis_version": "1.0"
-            }
-        }
-
-        return create_success_response(result)
-
-    except Exception as e:
-        logger.error(f"Error calculating repository difficulty: {str(e)}", exc_info=True)
-        return create_error_response(f"Internal server error: {str(e)}", 500)
-
-
-
-# # Add a health check endpoint
-# @app.route(route="health", auth_level=func.AuthLevel.ANONYMOUS)
-# def health_check(req: func.HttpRequest) -> func.HttpResponse:
-#     """Enhanced health check endpoint with cache status"""
-#     logger.info('Processing API health check')
-
-#     # Perform basic GitHub connectivity test
-#     github_token = os.getenv('GITHUB_TOKEN')
-#     if github_token:
-#         try:
-#             # Initialize managers
-#             api, _, _ = _get_github_managers('yungryce')
-
-#             # Test GitHub API connectivity
-#             rate_limit = api.make_request('GET', 'rate_limit')
-#             github_status = "connected" if rate_limit else "error"
-
-#             # Get cache statistics
-#             cache_stats = cache_manager.get_cache_statistics()
-
-#         except Exception as e:
-#             logger.error(f"GitHub connectivity test failed: {str(e)}")
-#             github_status = f"error: {str(e)}"
-#             cache_stats = {"status": "error", "error": str(e)}
-#     else:
-#         github_status = "unconfigured"
-#         cache_stats = {"status": "unconfigured"}
-
-#     # Check GROQ API key
-#     groq_api_key = os.getenv('GROQ_API_KEY')
-#     groq_status = "configured" if groq_api_key else "unconfigured"
-
-#     # Check Azure Storage
-#     azure_storage = os.getenv('AzureWebJobsStorage')
-#     storage_status = "configured" if azure_storage else "unconfigured"
-
-#     health_data = {
-#         "status": "healthy",
-#         "timestamp": datetime.now().isoformat(),
-#         "environment": {
-#             "github_api": github_status,
-#             "groq_api": groq_status,
-#             "azure_storage": storage_status
-#         },
-#         "cache": cache_stats
-#     }
-
-#     return create_success_response(health_data, cache_control="no-cache")
+        logger.error(f"Failed to list survey images: {str(e)}", exc_info=True)
+        return create_error_response(f"Failed to list survey images: {str(e)}", 500)

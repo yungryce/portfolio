@@ -1,48 +1,91 @@
 # Copilot Instructions for Portfolio Project
 
-## Overview
-This monorepo powers a modern portfolio site with an Angular frontend and an Azure Functions Python backend. The system showcases GitHub projects and provides an AI-powered assistant for portfolio queries. The architecture is designed for clear separation of frontend and backend, secure API integration, and extensibility for AI features.
+Concise, codebase-specific guidance.
 
-## Architecture & Data Flow
-- **Frontend (`/src/app/`)**: Angular 19 app with Tailwind CSS, using services for API communication and caching. Key features include project listing, detailed project views, and an AI assistant interface.
-- **Backend (`/api/`)**: Python Azure Functions app. Handles GitHub API proxying, repository metadata extraction, and AI query processing via Groq API (Llama 3.1).
-- **Data Flow**: Frontend services call backend HTTP endpoints. Backend fetches/processes GitHub data and AI responses, returning structured results to the frontend.
+## Big Picture
+- **Frontend**: Angular standalone application (17+) styled with Tailwind CSS. Entry point is `main.ts`, and routing is defined in `app/app.routes.ts`.
+- **Backend**: Azure Functions (Python) serving GitHub data bundles and AI endpoints. Key entry file: `api/function_app.py`.
+- **Integration**: The frontend communicates with the backend via REST API endpoints, with the base URL managed by `ConfigService.apiUrl`.
 
-## Key Workflows
-- **Project Listing**: Frontend `ProjectsComponent` requests repositories via `GitHubService` → backend `/github/repos` endpoint → GitHub API → processed and returned to frontend.
-- **AI Assistant**: User submits query in `PortfolioAssistantComponent` → `PortfolioService` sends to `/portfolio/query` → backend builds context from repos, calls Groq API, returns answer.
-- **Caching**: Both frontend (`CacheService`) and backend use caching to minimize redundant API calls.
+## Refactor Direction
+- **Projects List**: `src/app/projects` consumes `RepoBundleService.getUserBundle(username)` to display repositories as cards. Deprecate `src/projects-old`.
+- **Project Detail**: `src/app/projects/project` consumes `RepoBundleService.getUserSingleRepoBundle(username, repo)` to display single repository details. Deprecate `src/projects-old/project-about`.
+- **AI Assistant**: `src/app/assistant` consumes `api/function-app.portfolio_query` for AI responses. Deprecate `src/portfolio-assistant`.
 
 ## Developer Workflows
 - **Frontend**:
-  - Start dev server: `npm run start`
-  - Build for production: `npm run build:prod`
-  - Main code: `src/app/`
+  - Start dev server: `npm run start` or `ng serve`.
+  - Build production: `npm run build` or `ng build`.
 - **Backend**:
-  - Python Azure Functions (see `api/`)
-  - Dependencies: `api/requirements.txt`
-  - Main entry: `api/function_app.py`
-- **Testing**: (Add/describe test commands if present)
+  - Install dependencies: `cd api && pip install -r requirements.txt`.
+  - Start Azure Functions locally: `func start`.
+  - Logs: `api/api_function_app.log` for debugging.
+- **Testing**:
+  - Frontend: `ng test`.
+  - Backend: `pytest` (ensure Python 3.11+ is installed).
 
-## Project Conventions
-- **API Communication**: All GitHub and AI queries go through backend endpoints; never call external APIs directly from frontend.
-- **Repository Metadata**: Special files like `PROJECT-MANIFEST.md` and `.repo-context.json` are parsed for enhanced project context.
-- **Logging**: Backend uses structured logging for all API and AI operations.
-- **Security**: API tokens are never exposed to the frontend; use environment variables and Azure config.
-- **Component Structure**: Angular components and services are organized by feature domain.
+## Theming (Dark/Light Mode)
+- Global `<html>.dark` class toggles themes.
+- Tokens in `src/styles.css`: `--bg`, `--fg`, `--primary`, etc.
+- On init: Read `localStorage.theme` or `prefers-color-scheme`.
+- Apply: Add/remove `dark` class on `<html>` and set `data-theme`.
+
+## API Endpoints
+- **Bundles**:
+  - `GET /bundles/{username}` → `{ username, data: Repo[] }`.
+  - `GET /bundles/{username}/{repo}` → `{ username, repo, data: Repo }`.
+- **AI**:
+  - `POST /ai` → `{ query, username? }` → AI assistant reply.
+- **Health Check**:
+  - `GET /api/health` → Returns environment and cache status.
+
+## Project-Specific Patterns
+- **Error Handling**:
+  - Use `create_success_response` and `create_error_response` for consistent API responses.
+  - For GitHub API errors, use `handle_github_error`.
+- **Caching**:
+  - Centralized in `config/cache_manager.py`.
+  - Keys: `repos_bundle_context_{username}`, `repo_context_{username}_{repo}`.
+- **Logging**:
+  - Use structured logging with `portfolio.api` logger.
+
+## UI/ViewModel Conventions
+- **Projects List**:
+  - Map API data to view model using `toCardVM`.
+  - Display title, updated date, type, description, primary stack, and language percentages.
+- **Project Detail**:
+  - Render README as sanitized Markdown with a linked Table of Contents.
+- **Accessibility**:
+  - Use `aria-pressed` for theme toggles and `role="progressbar"` for language bars.
 
 ## Integration Points
-- **GitHub API**: Accessed via backend proxy for security.
-- **Groq API (Llama 3.1)**: Used for AI assistant responses.
-- **Azure Functions**: Backend is serverless, configured via `host.json` and `local.settings.json`.
+- **Frontend**:
+  - `RepoBundleService`: Fetches repository bundles.
+  - `AIAssistantService`: Sends queries to the AI endpoint.
+- **Backend**:
+  - `GitHubRepoManager`: Fetches metadata, file content, and repository trees.
+  - `RepoScoringService`: Scores repositories for AI queries.
 
 ## Examples
-- To add a new project feature, create a service in `src/app/services/` and expose it via a component.
-- To extend backend AI capabilities, update `api/ai_assistant.py` and relevant HTTP endpoints in `api/function_app.py`.
+- **Normalize Language Percentages**:
+  ```typescript
+  const total = Object.values(langs).reduce((a, b) => a + Number(b), 0) || 1;
+  Object.entries(langs)
+    .map(([k, v]) => ({ k, pct: Math.round((Number(v) / total) * 100) }))
+    .sort((a, b) => b.pct - a.pct);
+  ```
+- **Toggle Theme**:
+  ```typescript
+  this.theme = this.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('theme', this.theme);
+  document.documentElement.classList.toggle('dark', this.theme === 'dark');
+  ```
 
-## References
-- Frontend: `src/app/`, `README.md`, `PROJECT-MANIFEST.md`
-- Backend: `api/`, `api/README.md`, `api/PROJECT-MANIFEST.md`
+## Gotchas
+- **API Responses**: May be raw or wrapped as `{ status, data }`. Always unwrap and apply fallbacks.
+- **repoContext**: Can be missing or partial. Use safe defaults for `type`, `description`, and `tech_stack`.
+- **CORS**: Ensure proper settings in `api/local.settings.json` when running locally.
 
----
-For questions about architecture or workflows, see the respective `README.md` and `PROJECT-MANIFEST.md` files in each module.
+## Open Questions / Feedback Needed
+- Confirm if Markdown rendering should standardize on `marked` + `DOMPurify` or another library.
+- Verify if all build/test commands are accurate and up-to-date.

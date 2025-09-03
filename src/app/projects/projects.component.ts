@@ -1,432 +1,161 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
-import { MarkdownModule } from 'ngx-markdown';
-import { Subject, takeUntil } from 'rxjs';
-import { GithubService, Repository } from '../services/github.service';
-import { CacheService } from '../services/cache.service';
-import { DifficultyService, DifficultyAnalysis, DifficultyState } from '../services/difficulty.service';
-import { FEATURED_REPOSITORIES, ProjectConfigHelper, TechStack } from './projects-config';
+import { RepoBundleService, RepoBundleResponse } from '../services/repo-bundle.service';
+import { Observable, map } from 'rxjs';
+
+interface RepoCardVM {
+  name: string;
+  updatedAt?: string;
+  type: string;
+  description: string;
+  primaryStack: string[];
+  languagesPct: { k: string; pct: number }[];
+  htmlUrl?: string;
+  isFork?: boolean;
+  hasDocumentation: boolean;
+}
 
 @Component({
   selector: 'app-projects',
   standalone: true,
-  imports: [CommonModule, RouterModule, MarkdownModule],
+  imports: [CommonModule, FormsModule, RouterModule],
   templateUrl: './projects.component.html',
   styleUrls: ['./projects.component.css']
 })
-export class ProjectsComponent implements OnInit, OnDestroy {
-  repositories: Repository[] = [];
-  loading = true;
-  error = false;
-  errorType: 'network' | 'parsing' | 'general' | null = null;
-  
-  // Difficulty state
-  difficultyState: DifficultyState = {};
-  difficultyLoading: { [repoName: string]: boolean } = {};
-  
-  // Use simplified repository list
-  private readonly featuredRepoNames = FEATURED_REPOSITORIES;
-  private destroy$ = new Subject<void>();
-  
-  constructor(
-    private githubService: GithubService,
-    private cacheService: CacheService,
-    private difficultyService: DifficultyService
-  ) {}
-  
+export class ProjectsComponent implements OnInit {
+  private repoBundleService = inject(RepoBundleService);
+  repoBundle$!: Observable<RepoBundleResponse>;
+  filteredRepos$!: Observable<RepoCardVM[]>;
+  filterByDocumentation = false; 
+  username = 'yungryce';
+
+  // Filter options
+  showForks = false;
+  selectedLanguage = '';
+  selectedTechnology = '';
+  searchTerm = '';
+
+  // Sorting
+  sortBy = 'updated';
+  sortDirection = 'desc';
+
+  // Available filter options
+  allLanguages: string[] = [];
+  allTechnologies: string[] = [];
+
   ngOnInit(): void {
-    this.setupDifficultyStateSubscription();
-    this.loadFeaturedRepositories();
+    this.loadRepoBundle();
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private setupDifficultyStateSubscription(): void {
-    // Subscribe to difficulty state changes
-    this.difficultyService.difficultyState$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(state => {
-        this.difficultyState = state;
-        
-        // Update loading states
-        this.difficultyLoading = {};
-        Object.keys(state).forEach(repoName => {
-          this.difficultyLoading[repoName] = state[repoName]?.loading || false;
-        });
-      });
-  }
-
-  private loadFeaturedRepositories(): void {
-    this.loading = true;
-    
-    // First, try to get cached repository data and files
-    const cachedRepos = this.getCachedFeaturedRepositories();
-    
-    if (cachedRepos.length > 0) {
-      // We have some cached data, show it immediately
-      this.repositories = this.sortRepositories(cachedRepos);
-      this.loading = false;
-      
-      // Start fetching difficulties in background
-      this.startBackgroundDifficultyFetch(cachedRepos.map(r => r.name));
-      
-      // Optionally, still fetch fresh data in background for updates
-      this.refreshRepositoriesInBackground();
-    } else {
-      // No cached data, fetch everything fresh
-      this.fetchFreshRepositories();
-    }
-  }
-
-  private startBackgroundDifficultyFetch(repoNames: string[]): void {
-    console.log('Starting background difficulty fetch for', repoNames.length, 'repositories');
-    
-    // Use the batch fetch method for better performance
-    this.difficultyService.batchFetchDifficulties(repoNames)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (results) => {
-          console.log('Received difficulty batch results:', Object.keys(results).length);
-          // Results are automatically updated via the state subscription
-        },
-        error: (error) => {
-          console.error('Batch difficulty fetch failed:', error);
-        }
-      });
-  }
-
-  private sortRepositories(repos: Repository[]): Repository[] {
-    return repos.sort((a, b) => {
-      // Sort by array order (index in FEATURED_REPOSITORIES)
-      const aIndex = this.featuredRepoNames.indexOf(a.name);
-      const bIndex = this.featuredRepoNames.indexOf(b.name);
-      
-      if (aIndex !== -1 && bIndex !== -1) {
-        return aIndex - bIndex;
-      }
-      
-      // Fallback to difficulty rating if not in featured list
-      const aDifficulty = this.getDifficultyNumericScore(a.name);
-      const bDifficulty = this.getDifficultyNumericScore(b.name);
-      return bDifficulty - aDifficulty;
-    });
-  }
-
-  private fetchFreshRepositories(): void {
-    this.githubService.getFeaturedRepositoriesWithContext(this.featuredRepoNames)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (reposWithContext) => {
-          this.repositories = this.sortRepositories(reposWithContext);
-          this.loading = false;
-          this.errorType = null;
-          
-          // Start fetching difficulties in background
-          this.startBackgroundDifficultyFetch(reposWithContext.map(r => r.name));
-        },
-        error: (err) => {
-          console.error('Error fetching repository contexts:', err);
-          this.error = true;
-          this.errorType = err.status === 0 ? 'network' : 'general';
-          this.loading = false;
-        }
-      });
-  }
-
-  private refreshRepositoriesInBackground(): void {
-    // Silently refresh data in background without showing loading state
-    this.githubService.getFeaturedRepositoriesWithContext(this.featuredRepoNames)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (reposWithContext) => {
-          // Update repositories if we got fresh data
-          const freshRepos = this.sortRepositories(reposWithContext);
-          
-          // Only update if the data has actually changed
-          if (this.hasRepositoryDataChanged(this.repositories, freshRepos)) {
-            this.repositories = freshRepos;
-            console.log('Repository data updated with fresh information');
-            
-            // Fetch difficulties for any new repositories
-            const newRepoNames = freshRepos.map(r => r.name);
-            this.startBackgroundDifficultyFetch(newRepoNames);
-          }
-        },
-        error: (err) => {
-          console.warn('Background refresh failed, using cached data:', err);
-          // Don't show error since we already have cached data displayed
-        }
-      });
-  }
-
-  private hasRepositoryDataChanged(current: Repository[], fresh: Repository[]): boolean {
-    if (current.length !== fresh.length) return true;
-    
-    // Simple check - compare repository names and last updated dates
-    for (let i = 0; i < current.length; i++) {
-      if (current[i].name !== fresh[i].name || 
-          current[i].updated_at !== fresh[i].updated_at) {
-        return true;
-      }
-    }
-    
-    return false;
-  }
-
-  private getCachedFeaturedRepositories(): Repository[] {
-    const cachedRepos: Repository[] = [];
-    
-    // Check if we have cached repository metadata and files
-    for (const repoName of this.featuredRepoNames) {
-      const repoMetadata = this.getCachedRepoMetadata(repoName);
-      const cachedFiles = this.getCachedRepoFiles(repoName);
-      
-      if (repoMetadata && cachedFiles.context) {
-        // We have both metadata and essential files cached
-        const repoWithContext: Repository = {
-          ...repoMetadata,
-          repoContext: cachedFiles.context
-        };
-        cachedRepos.push(repoWithContext);
-      }
-    }
-    
-    return cachedRepos;
-  }
-
-  private getCachedRepoMetadata(repoName: string): any {
-    // Check if repository metadata is cached (from GithubService)
-    const cacheKey = `repo-metadata-${repoName}`;
-    return this.getSafeCache(cacheKey);
-  }
-
-  private getSafeCache<T>(key: string): T | undefined {
-    const cached = this.cacheService.get<T>(key);
-    return cached ?? undefined; // Convert null to undefined for TypeScript compatibility
-  }
-
-  private getCachedRepoFiles(repoName: string): { readme?: string, context?: any } {
-    // Use the SAME cache keys as GithubFilesService now uses
-    const contextCacheKey = `${repoName}-context-content`;
-    
-    return {
-      context: this.getCachedContextAsObject(contextCacheKey)
-    };
-  }
-
-  private getCachedContextAsObject(cacheKey: string): any {
-    const cachedContext = this.cacheService.get<string>(cacheKey);
-    if (!cachedContext) return null;
-    
-    try {
-      return JSON.parse(cachedContext);
-    } catch (error) {
-      console.warn('Failed to parse cached context:', error);
-      return null;
-    }
-  }
-
-  // ===== DIFFICULTY RELATED METHODS =====
-
-  getDifficultyRating(repo: Repository): string {
-    // First try to get from the difficulty service (synchronously)
-    const cachedDifficulty = this.getDifficultyRatingSync(repo.name);
-    if (cachedDifficulty !== 'intermediate' || this.isDifficultyLoaded(repo.name)) {
-      return cachedDifficulty;
-    }
-    
-    // Fallback to local calculation while API data loads
-    return this.calculateLocalDifficultyRating(repo);
-  }
-
-  getDifficultyRatingSync(repoName: string): string {
-    const analysis = this.getDifficultyAnalysis(repoName);
-    return analysis?.difficulty || 'intermediate';
-  }
-
-  isDifficultyLoaded(repoName: string): boolean {
-    const state = this.difficultyState[repoName];
-    return !!(state?.analysis && !state.loading && !state.error);
-  }
-
-  getDifficultyColor(repoName: string): string {
-    const difficulty = this.getDifficultyRatingFromState(repoName);
-    return this.difficultyService.getDifficultyColor(difficulty);
-  }
-
-  isDifficultyLoading(repoName: string): boolean {
-    return this.difficultyService.isDifficultyLoading(repoName);
-  }
-
-  getDifficultyAnalysis(repoName: string): DifficultyAnalysis | null {
-    return this.difficultyService.getCachedDifficulty(repoName);
-  }
-
-  getDifficultyScore(repoName: string): number {
-    const analysis = this.getDifficultyAnalysis(repoName);
-    return analysis?.score || 0;
-  }
-
-  getDifficultyNumericScore(repoName: string): number {
-    const analysis = this.getDifficultyAnalysis(repoName);
-    if (analysis?.difficulty) {
-      return this.difficultyService.getDifficultyNumericScore(analysis.difficulty);
-    }
-    return 2; // Default intermediate
-  }
-
-  getDifficultyTooltip(repoName: string): string {
-    const analysis = this.getDifficultyAnalysis(repoName);
-    if (!analysis) {
-      return this.isDifficultyLoading(repoName) 
-        ? 'Difficulty analysis loading...' 
-        : 'Difficulty analysis not available';
-    }
-    
-    return `${analysis.difficulty} (${analysis.score}/100) - ${(analysis.confidence * 100).toFixed(0)}% confidence`;
-  }
-
-  // Helper method to get difficulty from state
-  private getDifficultyRatingFromState(repoName: string): string {
-    const analysis = this.difficultyState[repoName]?.analysis;
-    return analysis?.difficulty || this.calculateLocalDifficultyRating(
-      this.repositories.find(r => r.name === repoName) || {} as Repository
+  loadRepoBundle(): void {
+    this.repoBundle$ = this.repoBundleService.getUserBundle(this.username);
+    this.filteredRepos$ = this.repoBundle$.pipe(
+      map(bundle => {
+        const vms = (bundle?.data ?? [])
+          .map(r => this.toCardVM(r))
+          .filter((vm): vm is RepoCardVM => vm !== null);
+        this.extractFilterOptionsFromVM(vms);
+        return this.filterAndSortVMs(vms);
+      })
     );
   }
 
-  // Local difficulty calculation fallback
-  private calculateLocalDifficultyRating(repo: Repository): string {
-    // Use the enhanced context to determine difficulty (fallback method)
-    if (!repo?.repoContext) {
-      return 'beginner'; // Default for repos without context
+  private toCardVM(r: any): RepoCardVM | null {
+    if (!r?.has_documentation) {
+      console.log('Excluding:', r?.name, 'due to missing documentation');
+      return null; // Exclude repositories without documentation
     }
-    
-    let score = 0;
-    
-    // Technology stack complexity
-    const techStack = repo.repoContext.tech_stack;
-    if (techStack?.primary?.length > 0) {
-      score += techStack.primary.length * 2;
-    }
-    if (techStack?.secondary?.length > 0) {
-      score += techStack.secondary.length;
-    }
-    
-    // Architecture complexity
-    const components = repo.repoContext.components;
-    if (components) {
-      score += Object.keys(components).length * 3;
-    }
-    
-    // Skill requirements
-    const skills = repo.repoContext.skill_manifest;
-    if (skills?.technical?.length > 0) {
-      score += skills.technical.length;
-    }
-    if (skills?.domain?.length > 0) {
-      score += skills.domain.length;
-    }
-    
-    // Project scope
-    const projectType = repo.repoContext.project_identity?.type?.toLowerCase();
-    if (projectType?.includes('full-stack') || projectType?.includes('enterprise')) {
-      score += 10;
-    }
-    
-    // Determine difficulty based on score
-    if (score >= 30) return 'expert';
-    if (score >= 20) return 'advanced';
-    if (score >= 10) return 'intermediate';
-    return 'beginner';
-  }
 
-  // ===== TEMPLATE HELPER METHODS =====
+    const pid = r?.repoContext?.project_identity ?? {};
+    const type = r?.repoContext?.type ?? pid?.type ?? 'Unknown';
+    const description = r?.repoContext?.description ?? pid?.description ?? 'No description';
+    const langs = r?.languages ?? {};
+    const total = Object.values(langs).reduce((a: number, b: any) => a + Number(b), 0) || 1;
+    const languagesPct = Object.entries(langs)
+      .map(([k, v]) => ({ k, pct: Math.round((Number(v) / total) * 100) }))
+      .sort((a, b) => b.pct - a.pct);
 
-  getPrimaryTechStack(repo: Repository): string[] {
-    return repo.repoContext?.tech_stack?.primary || [repo.language].filter(Boolean);
-  }
-
-  getSecondaryTechStack(repo: Repository): string[] {
-    return repo.repoContext?.tech_stack?.secondary || [];
-  }
-
-  hasSecondaryTechStack(repo: Repository): boolean {
-    return this.getSecondaryTechStack(repo).length > 0;
-  }
-
-  getProjectTitle(repo: Repository): string {
-    return ProjectConfigHelper.getProjectTitle(repo.repoContext, repo.name);
-  }
-
-  getProjectDescription(repo: Repository): string {
-    return ProjectConfigHelper.getProjectDescription(repo.repoContext, repo.name);
-  }
-
-  getScreenshotUrl(repo: Repository): string | undefined {
-    return ProjectConfigHelper.getScreenshotUrl(repo.repoContext, repo.name);
-  }
-
-  getProjectTags(repo: Repository): string[] {
-    return ProjectConfigHelper.getProjectTags(repo.repoContext, repo.name);
-  }
-
-  getTechStack(repo: Repository): TechStack[] {
-    return ProjectConfigHelper.getTechStack(repo.repoContext);
-  }
-
-  getEstimatedHours(repo: Repository): number {
-    return ProjectConfigHelper.getProjectMetrics(repo.repoContext).estimatedHours;
-  }
-
-  getCompetencyLevel(repo: Repository): string {
-    return ProjectConfigHelper.getProjectMetrics(repo.repoContext).competencyLevel;
-  }
-
-  getProjectType(repo: Repository): string {
-    return ProjectConfigHelper.getProjectMetrics(repo.repoContext).projectType;
-  }
-
-  getProjectScope(repo: Repository): string {
-    return ProjectConfigHelper.getProjectMetrics(repo.repoContext).projectScope;
-  }
-
-  getProjectVersion(repo: Repository): string {
-    return ProjectConfigHelper.getProjectMetrics(repo.repoContext).version;
-  }
-
-  // ===== SUMMARY STATISTICS =====
-
-  getTotalDevelopmentHours(): number {
-    return this.repositories.reduce((sum, repo) => sum + this.getEstimatedHours(repo), 0);
-  }
-
-  getTotalStars(): number {
-    return this.repositories.reduce((sum, repo) => sum + repo.stargazers_count, 0);
-  }
-
-  getCompletedProjects(): number {
-    return this.repositories.filter(repo => 
-      repo.repoContext?.project_status === 'completed'
-    ).length;
-  }
-
-  getActiveProjects(): number {
-    return this.repositories.filter(repo => 
-      repo.repoContext?.project_status === 'active'
-    ).length;
-  }
-
-  getCompetencyColor(level: string): string {
-    const colors: { [key: string]: string } = {
-      'beginner': '#10b981',
-      'intermediate': '#3b82f6', 
-      'advanced': '#8b5cf6',
-      'expert': '#ef4444'
+    return {
+      name: r?.name ?? r?.metadata?.name ?? 'unknown',
+      updatedAt: r?.metadata?.updated_at ?? r?.metadata?.pushed_at,
+      type,
+      description,
+      primaryStack: r?.repoContext?.tech_stack?.primary ?? [],
+      languagesPct,
+      htmlUrl: r?.metadata?.html_url,
+      isFork: !!r?.metadata?.fork,
+      hasDocumentation: !!r?.has_documentation,
     };
-    return colors[level] || '#6b7280';
   }
+
+  private extractFilterOptionsFromVM(vms: RepoCardVM[]): void {
+    const languages = new Set<string>();
+    const technologies = new Set<string>();
+    vms.forEach(vm => {
+      (vm.languagesPct ?? []).forEach(l => languages.add(l.k));
+      (vm.primaryStack ?? []).forEach(tech => technologies.add(tech));
+    });
+    this.allLanguages = Array.from(languages).sort();
+    this.allTechnologies = Array.from(technologies).sort();
+  }
+
+  private filterAndSortVMs(vms: RepoCardVM[]): RepoCardVM[] {
+    let result = vms.filter(vm => {
+      if (!this.showForks && vm.isFork) return false;
+      if (this.searchTerm) {
+        const q = this.searchTerm.toLowerCase();
+        const hits =
+          vm.name.toLowerCase().includes(q) ||
+          vm.description.toLowerCase().includes(q) ||
+          vm.type.toLowerCase().includes(q) ||
+          (vm.primaryStack || []).some(t => t.toLowerCase().includes(q));
+        if (!hits) return false;
+      }
+      if (this.selectedLanguage) {
+        const hasLang = (vm.languagesPct || []).some(l => l.k === this.selectedLanguage);
+        if (!hasLang) return false;
+      }
+      if (this.selectedTechnology) {
+        const hasTech = (vm.primaryStack || []).includes(this.selectedTechnology);
+        if (!hasTech) return false;
+      }
+      return true;
+    });
+    result = this.sortVMs(result, this.sortBy, this.sortDirection);
+    return result;
+  }
+
+  private sortVMs(vms: RepoCardVM[], sortBy: string, direction: string): RepoCardVM[] {
+    return [...vms].sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case 'name':
+          cmp = a.name.localeCompare(b.name);
+          break;
+        case 'updated':
+        default: {
+          const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const bt = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          cmp = at - bt;
+          break;
+        }
+      }
+      return direction === 'asc' ? cmp : -cmp;
+    });
+  }
+
+  applyFilters(): void { this.loadRepoBundle(); }
+  resetFilters(): void {
+    this.showForks = false;
+    this.selectedLanguage = '';
+    this.selectedTechnology = '';
+    this.searchTerm = '';
+    this.sortBy = 'updated';
+    this.sortDirection = 'desc';
+    this.loadRepoBundle();
+  }
+
+  trackByName = (_: number, vm: RepoCardVM) => vm.name;
 }

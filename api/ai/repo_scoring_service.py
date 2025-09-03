@@ -16,29 +16,34 @@ class RepoScoringService:
     
     def __init__(self, username: str = None):
         """Initialize the repository scoring service with required components."""
-        self.semantic_model = SemanticModel()
-        self.file_type_analyzer = FileTypeAnalyzer()
         self.username = username
+        self.file_type_analyzer = FileTypeAnalyzer()
+        self.semantic_model = SemanticModel()
         
-    def score_repositories(self, query: str, repositories: List[Dict]) -> List[Dict]:
+    def score_repositories(self, query: str, repo_bundles: List[Dict]) -> List[Dict]:
         """
-        Score all repositories against the query and return a list of scored repositories.
-        This doesn't modify the original repositories.
+        Score repositories based on their relevance to the user query.
         
         Args:
-            query: The user query to score repositories against
-            repositories: List of repository bundles
+            query: The user query string
+            repo_bundles: List of repository data bundles from cache or orchestration
             
         Returns:
             List of repositories with scores added
         """
-        logger.info(f"Scoring {len(repositories)} repositories against query: {query[:50]}...")
-        
+        if not repo_bundles:
+            logger.warning("No repositories to score")
+            return []
+        logger.info(f"Scoring {len(repo_bundles)} repositories against query: {query[:50]}...")
+
+        # Filter repositories with documentation for model usage
+        documented_repos = [repo for repo in repo_bundles if repo.get("has_documentation", False)]
+
         # Load model without training (training happens in background activity)
-        self.semantic_model.ensure_model_ready(repositories, train_if_missing=False)
-        
+        self.semantic_model.ensure_model_ready(documented_repos, train_if_missing=False)
+
         scored_repos = []
-        for repo in repositories:
+        for repo in repo_bundles:
             try:
                 # Calculate scores
                 scored_repo = repo.copy()  # Don't modify original data
@@ -95,15 +100,15 @@ class RepoScoringService:
             categorized = {}
 
         # Calculate individual scores
-        context_score = float(self.semantic_scorer.score_context_similarity(query, repo_bundle))
-        language_score = float(self.semantic_scorer.score_language_matches(query, repo_languages))
+        context_score = float(self.score_context_similarity(query, repo_bundle))
+        language_score = float(self.score_language_matches(query, repo_languages))
         type_score = float(self.file_type_analyzer.calculate_type_score(categorized))
         
-        logger.debug(f"Calculated scores for repository '{repo_name}': "
-                    f"Context: {context_score}, Language: {language_score}, Type: {type_score}")
-
         # Aggregate total score
-        total_score = float(self.semantic_scorer.aggregate_scores(context_score, language_score, type_score))
+        if language_score > 0:
+            total_score = float((context_score * 0.6) + (language_score * 0.25) + (type_score * 0.15))
+        else:
+            total_score = float((context_score * 0.85) + (type_score * 0.15))
 
         # Return score components and metadata
         return {
@@ -118,6 +123,10 @@ class RepoScoringService:
         """
         Scores the similarity between the query and the repository context using semantic embeddings.
         """
+        if not repo_bundle.get("has_documentation", False):
+            logger.debug(f"Skipping context scoring for {repo_bundle.get('name', 'Unknown')} due to lack of documentation.")
+            return 0.0
+        
         context_str = self.flatten_repo_context_to_natural_language(repo_bundle)
         if not context_str or context_str.strip() == "" or "None" in context_str:
             logger.debug(f"Skipping context scoring for {repo_bundle.get('name', 'Unknown')} due to empty or meaningless context string.")
@@ -129,9 +138,6 @@ class RepoScoringService:
 
         # Dot product equals cosine for normalized vectors
         similarity = float(np.dot(q_emb[0], c_emb[0]))
-
-        project_name = repo_bundle.get("repoContext", {}).get("project_identity", {}).get("name")
-        logger.debug(f"Context similarity score for: '{project_name}'= {similarity}")
 
         return similarity
 
@@ -164,9 +170,6 @@ class RepoScoringService:
         logger.debug(f"Language size score for query '{query}': {match_size}/{total_size} = {match_size / total_size if total_size > 0 else 0.0}")
         score = match_size / total_size
         return min(score, 1.0)
-
-    def aggregate_scores(self, context_score: float, language_score: float, type_score: float) -> float:
-        return (context_score * 0.4) + (language_score * 0.3) + (type_score * 0.3)
     
     
     def flatten_repo_context_to_natural_language(self, repo_bundle: Dict) -> str:

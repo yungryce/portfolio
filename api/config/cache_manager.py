@@ -3,9 +3,9 @@ import json
 import hashlib
 import logging
 import functools
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, Union, List, Callable
-from azure.storage.blob import BlobServiceClient, ContentSettings
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, Optional, Callable
+from azure.storage.blob import BlobServiceClient, ContentSettings, generate_blob_sas, BlobSasPermissions
 from azure.core.exceptions import HttpResponseError, ClientAuthenticationError
 
 logger = logging.getLogger('portfolio.api')
@@ -209,7 +209,7 @@ class CacheManager:
             
             # Honor TTL for backward compatibility; default to non-expiring
             if ttl is not None:
-                expires_at = (datetime.now() + timedelta(seconds=int(ttl))).isoformat()
+                expires_at = (datetime.now(timezone.utc) + timedelta(seconds=int(ttl))).isoformat()
                 metadata['expires_at'] = expires_at
 
             blob_client = self.blob_service_client.get_blob_client(
@@ -289,16 +289,13 @@ class CacheManager:
                 # Check cache
                 cache_result = self.get(cache_key)
                 if cache_result['status'] == 'valid':
-                    logger.debug(f"Cache hit for key: {cache_key}")
                     return cache_result['data']
                 
                 # Cache miss or expired, call the function
-                logger.debug(f"Cache miss for key: {cache_key}, calling function")
                 result = func(*args, **kwargs)
                 
                 # Save result to cache
                 self.save(cache_key, result, ttl=ttl)
-                logger.debug(f"Saved result to cache for key: {cache_key}")
 
                 return result
             return wrapper
@@ -325,8 +322,6 @@ class CacheManager:
                 "error_count": 0
             }
         
-        logger.info(f"Starting cache cleanup (batch_size={batch_size}, dry_run={dry_run})")
-        
         try:
             # Get container client
             container_client = self.blob_service_client.get_container_client(self.container_name)
@@ -347,12 +342,10 @@ class CacheManager:
             expired_count = 0
             deleted_count = 0
             error_count = 0
-            current_time = datetime.now()
+            current_time = datetime.now(timezone.utc)
             
             # Process blobs in batches
             blob_batch = []
-            
-            logger.info(f"Scanning blobs in container '{self.container_name}'")
             
             for blob in container_client.list_blobs():
                 total_blobs += 1
@@ -419,7 +412,7 @@ class CacheManager:
                     try:
                         expires_at = datetime.fromisoformat(metadata['expires_at'])
                     except Exception:
-                        expires_at = datetime.min
+                        expires_at = datetime.min.replace(tzinfo=timezone.utc)
                     if expires_at <= current_time:
                         expired += 1
                         if not dry_run:
@@ -510,6 +503,37 @@ class CacheManager:
                 "total_entries": 0,
                 "total_size_bytes": 0
             }
+
+    def get_container_client(self, container_name: str):
+        if not self.blob_service_client:
+            raise RuntimeError("Blob service not configured")
+        return self.blob_service_client.get_container_client(container_name)
+
+    def make_blob_sas_url(self, container_name: str, blob_name: str, minutes: int = 60) -> str:
+        """
+        Build a read-only URL for a blob. If credentials are unavailable (public container),
+        returns the public URL without SAS.
+        """
+        if not self.blob_service_client:
+            raise RuntimeError("Blob service not configured")
+        account = self.blob_service_client.account_name
+        base = f"https://{account}.blob.core.windows.net/{container_name}/{blob_name}"
+        # Try to append SAS if we have an account key
+        try:
+            account_key = getattr(self.blob_service_client.credential, "account_key", None)
+            if not account_key:
+                return base
+            sas = generate_blob_sas(
+                account_name=account,
+                container_name=container_name,
+                blob_name=blob_name,
+                account_key=account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.now() + timedelta(minutes=minutes),
+            )
+            return f"{base}?{sas}"
+        except Exception:
+            return base
 
 # Create a global instance of CacheManager
 cache_manager = CacheManager()

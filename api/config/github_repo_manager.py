@@ -18,7 +18,7 @@ class GitHubRepoManager:
         self.api = api
         self.username = username
 
-    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, **kwargs: f"repo_metadata:{username}:{repo}")
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, **kwargs: f"repo_metadata:{username}:{repo}", ttl=3600)
     def get_repo_metadata(self, username: Optional[str]=None, repo: Optional[str]=None, include_languages: bool=False) -> Dict[str, Any]:
         """Get metadata for a specific repository.
 
@@ -46,7 +46,7 @@ class GitHubRepoManager:
                 repo_data['languages'] = languages
         return repo_data
 
-    @cache_manager.cache_decorator(cache_key_func=lambda username=None, **kwargs: f"repos_metadata:{username}:all")
+    @cache_manager.cache_decorator(cache_key_func=lambda username=None, **kwargs: f"repos_metadata:{username}:all", ttl=3600)
     def get_all_repos_metadata(self, username: Optional[str]=None, per_page=100, include_languages: bool=False) -> List[Dict[str, Any]]:
         """Get metadata for all repositories.
 
@@ -74,7 +74,7 @@ class GitHubRepoManager:
                         repo['languages'] = languages
         return repos
 
-    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, path, **kwargs: f"file_content:{username}:{repo}:{path}")
+    @cache_manager.cache_decorator(cache_key_func=lambda username, repo, path, **kwargs: f"file_content:{username}:{repo}:{path}", ttl=3600)
     def get_file_content(self, username: Optional[str], repo: str, path: str) -> Optional[str]:
         """
         Fetch the content of a file from a repository using the underlying file_manager.
@@ -92,28 +92,6 @@ class GitHubRepoManager:
         if isinstance(file_data, dict) and file_data.get('type') == 'file':
             return self.api.decode_file_content(file_data)
         return None
-    
-    @cache_manager.cache_decorator(cache_key_func=lambda username, **kwargs: cache_manager.generate_cache_key(kind='bundle', username=username))
-    def get_all_repos_with_context(self, username: Optional[str], include_languages: bool = True):
-        """
-        Get all repositories with enhanced context including .repo-context.json and file paths.
-        """
-        if not username:
-            raise ValueError("Username is required")
-        username = str(username)  # Ensure username is a string
-        repos = self.get_all_repos_metadata(username, include_languages=include_languages)
-        repos_with_context = [trim_processed_repo(repo) for repo in repos if isinstance(repo, dict)]
-        
-        # Generate fingerprint for the bundle
-        fingerprint = FingerprintManager.generate_bundle_fingerprint([
-            FingerprintManager.generate_metadata_fingerprint(repo)
-            for repo in repos_with_context if isinstance(repo, dict)
-        ])
-        
-        # Add fingerprint to cache metadata when saving
-        # Note: The cache_decorator will handle this automatically
-        
-        return repos_with_context
 
     def get_repository_tree(self, repo_name: str, username: Optional[str] = None, recursive: bool = False) -> List[str]:
         """
