@@ -1,0 +1,170 @@
+# .azure-pipelines.yml
+# Purpose: CI/CD to staging for a fullstack app
+# - Backend: Python Azure Functions (Flex Consumption)
+# - Frontend: Angular → Azure Static Web Apps
+# Notes:
+# - Deploys only on branch 'staging' (builds on PRs too)
+# - Uses a stable Angular output path: 'dist/'
+# - Requires:
+#     - Service connection: 'portfolio'
+#     - Variable group: 'portfolio-secrets' with SWA_TOKEN
+
+trigger:
+  branches:
+    include:
+      - staging
+
+pr:
+  branches:
+    include:
+      - staging
+      - fe
+      - feature/*
+
+variables:
+  - name: Node_Version
+    value: '20.x'              # Strongly prefer current LTS for Angular builds
+  - name: Python_Version
+    value: '3.11'              # Aligns with your Functions runtime
+  - name: AzureServiceConnection
+    value: 'portfolio'         # ARM service connection name
+  - name: FunctionAppName
+    value: 'portfolio-api-o9'  # Your Function App name (Flex plan)
+  - group: portfolio-secrets    # Provides SWA_TOKEN
+
+stages:
+  # -----------------------------
+  # Backend: Build & Package
+  # -----------------------------
+  - stage: Backend_Build_Package
+    displayName: "Backend (Functions) — Build & Package"
+    jobs:
+      - job: build_backend
+        displayName: "Build Function App (zip)"
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(Python_Version)'
+
+          # Install direct (for tests or tooling); build reproducibility comes from vendoring step
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r requirements.txt
+            displayName: "Install dependencies (tools)"
+            workingDirectory: '$(Build.SourcesDirectory)/api'
+
+          # Vendor dependencies into .python_packages per Azure Functions Python guidance
+          - script: |
+              pip install -r requirements.txt --target .python_packages/lib/site-packages
+              rm -f local.settings.json || true
+              find . -type d -name "__pycache__" -prune -exec rm -rf {} +
+            displayName: "Vendor deps & clean"
+            workingDirectory: '$(Build.SourcesDirectory)/api'
+
+          # Create deployment zip
+          - task: ArchiveFiles@2
+            displayName: "Archive Function App to zip"
+            inputs:
+              rootFolderOrFile: '$(Build.SourcesDirectory)/api'
+              includeRootFolder: false
+              archiveType: zip
+              archiveFile: '$(Build.ArtifactStagingDirectory)/api.zip'
+              replaceExistingArchive: true
+
+          - task: PublishBuildArtifacts@1
+            displayName: "Publish API artifact"
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/api.zip'
+              ArtifactName: 'api'
+              publishLocation: 'Container'
+
+  # -----------------------------
+  # Backend: Deploy (staging only)
+  # -----------------------------
+  - stage: Backend_Deploy
+    displayName: "Backend (Functions) — Deploy to Staging"
+    dependsOn: Backend_Build_Package
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/staging'))
+    jobs:
+      - deployment: deploy_backend
+        displayName: "Deploy Functions"
+        environment: "staging"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: api
+
+                - task: AzureFunctionApp@2
+                  displayName: "Deploy Azure Function App"
+                  inputs:
+                    azureSubscription: '$(AzureServiceConnection)'
+                    appType: 'functionAppLinux'
+                    appName: '$(FunctionAppName)'
+                    package: '$(Pipeline.Workspace)/api/api.zip'
+                    # runtimeStack not required if the app is already configured
+                    # runtimeStack: 'PYTHON|3.11'
+
+  # -----------------------------
+  # Frontend: Build & Deploy SWA
+  # -----------------------------
+  - stage: Frontend_Deploy_SWA
+    displayName: "Frontend (Angular) — Deploy to Azure Static Web Apps"
+    dependsOn: []   # independent of backend; keep if you want parallelism
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/staging'))
+    jobs:
+      - deployment: deploy_frontend
+        displayName: "Build & Deploy SWA"
+        environment: "staging"
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self    # ensure source is available for npm
+                  fetchDepth: 0
+
+                - task: NodeTool@0
+                  inputs:
+                    versionSpec: '$(Node_Version)'
+
+                # Optional but recommended: clean install
+                - script: |
+                    npm ci
+                    npm run build:prod
+                  displayName: "Build Angular (production)"
+                  workingDirectory: '$(Build.SourcesDirectory)'
+
+                - script: |
+                    if [ -f staticwebapp.config.json ]; then
+                      mkdir -p dist/browser
+                      cp staticwebapp.config.json dist/browser/staticwebapp.config.json
+                    fi
+                  displayName: "Include SWA config in dist"
+                  workingDirectory: '$(Build.SourcesDirectory)'
+
+                - task: AzureStaticWebApp@0
+                  displayName: "Deploy to Azure Static Web Apps"
+                  inputs:
+                    azure_static_web_apps_api_token: '$(SWA_TOKEN)'
+                    action: 'upload'
+                    app_location: 'dist/browser'  # Updated to match actual build output
+                    api_location: ''
+                    output_location: ''
+                    skip_app_build: true
+                    skip_api_build: true
+
+                # - task: AzureStaticWebApp@0
+                #   displayName: "Deploy to Azure Static Web Apps"
+                #   inputs:
+                #     azure_static_web_apps_api_token: '$(SWA_TOKEN)'
+                #     action: 'upload'
+                #     app_location: '/'  # Updated to match actual build output
+                #     api_location: '/api'
+                #     output_location: 'dist/portfolio/browser'
+                #     skip_app_build: true
+                #     skip_api_build: true
