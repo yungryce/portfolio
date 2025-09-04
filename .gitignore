@@ -71,4 +71,4 @@ api/.funcpack/
 /schema
 __azurite*
 __blobstorage__/
-__queuestorage__
+__queuestorage__/
