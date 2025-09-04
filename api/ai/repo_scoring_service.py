@@ -124,12 +124,12 @@ class RepoScoringService:
         Scores the similarity between the query and the repository context using semantic embeddings.
         """
         if not repo_bundle.get("has_documentation", False):
-            logger.debug(f"Skipping context scoring for {repo_bundle.get('name', 'Unknown')} due to lack of documentation.")
+            logger.info(f"Skipping context scoring for {repo_bundle.get('name', 'Unknown')} due to lack of documentation.")
             return 0.0
         
         context_str = self.flatten_repo_context_to_natural_language(repo_bundle)
         if not context_str or context_str.strip() == "" or "None" in context_str:
-            logger.debug(f"Skipping context scoring for {repo_bundle.get('name', 'Unknown')} due to empty or meaningless context string.")
+            logger.info(f"Skipping context scoring for {repo_bundle.get('name', 'Unknown')} due to empty or meaningless context string.")
             return 0.0
 
         # Encode with whitening + L2 normalization for better spread
@@ -152,7 +152,7 @@ class RepoScoringService:
         repo_langs = [lang.lower() for lang in repo_languages.keys()]
         matches = set(query_terms) & set(repo_langs)
         score = len(matches) / len(query_terms)
-        logger.debug(f"Language match score for query '{query}': {score} (matches: {matches})")
+        logger.info(f"Language match score for query '{query}': {score} (matches: {matches})")
         return min(score, 1.0)
 
     def score_language_size(self, query: str, repo_languages: Dict) -> float:
@@ -167,7 +167,7 @@ class RepoScoringService:
         if total_size == 0:
             return 0.0
         match_size = sum(size for lang, size in repo_languages.items() if lang.lower() in query_terms)
-        logger.debug(f"Language size score for query '{query}': {match_size}/{total_size} = {match_size / total_size if total_size > 0 else 0.0}")
+        logger.info(f"Language size score for query '{query}': {match_size}/{total_size} = {match_size / total_size if total_size > 0 else 0.0}")
         score = match_size / total_size
         return min(score, 1.0)
     

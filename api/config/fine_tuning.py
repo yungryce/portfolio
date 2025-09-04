@@ -47,7 +47,6 @@ class SemanticModel:
         """
         if self.model is None:
             try:
-                logger.info("Loading base sentence transformer model (all-MiniLM-L6-v2)")
                 self.model = SentenceTransformer("all-MiniLM-L6-v2")
             except Exception as e:
                 logger.error(f"Failed to load base model: {e}", exc_info=True)
@@ -130,18 +129,15 @@ class SemanticModel:
         This helps spread out embeddings for better similarity discrimination.
         """
         if not corpus_texts:
-            logger.debug("No corpus texts provided for whitening")
             return
             
         self._ensure_base_model()
         if self.model is None:
-            logger.warning("No model available for whitening")
             return
             
         # Get raw embeddings from the model
         emb = self.model.encode(corpus_texts, convert_to_numpy=True, normalize_embeddings=False)
         if emb.size == 0:
-            logger.warning("Empty embeddings generated for whitening")
             return
             
         # Compute mean and center the data
@@ -293,12 +289,25 @@ class SemanticModel:
             container = model_info.get("container", "ai-models")
             blob_name = model_info.get("blob_name")
             fingerprint = model_info.get("fingerprint", "")
-            
             if not blob_name:
                 logger.error("Missing blob_name in model_info")
                 return False
             
-            # Check if we already have this model in local cache
+            try:
+                ensure = getattr(cache_manager, "_ensure_initialized", None)
+                if callable(ensure):
+                    ensure()
+            except Exception as e:
+                logger.warning(f"Failed to ensure cache_manager init: {e}")
+
+            if not cache_manager.blob_service_client:
+                logger.error("Blob service client not available from cache_manager")
+                return False
+            
+            container_client = cache_manager.blob_service_client.get_container_client(container)
+            blob_client = container_client.get_blob_client(blob_name)
+            
+            # Local cache short-circuit
             if local_cache_dir and fingerprint:
                 local_model_path = os.path.join(local_cache_dir, f"model_{fingerprint}")
                 if os.path.exists(local_model_path):
@@ -309,39 +318,22 @@ class SemanticModel:
                     except Exception as local_e:
                         logger.warning(f"Failed to load from local cache: {str(local_e)}")
             
-            # Download model from Azure Blob Storage
-            connection_string = os.getenv('AzureWebJobsStorage')
-            if not connection_string:
-                logger.error("AzureWebJobsStorage connection string not found")
-                return False
-                
-            blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-            container_client = blob_service_client.get_container_client(container)
-            blob_client = container_client.get_blob_client(blob_name)
-            
-            # Create a temporary directory to extract the model
+            # Download to temp, extract, load
             temp_dir = tempfile.mkdtemp()
             zip_path = os.path.join(temp_dir, "model.zip")
-            
             try:
-                # Download the blob
                 with open(zip_path, "wb") as download_file:
                     download_file.write(blob_client.download_blob().readall())
                 
-                # Extract the zip file
                 model_dir = os.path.join(temp_dir, "model")
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     zip_ref.extractall(model_dir)
                 
-                # Load the model
                 self.model = SentenceTransformer(model_dir)
 
-                # Save to local cache if requested
                 if local_cache_dir and fingerprint:
                     os.makedirs(local_cache_dir, exist_ok=True)
                     local_model_path = os.path.join(local_cache_dir, f"model_{fingerprint}")
-                    
-                    # Copy model files to local cache
                     if os.path.exists(local_model_path):
                         shutil.rmtree(local_model_path)
                     shutil.copytree(model_dir, local_model_path)
@@ -350,7 +342,6 @@ class SemanticModel:
                 logger.error(f"Error processing downloaded model: {e}", exc_info=True)
                 return False
             finally:
-                # Cleanup temporary files
                 shutil.rmtree(temp_dir)
                 
             logger.info(f"Successfully loaded model from {container}/{blob_name}")
@@ -394,11 +385,11 @@ class SemanticModel:
         training_pairs = []
         for repo_bundle in repos_bundle:
             repo_name = repo_bundle.get('name', 'Unknown')
-            logger.debug(f"Generating training pairs for repository: {repo_name}")
+            logger.info(f"Generating training pairs for repository: {repo_name}")
             try:
                 pairs = self.generate_semantic_training_pairs(repo_bundle)
                 training_pairs.extend(pairs)
-                logger.debug(f"Generated {len(pairs)} training pairs for {repo_name}")
+                logger.info(f"Generated {len(pairs)} training pairs for {repo_name}")
             except Exception as e:
                 logger.error(f"Error generating training pairs for {repo_name}: {str(e)}")
                 continue
@@ -463,13 +454,23 @@ class SemanticModel:
                         zipf.write(file_path, arcname)
         
             # Upload zip to Azure Blob Storage using the same blob service client as cache_manager
+            try:
+                ensure = getattr(cache_manager, "_ensure_initialized", None)
+                if callable(ensure):
+                    ensure()
+            except Exception:
+                pass
+
             if not cache_manager.blob_service_client:
                 logger.error("Blob service client not available")
                 return False
+
             container_name = cache_manager.container_name
             blob_name = f"{model_id}.zip"
+
+            # Prefer container client from cache_manager to ensure init and MI path
             try:
-                container_client = cache_manager.blob_service_client.get_container_client(container_name)
+                container_client = cache_manager.get_container_client(container_name)
                 if not container_client.exists():
                     logger.info(f"Container {container_name} does not exist, creating it...")
                     cache_manager.blob_service_client.create_container(container_name)
@@ -477,11 +478,8 @@ class SemanticModel:
             except Exception as e:
                 logger.error(f"Error checking/creating container {container_name}: {e}")
                 return False
-                
-            blob_client = cache_manager.blob_service_client.get_blob_client(
-                container=container_name,
-                blob=blob_name
-            )
+
+            blob_client = container_client.get_blob_client(blob_name)
             
             with open(zip_path, "rb") as data:
                 try:
@@ -594,7 +592,7 @@ class SemanticModel:
         Returns:
             List[Tuple[str, str, float]]: List of (query, context, similarity_score) tuples.
         """
-        logger.debug("Generating semantic training pairs from repository context.")
+        logger.info("Generating semantic training pairs from repository context.")
         pairs = []
 
         # Extract relevant fields
@@ -635,5 +633,5 @@ class SemanticModel:
         if architecture:
             pairs.append(("Describe the architecture of this project.", architecture, 1.0))
 
-        logger.debug(f"Generated {len(pairs)} training pairs.")
+        logger.info(f"Generated {len(pairs)} training pairs.")
         return pairs

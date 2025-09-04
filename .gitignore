@@ -69,3 +69,6 @@ api/.funcpack/
 # Others
 /private
 /schema
+__azurite*
+__blobstorage__/
+__queuestorage__

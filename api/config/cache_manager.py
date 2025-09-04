@@ -5,6 +5,7 @@ import logging
 import functools
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Callable
+from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient, ContentSettings, generate_blob_sas, BlobSasPermissions
 from azure.core.exceptions import HttpResponseError, ClientAuthenticationError
 
@@ -44,7 +45,16 @@ class CacheManager:
         # default_ttl kept for backward compatibility but not used by default
         self.default_ttl = default_ttl
         self.use_cache = use_cache
+        self._initialized = False
+        self.blob_service_client = None
+        # self._init_cache()
+        
+    def _ensure_initialized(self):
+        """Ensure cache is initialized on first use."""
+        if self._initialized:
+            return
         self._init_cache()
+        self._initialized = True
         
     @staticmethod
     def generate_cache_key(*args, **kwargs):
@@ -80,41 +90,53 @@ class CacheManager:
     def _init_cache(self) -> None:
         """
         Initialize Azure Blob Storage connection and create container if needed.
-        
-        Sets up the blob service client using the AzureWebJobsStorage connection string
-        and creates the cache container if it doesn't exist. Handles authentication
-        and network errors gracefully.
+
+        Prefers Managed Identity via service URI; falls back to connection string for local Durable Functions.
         """
-        connection_string = os.getenv('AzureWebJobsStorage')
-        if connection_string and self.use_cache:
+        blob_service_uri = (
+            os.getenv('BLOB_SERVICE_URI')  # preferred explicit URI
+            or os.getenv('AzureWebJobsStorage__blobServiceUri')  # host identity-based config
+        )
+        connection_string = os.getenv('AzureWebJobsStorage')  # local dev / fallback
+
+        # Try Managed Identity first (requires blob_service_uri)
+        if self.use_cache and blob_service_uri:
             try:
-                self.blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-                try:
-                    self.blob_service_client.create_container(self.container_name)
-                    logger.info(f"Created cache container: {self.container_name}")
-                except Exception as e:
-                    if "ContainerAlreadyExists" not in str(e):
-                        logger.warning(f"Container creation issue: {str(e)}")
+                # Exclude interactive for serverless; works with system/user-assigned MI or Env creds
+                credential = DefaultAzureCredential()
+                self.blob_service_client = BlobServiceClient(account_url=blob_service_uri, credential=credential)
+                logger.info("Initialized Azure Blob client using Managed Identity.")
             except ClientAuthenticationError as auth_err:
-                logger.error(f"Azure Storage authentication failed: {auth_err}. "
-                             "Check your storage account keys or managed identity configuration.")
+                logger.warning(f"Managed Identity auth failed, will try connection string fallback: {auth_err}")
                 self.blob_service_client = None
             except HttpResponseError as http_err:
-                if "AuthorizationFailure" in str(http_err) or "AuthenticationFailed" in str(http_err):
-                    logger.error(f"Azure Storage authorization error: {http_err}. "
-                                 "Verify your credentials and permissions.")
-                elif "Network" in str(http_err) or "Forbidden" in str(http_err):
-                    logger.error(f"Azure Storage network restriction: {http_err}. "
-                                 "Check firewall, virtual network, or private endpoint settings.")
-                else:
-                    logger.error(f"Azure Storage HTTP error: {http_err}")
+                logger.warning(f"Managed Identity HTTP error, will try connection string fallback: {http_err}")
                 self.blob_service_client = None
             except Exception as e:
-                logger.error(f"Failed to initialize Azure Storage cache: {str(e)}")
+                logger.warning(f"Managed Identity initialization failed, will try connection string fallback: {e}")
                 self.blob_service_client = None
-        else:
-            logger.warning("Azure Storage connection string not found or caching disabled")
-            self.blob_service_client = None
+
+        # Fallback to connection string (needed for local Durable Functions)
+        if (self.blob_service_client is None) and self.use_cache and connection_string:
+            try:
+                self.blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+                logger.info("Initialized Azure Blob client using connection string (fallback).")
+            except Exception as e:
+                logger.error(f"Connection string authentication failed: {e}")
+                self.blob_service_client = None
+
+        # Neither MI nor connection string available
+        if self.blob_service_client is None:
+            logger.warning("Azure Blob client not initialized (no valid credentials/URI). Caching disabled.")
+            return
+
+        # Create container if client is available
+        try:
+            self.blob_service_client.create_container(self.container_name)
+            logger.info(f"Created cache container: {self.container_name}")
+        except Exception as e:
+            if "ContainerAlreadyExists" not in str(e):
+                logger.warning(f"Container creation issue: {e}")
 
     def get(self, cache_key: str) -> Dict[str, Any]:
         """
@@ -133,6 +155,7 @@ class CacheManager:
             - last_modified: ISO format last modified timestamp
             - size_bytes: Size of the cached data in bytes
         """
+        self._ensure_initialized()
         if not self.blob_service_client or not self.use_cache:
             return {'status': 'disabled', 'data': None, 'metadata': None}
         try:
@@ -194,6 +217,7 @@ class CacheManager:
         Returns:
             True if successfully saved, False otherwise
         """
+        self._ensure_initialized()
         if not self.blob_service_client or not self.use_cache:
             return False
         try:
@@ -240,6 +264,7 @@ class CacheManager:
         Returns:
             True if successfully deleted or didn't exist, False on error
         """
+        self._ensure_initialized()
         if not self.blob_service_client or not self.use_cache:
             return False
         try:
@@ -312,6 +337,7 @@ class CacheManager:
         Returns:
             Dictionary containing cleanup operation results
         """
+        self._ensure_initialized()
         if not self.blob_service_client or not self.use_cache:
             logger.warning("Cache cleanup skipped: no blob service client or caching disabled")
             return {
@@ -389,6 +415,7 @@ class CacheManager:
 
     def _process_cleanup_batch(self, blob_batch, current_time, dry_run):
         """Process a batch of blobs for cleanup."""
+        self._ensure_initialized()
         expired = 0
         deleted = 0
         errors = 0
@@ -505,34 +532,56 @@ class CacheManager:
             }
 
     def get_container_client(self, container_name: str):
+        self._ensure_initialized()
         if not self.blob_service_client:
             raise RuntimeError("Blob service not configured")
         return self.blob_service_client.get_container_client(container_name)
 
     def make_blob_sas_url(self, container_name: str, blob_name: str, minutes: int = 60) -> str:
         """
-        Build a read-only URL for a blob. If credentials are unavailable (public container),
-        returns the public URL without SAS.
+        Build a read-only URL for a blob.
+        - If using an account key (conn string), generate key-based SAS.
+        - If using Managed Identity, generate a user-delegation SAS.
+        - If SAS cannot be created, return the base URL (works only for public containers).
         """
+        self._ensure_initialized()
         if not self.blob_service_client:
             raise RuntimeError("Blob service not configured")
+
         account = self.blob_service_client.account_name
         base = f"https://{account}.blob.core.windows.net/{container_name}/{blob_name}"
-        # Try to append SAS if we have an account key
         try:
+            expiry = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+            # 1) Try account-key SAS (connection string auth)
             account_key = getattr(self.blob_service_client.credential, "account_key", None)
-            if not account_key:
-                return base
+            if account_key:
+                sas = generate_blob_sas(
+                    account_name=account,
+                    container_name=container_name,
+                    blob_name=blob_name,
+                    account_key=account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=expiry,
+                )
+                return f"{base}?{sas}"
+
+            # 2) Managed Identity: user-delegation SAS
+            uds = self.blob_service_client.get_user_delegation_key(
+                key_start_time=datetime.now(timezone.utc),
+                key_expiry_time=expiry + timedelta(minutes=5)
+            )
             sas = generate_blob_sas(
                 account_name=account,
                 container_name=container_name,
                 blob_name=blob_name,
-                account_key=account_key,
+                user_delegation_key=uds,
                 permission=BlobSasPermissions(read=True),
-                expiry=datetime.now() + timedelta(minutes=minutes),
+                expiry=expiry,
             )
             return f"{base}?{sas}"
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Could not create SAS for {container_name}/{blob_name}: {e}")
             return base
 
 # Create a global instance of CacheManager

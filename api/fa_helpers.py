@@ -71,7 +71,7 @@ def format_file_response(file_content: str, file_path: str, logger: Optional[log
     if file_path.endswith('.json'):
         try:
             json_content = json.loads(file_content)
-            logger.debug(f"Successfully parsed JSON file: {file_path}")
+            logger.info(f"Successfully parsed JSON file: {file_path}")
             return func.HttpResponse(
                 json.dumps(json_content, indent=2),
                 status_code=200,
@@ -111,7 +111,7 @@ def format_file_response(file_content: str, file_path: str, logger: Optional[log
     elif file_path.endswith('.txt'):
         content_type = "text/plain"
     
-    logger.debug(f"Returning file {file_path} as {content_type}")
+    logger.info(f"Returning file {file_path} as {content_type}")
     
     return func.HttpResponse(
         file_content,
@@ -213,7 +213,7 @@ def get_orchestration_status(instance_id: str = None, status_query_url: str = No
 
     if status_query_url:
         status_url = status_query_url
-        logger.debug(f"Fetching orchestration status using statusQueryGetUri: {status_url}")
+        logger.info(f"Fetching orchestration status using statusQueryGetUri: {status_url}")
         headers = {}
     elif instance_id:
         # Fallback: construct status URL from environment/config
@@ -225,8 +225,8 @@ def get_orchestration_status(instance_id: str = None, status_query_url: str = No
             f"{base_url}/runtime/webhooks/durabletask/instances/{instance_id}"
             f"?taskHub={task_hub}&connection={connection}"
         )
-        logger.debug(f"Fetching orchestration status for instance {instance_id} from {base_url}")
-        logger.debug(f"Using task hub: {task_hub}, connection: {connection}, host key: {'***' if host_key else 'None'}")
+        logger.info(f"Fetching orchestration status for instance {instance_id} from {base_url}")
+        logger.info(f"Using task hub: {task_hub}, connection: {connection}, host key: {'***' if host_key else 'None'}")
         headers = {}
         if host_key:
             headers["x-functions-key"] = host_key

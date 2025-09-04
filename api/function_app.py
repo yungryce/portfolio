@@ -1,5 +1,9 @@
-import json
 import logging
+logger = logging.getLogger('portfolio.api')
+logger.setLevel(logging.INFO)
+logger.propagate = True
+
+import json
 import os
 import time
 import azure.functions as func
@@ -15,17 +19,6 @@ from config.fingerprint_manager import FingerprintManager
 
 # AI imports
 from ai.type_analyzer import FileTypeAnalyzer
-
-# Configure logging
-logger = logging.getLogger('portfolio.api')
-logger.setLevel(logging.DEBUG)
-# Do NOT add FileHandler in production
-if os.getenv("ENV_SETUP") == "Development":
-    file_handler = logging.FileHandler("api_function_app.log", mode='a', encoding='utf-8')
-    file_handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
 
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 logger.info("Function app initialized")
@@ -111,7 +104,7 @@ async def http_start(req: func.HttpRequest, client) -> func.HttpResponse:
 
                 if cached_bundle_fingerprint and cached_bundle_fingerprint == current_bundle_fingerprint:
                     logger.info("Combined bundle fingerprints match")
-                    # logger.debug(f"First repository in bundle: {json.dumps(cache_entry['data'][1], indent=2)}")
+                    # logger.info(f"First repository in bundle: {json.dumps(cache_entry['data'][1], indent=2)}")
 
                     # Return cached response with bundle fingerprint
                     return create_success_response({
@@ -374,7 +367,7 @@ def merge_repo_results_activity(activityContext):
             # Use fresh data
             merged_results.append(fresh_repo_lookup[repo_name])
             processed_repo_names.add(repo_name)
-            logger.debug(f"Updated repository '{repo_name}' with fresh data")
+            logger.info(f"Updated repository '{repo_name}' with fresh data")
         else:
             # Keep cached data
             merged_results.append(cached_repo)
@@ -534,7 +527,7 @@ def portfolio_query(req: func.HttpRequest) -> func.HttpResponse:
         # Try to get cached results first
         cache_key = cache_manager.generate_cache_key(kind='bundle', username=username)
         cached_results = cache_manager.get(cache_key)
-        logger.debug(f"Cached results for user '{username}': {cached_results['status'] if cached_results else 'None'}")
+        logger.info(f"Cached results for user '{username}': {cached_results['status'] if cached_results else 'None'}")
 
         all_repos_bundle = None
         if cached_results and isinstance(cached_results.get('data'), list):

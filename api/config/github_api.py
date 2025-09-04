@@ -37,7 +37,7 @@ class GitHubAPI:
             except Exception:
                 return response.text
         elif response.status_code == 404:
-            logger.debug(f"Resource not found: {full_url}")
+            logger.info(f"Resource not found: {full_url}")
             return None
         else:
             logger.warning(f"GitHub API error: {response.status_code} {response.text[:200]}")
