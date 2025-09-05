@@ -6,8 +6,9 @@
 # - Deploys only on branch 'staging' (builds on PRs too)
 # - Uses a stable Angular output path: 'dist/'
 # - Requires:
-#     - Service connection: 'portfolio'
-#     - Variable group: 'portfolio-secrets' with SWA_TOKEN
+#     - Service connection: 'portfolio' (for SWA)
+#     - Service connection: 'portfolio-repro' (for Function App)
+#     - Variable group: 'portfolio-secrets' with SWA_TOKEN (fallback if needed)
 
 trigger:
   branches:
@@ -27,10 +28,10 @@ variables:
   - name: Python_Version
     value: '3.11'              # Aligns with your Functions runtime
   - name: AzureServiceConnection
-    value: 'portfolio'         # ARM service connection name
-  - name: FunctionAppName
-    value: 'app-repro'  # Your Function App name (Flex plan)
-  - group: portfolio-secrets    # Provides SWA_TOKEN
+    value: 'portfolio'         # ARM service connection name for SWA
+  - name: FunctionAppServiceConnection
+    value: 'portfolio-repro'   # ARM service connection name for Function App
+  - group: portfolio-secrets    # Provides SWA_TOKEN (as fallback)
 
 stages:
   # -----------------------------
@@ -101,11 +102,10 @@ stages:
                 - task: AzureFunctionApp@2
                   displayName: "Deploy Azure Function App"
                   inputs:
-                    azureSubscription: '$(AzureServiceConnection)'
+                    azureSubscription: '$(FunctionAppServiceConnection)'
                     appType: 'functionAppLinux'
                     appName: '$(FunctionAppName)'
                     package: '$(Pipeline.Workspace)/api/api.zip'
-                    resourceGroupName: 'porfolio-repro' 
 
   # -----------------------------
   # Frontend: Build & Deploy SWA
@@ -149,21 +149,10 @@ stages:
                 - task: AzureStaticWebApp@0
                   displayName: "Deploy to Azure Static Web Apps"
                   inputs:
-                    azure_static_web_apps_api_token: '$(SWA_TOKEN)'
+                    azureSubscription: '$(AzureServiceConnection)'  # Updated to use service connection
                     action: 'upload'
                     app_location: 'dist/browser'  # Updated to match actual build output
                     api_location: ''
                     output_location: ''
                     skip_app_build: true
                     skip_api_build: true
-
-                # - task: AzureStaticWebApp@0
-                #   displayName: "Deploy to Azure Static Web Apps"
-                #   inputs:
-                #     azure_static_web_apps_api_token: '$(SWA_TOKEN)'
-                #     action: 'upload'
-                #     app_location: '/'  # Updated to match actual build output
-                #     api_location: '/api'
-                #     output_location: 'dist/portfolio/browser'
-                #     skip_app_build: true
-                #     skip_api_build: true
