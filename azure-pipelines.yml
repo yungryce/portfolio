@@ -10,6 +10,19 @@
 #     - Service connection: 'porfolio-repro' (for Function App)
 #     - Variable group: 'portfolio-secrets' with SWA_TOKEN (fallback if needed)
 
+variables:
+  - name: Node_Version
+    value: '20.x'
+  - name: Python_Version
+    value: '3.11'
+  - name: AzureServiceConnection
+    value: 'portfolio'
+  - name: FunctionAppServiceConnection
+    value: 'portfolio-repro'
+  - name: FunctionAppName
+    value: 'app-repro'  # Ensure this is defined at the top level
+  - group: portfolio-secrets
+
 trigger:
   branches:
     include:
@@ -21,17 +34,6 @@ pr:
       - staging
       - fe
       - feature/*
-
-variables:
-  - name: Node_Version
-    value: '20.x'              # Strongly prefer current LTS for Angular builds
-  - name: Python_Version
-    value: '3.11'              # Aligns with your Functions runtime
-  - name: AzureServiceConnection
-    value: 'portfolio'         # ARM service connection name for SWA
-  - name: FunctionAppServiceConnection
-    value: 'porfolio-repro'   # ARM service connection name for Function App
-  - group: portfolio-secrets    # Provides SWA_TOKEN (as fallback)
 
 stages:
   # -----------------------------
@@ -99,6 +101,21 @@ stages:
                 - download: current
                   artifact: api
 
+                # Optional: Verify the Function App exists before deployment
+                - task: AzureCLI@2
+                  displayName: "Verify Function App Exists"
+                  inputs:
+                    azureSubscription: '$(FunctionAppServiceConnection)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      if az functionapp show --name $(FunctionAppName) --resource-group porfolio-repro --query name -o tsv; then
+                        echo "Function App $(FunctionAppName) exists."
+                      else
+                        echo "Function App $(FunctionAppName) does not exist. Please create it first."
+                        exit 1
+                      fi
+
                 - task: AzureFunctionApp@2
                   displayName: "Deploy Azure Function App"
                   inputs:
@@ -106,6 +123,7 @@ stages:
                     appType: 'functionAppLinux'
                     appName: '$(FunctionAppName)'
                     package: '$(Pipeline.Workspace)/api/api.zip'
+                    resourceGroupName: 'porfolio-repro'
 
   # -----------------------------
   # Frontend: Build & Deploy SWA
@@ -149,9 +167,9 @@ stages:
                 - task: AzureStaticWebApp@0
                   displayName: "Deploy to Azure Static Web Apps"
                   inputs:
-                    azure_static_web_apps_api_token: '$(SWA_TOKEN)'  # Switched to token for reliability
+                    azure_static_web_apps_api_token: '$(SWA_TOKEN)'
                     action: 'upload'
-                    app_location: 'dist/browser'  # Updated to match actual build output
+                    app_location: 'dist/browser'
                     api_location: ''
                     output_location: ''
                     skip_app_build: true
