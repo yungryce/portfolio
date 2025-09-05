@@ -7,7 +7,7 @@
 # - Uses a stable Angular output path: 'dist/'
 # - Requires:
 #     - Service connection: 'portfolio' (for SWA)
-#     - Service connection: 'portfolio-repro' (for Function App)
+#     - Service connection: 'porfolio-repro' (for Function App)
 #     - Variable group: 'portfolio-secrets' with SWA_TOKEN (fallback if needed)
 
 trigger:
@@ -30,7 +30,7 @@ variables:
   - name: AzureServiceConnection
     value: 'portfolio'         # ARM service connection name for SWA
   - name: FunctionAppServiceConnection
-    value: 'portfolio-repro'   # ARM service connection name for Function App
+    value: 'porfolio-repro'   # ARM service connection name for Function App
   - group: portfolio-secrets    # Provides SWA_TOKEN (as fallback)
 
 stages:
