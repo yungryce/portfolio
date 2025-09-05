@@ -105,8 +105,7 @@ stages:
                     appType: 'functionAppLinux'
                     appName: '$(FunctionAppName)'
                     package: '$(Pipeline.Workspace)/api/api.zip'
-                    # runtimeStack not required if the app is already configured
-                    # runtimeStack: 'PYTHON|3.11'
+                    resourceGroupName: 'porfolio-repro' 
 
   # -----------------------------
   # Frontend: Build & Deploy SWA
