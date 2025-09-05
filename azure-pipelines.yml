@@ -18,7 +18,7 @@ variables:
   - name: AzureServiceConnection
     value: 'portfolio'
   - name: FunctionAppServiceConnection
-    value: 'portfolio-repro'
+    value: 'porfolio-repro'
   - name: FunctionAppName
     value: 'app-repro'  # Ensure this is defined at the top level
   - group: portfolio-secrets
