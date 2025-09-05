@@ -16,7 +16,11 @@
     "durableTask": {
       "hubName": "DurableFunctionsHub",
       "maxConcurrentActivityFunctions": 10,
-      "maxConcurrentOrchestratorFunctions": 10
+      "maxConcurrentOrchestratorFunctions": 10,
+      "storageProvider": {
+        "type": "azureStorage",
+        "connectionName": "AzureWebJobsStorage"
+      }
     }
   }
 }
