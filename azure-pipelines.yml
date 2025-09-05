@@ -149,7 +149,7 @@ stages:
                 - task: AzureStaticWebApp@0
                   displayName: "Deploy to Azure Static Web Apps"
                   inputs:
-                    azureSubscription: '$(AzureServiceConnection)'  # Updated to use service connection
+                    azure_static_web_apps_api_token: '$(SWA_TOKEN)'  # Switched to token for reliability
                     action: 'upload'
                     app_location: 'dist/browser'  # Updated to match actual build output
                     api_location: ''
