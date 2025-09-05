@@ -22,16 +22,25 @@ export class AIAssistantService {
   private http = inject(HttpClient);
   private config = inject(ConfigService);
 
+  /** Trigger backend orchestration to (re)build bundles for a user. */
+  startBuild(username: string, force = true): Observable<any> {
+    const url = `${this.config.apiUrl}/orchestrator_start`;
+    return this.http.post(url, { username, force_refresh: force });
+  }
+
   askPortfolio(req: AIAssistantRequest): Observable<AIAssistantResponse> {
     const url = `${this.config.apiUrl}/ai`;
     return this.http.post<any>(url, req).pipe(
       map(res => {
-        // API returns { status: 'success', data: {...} }
         if (res?.status === 'success' && res?.data) return res.data as AIAssistantResponse;
         return res as AIAssistantResponse;
       }),
       catchError(err => {
         console.error('AI request failed:', err);
+        if (err.status === 404 && req.username) {
+          // On not found, kick off a build with force_refresh
+          this.startBuild(req.username, true).subscribe();
+        }
         return of({
           response: 'AI service failed or is unavailable. Please try again.',
           repositories_used: [],

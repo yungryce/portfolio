@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { RepoBundleService, RepoBundleResponse } from '../services/repo-bundle.service';
-import { Observable, map } from 'rxjs';
+import { Observable, map, timer, switchMap, takeWhile } from 'rxjs';
 
 interface RepoCardVM {
   name: string;
@@ -45,8 +45,47 @@ export class ProjectsComponent implements OnInit {
   allLanguages: string[] = [];
   allTechnologies: string[] = [];
 
+  // Loading state
+  loading = false;
+  loadingMessage = '';
+
+  // Building state
+  building = false;
+  buildMessage = '';
+
   ngOnInit(): void {
     this.loadRepoBundle();
+  }
+
+  triggerBuild(): void {
+    if (this.building) return;
+    this.building = true;
+    this.buildMessage = 'Starting build… This may take a few minutes.';
+    this.repoBundleService.startBuild(this.username, true).subscribe({
+      next: () => {
+        // Begin a light polling loop to refresh the bundle for ~2 minutes
+        timer(5000, 5000).pipe(
+          takeWhile((_, i) => i < 24), // 24*5s ≈ 2 minutes
+          switchMap(() => this.repoBundleService.getUserBundle(this.username, false))
+        ).subscribe({
+          next: b => {
+            // Stop polling when data appears
+            if (Array.isArray(b?.data) && b.data.length > 0) {
+              this.building = false;
+              this.buildMessage = '';
+              this.loadRepoBundle();
+            } else {
+              this.buildMessage = 'Still building… please keep this tab open.';
+            }
+          },
+          error: () => { this.building = false; }
+        });
+      },
+      error: () => {
+        this.building = false;
+        this.buildMessage = 'Failed to start build. Please try again.';
+      }
+    });
   }
 
   loadRepoBundle(): void {

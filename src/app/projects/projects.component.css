@@ -25,3 +25,4 @@
 .lang-chunk[data-i="2"] { background: #f59e0b; }  /* amber-500 */
 .lang-chunk[data-i="3"] { background: #ef4444; }  /* red-500 */
 .lang-chunk[data-i="4"] { background: #a855f7; }  /* purple-500 */
+.build-banner { border-left: 4px solid var(--primary); padding-left: .75rem; }

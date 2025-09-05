@@ -29,7 +29,7 @@ variables:
   - name: AzureServiceConnection
     value: 'portfolio'         # ARM service connection name
   - name: FunctionAppName
-    value: 'portfolio-api-o9'  # Your Function App name (Flex plan)
+    value: 'app-repro'  # Your Function App name (Flex plan)
   - group: portfolio-secrets    # Provides SWA_TOKEN
 
 stages:

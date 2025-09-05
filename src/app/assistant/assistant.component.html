@@ -2,7 +2,14 @@
   <h1 class="text-3xl font-extrabold tracking-tight mb-4">Assistant</h1>
 
   <div class="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 mb-6">
-    <label for="query" class="block text-sm font-medium text-[var(--muted)] mb-2">Ask about the portfolio</label>
+    <div class="flex items-center justify-between">
+      <label for="query" class="block text-sm font-medium text-[var(--muted)]">Ask about the portfolio</label>
+      <button (click)="triggerBuild()" [disabled]="building"
+              class="px-3 py-2 rounded border border-[var(--border)] bg-[var(--soft)] hover:brightness-95">
+        {{ building ? 'Starting…' : 'Prepare repositories' }}
+      </button>
+    </div>
+    <p class="text-xs text-[var(--muted)] mt-1">Preparing may take several minutes on first run.</p>
     <textarea id="query" [(ngModel)]="query" rows="3"
               class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
               placeholder="e.g., Show projects that use Flask and SQLAlchemy"></textarea>
@@ -19,6 +26,9 @@
     <div class="h-4 w-full rounded bg-[var(--soft)] mb-2"></div>
     <div class="h-4 w-5/6 rounded bg-[var(--soft)] mb-2"></div>
     <div class="h-4 w-3/4 rounded bg-[var(--soft)]"></div>
+    <p class="mt-4 text-sm text-[var(--muted)]" *ngIf="loadingMessage">
+      {{ loadingMessage }} Tip: first-time setup can take a few minutes.
+    </p>
   </div>
 
   <div *ngIf="repositoriesUsed.length" class="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 mb-6">

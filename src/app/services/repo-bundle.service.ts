@@ -28,6 +28,12 @@ export class RepoBundleService {
   private config = inject(ConfigService);
   private cache = inject(CacheService);
 
+  /** Trigger backend orchestration to (re)build bundles for a user. */
+  startBuild(username: string, force = true): Observable<any> {
+    const url = `${this.config.apiUrl}/orchestrator_start`;
+    return this.http.post(url, { username, force_refresh: force });
+  }
+
   /**
    * GET /bundles/{username}
    * Unwraps { status, data } shapes and guarantees data is an array.
@@ -46,9 +52,7 @@ export class RepoBundleService {
 
     return this.http.get<any>(url).pipe(
       map((res: any) => {
-        // Expected: { status: 'success', data: { username, data: [] } }
         let payload: RepoBundleResponse | null = null;
-
         if (res?.status === 'success' && res?.data) {
           payload = res.data as RepoBundleResponse;
         } else if (res?.username && Array.isArray(res?.data)) {
@@ -60,13 +64,16 @@ export class RepoBundleService {
         } else {
           payload = { username, data: [] };
         }
-
         if (!Array.isArray(payload.data)) payload.data = [];
         this.cache.set(cacheKey, payload, 1000 * 60 * 10);
         return payload;
       }),
       catchError(err => {
         console.error('getUserBundle error:', err);
+        if (err.status === 404) {
+          // On not found, kick off a build with force_refresh
+          this.startBuild(username, true).subscribe();
+        }
         return of({ username, data: [] } as RepoBundleResponse);
       })
     );

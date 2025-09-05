@@ -4,3 +4,4 @@
 .prose code { padding: .1rem .3rem; border-radius: .25rem; }
 .prose pre { padding: .75rem; border-radius: .5rem; overflow: auto; }
 .prose a { color: var(--primary); text-decoration: underline; }
+.build-note { font-size: .85rem; color: var(--muted); }

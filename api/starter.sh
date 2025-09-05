@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 # Default values
 USERNAME="yungryce"
 FORCE_REFRESH=false
-API_BASE="http://localhost:7071"
+API_BASE="app-repro-gqethzbph0bqcddc.westus2-01.azurewebsites.net"
 VERBOSE=false
 QUERY_TYPE="devops"
 
@@ -138,6 +138,7 @@ fi
 
 # Check if response is valid JSON
 if ! echo "$START_RESPONSE" | python3 -c "import sys, json; json.load(sys.stdin)" > /dev/null 2>&1; then
+  echo "$START_RESPONSE"
   echo -e "${RED}Error: Invalid JSON response${NC}"
   echo "$START_RESPONSE"
   exit 1
