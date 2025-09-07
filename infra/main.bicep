@@ -392,7 +392,7 @@ resource funcAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
     FUNCTIONS_EXTENSION_VERSION: '~4'
     FUNCTIONS_WORKER_RUNTIME: 'python'
     WEBSITE_RUN_FROM_PACKAGE: string(enableRunFromPackage)
-    APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
+    APPLICATIONINSIGHTS_AUTHENTICATION_STRING: 'Authorization=AAD'
     APPLICATIONINSIGHTS_CONNECTION_STRING: appInsightsConnectionString
     AzureWebJobsStorage__blobServiceUri: 'https://${saName}.blob.core.windows.net/'
     AzureWebJobsStorage__queueServiceUri: 'https://${saName}.queue.core.windows.net'
