@@ -129,6 +129,15 @@ stages:
               fi
             displayName: "Generate suffix"
 
+          - script: |
+              echo "Current Azure CLI version:"
+              az version --output table
+              echo "Updating Azure CLI..."
+              curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+              echo "Updated Azure CLI version:"
+              az version --output table
+            displayName: "Update Azure CLI"
+
           # Deploy infrastructure with static RG and existence check
           - task: AzureCLI@2
             displayName: "Deploy Bicep Template"
@@ -147,28 +156,10 @@ stages:
                   echo "Resource Group $(ResourceGroupName) already exists"
                 fi
 
-                # Function to retry a command up to N times
-                retry() {
-                  local retries=$1
-                  shift
-                  local count=0
-                  until "$@"; do
-                    exit=$?
-                    count=$((count + 1))
-                    if [ $count -lt $retries ]; then
-                      echo "Command failed. Attempt $count/$retries. Retrying in 5 seconds..."
-                      sleep 5
-                    else
-                      return $exit
-                    fi
-                  done
-                  return 0
-                }
-
-                # Run deployment - separate deployment from output capture
+                # Deploy with minimal output to avoid response consumption issues
                 echo "Deploying Bicep template..."
-                retry 3 az deployment group create \
-                  --name main \
+                az deployment group create \
+                  --name "main-$(date +%s)" \
                   --resource-group "$(ResourceGroupName)" \
                   --template-file infra/main.bicep \
                   --parameters \
@@ -179,33 +170,42 @@ stages:
                     enablePurgeProtection=$(EnablePurgeProtection) \
                     enableRunFromPackage=$(EnableRunFromPackage) \
                   --mode Incremental \
+                  --no-wait false \
                   --only-show-errors
 
-                # Separate command to get outputs after successful deployment
-                echo "✅ Bicep deployment succeeded. Retrieving outputs..."
-                DEPLOY_OUTPUTS=$(az deployment group show \
+                # Verify deployment succeeded by checking the latest deployment status
+                LATEST_DEPLOYMENT=$(az deployment group list \
                   --resource-group "$(ResourceGroupName)" \
-                  --name main \
-                  --query "properties.outputs" \
-                  --output json)
+                  --query "max_by([], &properties.timestamp).name" \
+                  --output tsv)
 
-                # Process outputs
-                echo "$DEPLOY_OUTPUTS" > /tmp/deploy_outputs.json
+                DEPLOYMENT_STATUS=$(az deployment group show \
+                  --resource-group "$(ResourceGroupName)" \
+                  --name "$LATEST_DEPLOYMENT" \
+                  --query "properties.provisioningState" \
+                  --output tsv)
 
-                # Display outputs
-                if [ -s /tmp/deploy_outputs.json ] && [ "$DEPLOY_OUTPUTS" != "{}" ]; then
-                  echo "📊 Deployment outputs:"
-                  echo "$DEPLOY_OUTPUTS" | jq -r 'to_entries[] | "  \(.key): \(.value.value)"' || true
+                if [ "$DEPLOYMENT_STATUS" = "Succeeded" ]; then
+                  echo "✅ Bicep deployment succeeded"
+                  
+                  # Set pipeline outputs with static RG name
+                  echo "##vso[task.setvariable variable=FunctionAppName;isOutput=true]fa-portfolio-$(GeneratedSuffix)"
+                  echo "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$(ResourceGroupName)"
+                  echo "##vso[task.setvariable variable=StorageAccountName;isOutput=true]stportfolio$(GeneratedSuffix)"
+                  echo "##vso[task.setvariable variable=KeyVaultName;isOutput=true]kv-portfolio-$(GeneratedSuffix)"
+                  echo "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]swa-portfolio-$(GeneratedSuffix)"
                 else
-                  echo "  No outputs available"
+                  echo "❌ Deployment failed with status: $DEPLOYMENT_STATUS"
+                  
+                  # Get deployment error details
+                  az deployment group show \
+                    --resource-group "$(ResourceGroupName)" \
+                    --name "$LATEST_DEPLOYMENT" \
+                    --query "properties.error" \
+                    --output table
+                  
+                  exit 1
                 fi
-
-                # Set pipeline outputs with static RG name
-                echo "##vso[task.setvariable variable=FunctionAppName;isOutput=true]fa-portfolio-$(GeneratedSuffix)"
-                echo "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$(ResourceGroupName)"
-                echo "##vso[task.setvariable variable=StorageAccountName;isOutput=true]stportfolio$(GeneratedSuffix)"
-                echo "##vso[task.setvariable variable=KeyVaultName;isOutput=true]kv-portfolio-$(GeneratedSuffix)"
-                echo "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]swa-portfolio-$(GeneratedSuffix)"
             env:
               AZURE_CORE_ONLY_SHOW_ERRORS: "true"
 
@@ -238,7 +238,4 @@ stages:
                 echo "🔑 Key Vault Secrets to Add:"
                 echo "  az keyvault secret set --vault-name kv-portfolio-$(GeneratedSuffix) --name GROQ-API-KEY --value '<your-groq-key>'"
                 echo "  az keyvault secret set --vault-name kv-portfolio-$(GeneratedSuffix) --name GITHUB-TOKEN --value '<your-github-token>'"
-          - script: |
-              az version
-              az upgrade --yes
-            displayName: "Update Azure CLI"
+
