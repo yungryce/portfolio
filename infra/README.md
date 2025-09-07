@@ -30,8 +30,7 @@ The infrastructure creates:
 
 1. Azure CLI installed and authenticated
 2. Azure DevOps service connection named `portfolio`
-3. Variable group `portfolio-secrets` with:
-   - `AppInsightsConnectionString` (get from existing App Insights or leave as placeholder)
+3. Variable group `portfolio-secrets`
 
 ### Option 1: Azure DevOps Pipeline (Recommended)
 
@@ -68,8 +67,7 @@ az keyvault secret set --vault-name kv-portfolio-<suffix> --name GITHUB-TOKEN --
      --resource-group "portfolio$SUFFIX" \
      --template-file infra/main.bicep \
      --parameters \
-       suffix="$SUFFIX" \
-       appInsightsConnectionString="<your-app-insights-connection-string>"
+       suffix="$SUFFIX"
    ```
 
 4. Add secrets to Key Vault (same as above)
@@ -82,7 +80,6 @@ az keyvault secret set --vault-name kv-portfolio-<suffix> --name GITHUB-TOKEN --
 | `suffix` | Unique suffix for resource names | - | Yes |
 | `devOpsRepoUrl` | Azure DevOps repo URL | `https://dev.azure.com/chxgbx/portfolio/_git/portfolio` | No |
 | `devOpsBranch` | Branch to deploy from | `staging` | No |
-| `appInsightsConnectionString` | Application Insights connection string | - | Yes |
 | `appInsightsAuthString` | Application Insights auth method | `Authorization=AAD` | No |
 | `enablePurgeProtection` | Enable Key Vault purge protection | `false` | No |
 | `enableRunFromPackage` | Enable WEBSITE_RUN_FROM_PACKAGE | `true` | No |

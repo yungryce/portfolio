@@ -42,7 +42,7 @@ variables:
     value: 'false'
   - name: EnableRunFromPackage
     value: 'true'
-  - group: portfolio-secrets  # Contains AppInsightsConnectionString
+  - group: portfolio-secrets
 
 pool:
   vmImage: ubuntu-latest

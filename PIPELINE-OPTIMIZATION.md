@@ -81,7 +81,7 @@ az pipelines run --name "Infrastructure" --branch staging
 - `AzureServiceConnection`: Azure service connection name
 - `Location`: Deployment region (default: westeurope)
 - `Suffix`: Resource name suffix (auto-generated if empty)
-- Variable Group: `portfolio-secrets` (AppInsightsConnectionString)
+- Variable Group: `portfolio-secrets` 
 
 ### Application Pipeline  
 - `FunctionAppName`: Function App name from infrastructure deployment
