@@ -162,72 +162,41 @@ module vnet 'br/public:avm/res/network/virtual-network:0.7.0' = {
 }
 
 // ---------- Private DNS Zones (unchanged structure) ----------
-module dnsZones 'br/public:avm/res/network/private-dns-zone:0.5.0' = [
-  // blob
+var privateZones = [
   {
-    name: 'pdns-${uniqueString(resourceGroup().id,'privatelink.blob.core.windows.net')}'
-    params: {
-      name: 'privatelink.blob.core.windows.net'
-      location: 'global'
-      tags: tags
-      virtualNetworkLinks: [
-        {
-          name: '${vnetName}-link'
-          virtualNetworkId: vnet.outputs.resourceId
-          registrationEnabled: false
-        }
-      ]
-    }
+    name: 'privatelink.blob.core.windows.net'
+    label: 'blob'
   }
-  // queue
   {
-    name: 'pdns-${uniqueString(resourceGroup().id,'privatelink.queue.core.windows.net')}'
-    params: {
-      name: 'privatelink.queue.core.windows.net'
-      location: 'global'
-      tags: tags
-      virtualNetworkLinks: [
-        {
-          name: '${vnetName}-link'
-          virtualNetworkId: vnet.outputs.resourceId
-          registrationEnabled: false
-        }
-      ]
-    }
+    name: 'privatelink.queue.core.windows.net'
+    label: 'queue'
   }
-  // table
   {
-    name: 'pdns-${uniqueString(resourceGroup().id,'privatelink.table.core.windows.net')}'
-    params: {
-      name: 'privatelink.table.core.windows.net'
-      location: 'global'
-      tags: tags
-      virtualNetworkLinks: [
-        {
-          name: '${vnetName}-link'
-          virtualNetworkId: vnet.outputs.resourceId
-          registrationEnabled: false
-        }
-      ]
-    }
+    name: 'privatelink.table.core.windows.net'
+    label: 'table'
   }
-  // vault
   {
-    name: 'pdns-${uniqueString(resourceGroup().id,'privatelink.vaultcore.azure.net')}'
-    params: {
-      name: 'privatelink.vaultcore.azure.net'
-      location: 'global'
-      tags: tags
-      virtualNetworkLinks: [
-        {
-          name: '${vnetName}-link'
-          virtualNetworkId: vnet.outputs.resourceId
-          registrationEnabled: false
-        }
-      ]
-    }
+    name: 'privatelink.vaultcore.azure.net'
+    label: 'vault'
   }
 ]
+
+// Then use a for loop to create the DNS zone modules
+module dnsZones 'br/public:avm/res/network/private-dns-zone:0.5.0' = [for (zone, i) in privateZones: {
+  name: 'pdns-${uniqueString(resourceGroup().id, zone.name)}'
+  params: {
+    name: zone.name
+    location: 'global'
+    tags: tags
+    virtualNetworkLinks: [
+      {
+        name: '${vnetName}-link'
+        virtualNetworkId: vnet.outputs.resourceId
+        registrationEnabled: false
+      }
+    ]
+  }
+}]
 
 // ---------- Key Vault (FIX: sku) ----------
 module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
