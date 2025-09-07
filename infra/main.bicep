@@ -136,7 +136,6 @@ resource keyVault 'Microsoft.KeyVault/vaults@2024-12-01-preview' = {
       family: 'A'
       name: 'standard'
     }
-    enablePurgeProtection: enablePurgeProtection
     enabledForTemplateDeployment: true
     publicNetworkAccess: 'Disabled'
     networkAcls: {
@@ -332,7 +331,6 @@ resource functionApp 'Microsoft.Web/sites@2024-11-01' = {
     httpsOnly: true
     serverFarmId: funcPlan.id
     siteConfig: {
-      linuxFxVersion: 'Python|3.11'
       appSettings: [
         // Minimal until dedicated appsettings resource below
         {
