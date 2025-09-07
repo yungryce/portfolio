@@ -9,30 +9,54 @@ param suffix string
 param devOpsRepoUrl string = 'https://dev.azure.com/chxgbx/portfolio/_git/portfolio'
 
 @description('Branch to build/deploy from')
-param devOpsBranch string = 'staging'
+param devOpsBranch string = 'feature/infra-test'
 
 @description('Application Insights Authentication String (Authorization=AAD)')
 param appInsightsAuthString string = 'Authorization=AAD'
 
-@description('Enable purge protection on Key Vault')
-param enablePurgeProtection bool = false
+@description('Function App runtime: python | dotnet-isolated | node | java | powerShell')
+@allowed(['python','dotnet-isolated','node','java','powerShell'])
+param functionAppRuntime string = 'python'
 
-@description('Toggle WEBSITE_RUN_FROM_PACKAGE setting')
+@description('Function App runtime version (Python: 3.11, etc.)')
+param functionAppRuntimeVersion string = '3.11'
+
+@description('Flex Consumption max instances')
+param maximumInstanceCount int = 100
+
+@description('Flex Consumption instance memory (MB)')
+@allowed([512,2048,4096])
+param instanceMemoryMB int = 2048
+
+@description('Enable zone redundancy where supported (plan).')
+param zoneRedundant bool = false
+
+@description('Toggle WEBSITE_RUN_FROM_PACKAGE setting on Function App.')
 param enableRunFromPackage bool = true
 
 // Name seeds
-var namePrefix        = 'portfolio'
-var vnetName          = 'vnet-${namePrefix}-${suffix}'
+var namePrefix            = 'portfolio'
+var resourceBase          = '${namePrefix}-${suffix}'
+var storageAccountName    = toLower('st${resourceBase}')
+var logAnalyticsName      = 'law-${resourceBase}'
+var appInsightsName       = 'appi-${resourceBase}'
+var functionPlanName      = 'fp-${resourceBase}'
+var functionAppName       = 'fa-${resourceBase}'
+var staticWebAppName      = 'swa-${resourceBase}' // kept for consistency; SWA standard uses global name
+var vnetName          = 'vnet-${resourceBase}'
 var funcSubnetName    = 'sn-func'
 var pepSubnetName     = 'sn-pep'
-var saName            = toLower('st${namePrefix}${suffix}')
-var kvName            = 'kv-${namePrefix}-${suffix}'
-var uamiName          = 'uami-${namePrefix}-${suffix}'
-var planName          = 'fp-${namePrefix}-${suffix}'
-var funcName          = 'fa-${namePrefix}-${suffix}'
-var swaName           = 'swa-${namePrefix}-${suffix}'
-var laName            = 'law-${namePrefix}-${suffix}'
-var appInsightsName   = 'appi-${namePrefix}-${suffix}'
+var kvName            = 'kv-${resourceBase}'
+var uamiName          = 'uami-${resourceBase}'
+var laName            = 'law-${resourceBase}'
+var deploymentContainer   = 'deployment-packages'
+
+
+// Tag set (extendable later)
+var tags = {
+  'azd-env-name': suffix
+  'owner': namePrefix
+}
 
 // Role Definition IDs
 var roleIds = {
@@ -43,336 +67,315 @@ var roleIds = {
   kvSecretsUser: '4633458b-17de-408a-b874-0445c86b69e6'
 }
 
-resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2025-01-31-preview' = {
-  name: uamiName
-  location: location
+// ---------- Identity (User Assigned) ----------
+module uami 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.0' = {
+  name: 'uami-${uniqueString(resourceGroup().id,uamiName)}'
+  params: {
+    name: uamiName
+    location: location
+    tags: tags
+  }
 }
 
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2025-02-01' = {
-  name: laName
-  location: location
-  properties: {
-    retentionInDays: 30
+// ---------- Log Analytics ----------
+module logAnalytics 'br/public:avm/res/operational-insights/workspace:0.11.1' = {
+  name: 'law-${uniqueString(resourceGroup().id,logAnalyticsName)}'
+  params: {
+    name: logAnalyticsName
+    location: location
+    tags: tags
+    dataRetention: 30
     features: {
       enableLogAccessUsingOnlyResourcePermissions: true
     }
   }
-  sku: {
-    name: 'PerGB2018'
+}
+
+// ---------- Application Insights ----------
+module applicationInsights 'br/public:avm/res/insights/component:0.6.0' = {
+  name: 'appi-${uniqueString(resourceGroup().id,appInsightsName)}'
+  params: {
+    name: appInsightsName
+    location: location
+    tags: tags
+    workspaceResourceId: logAnalytics.outputs.resourceId
+    disableLocalAuth: true
   }
 }
 
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
-  name: appInsightsName
-  location: location
-  kind: 'web'
-  properties: {
-    Application_Type: 'web'
-    Flow_Type: 'Bluefield'
-    WorkspaceResourceId: logAnalytics.id
-  }
-}
-
-resource storage 'Microsoft.Storage/storageAccounts@2025-01-01' = {
-  name: saName
-  location: location
-  sku: {
-    name: 'Standard_LRS'
-  }
-  kind: 'StorageV2'
-  properties: {
+// ---------- Storage Account ----------
+module storage 'br/public:avm/res/storage/storage-account:0.25.0' = {
+  name: 'st-${uniqueString(resourceGroup().id,storageAccountName)}'
+  params: {
+    name: storageAccountName
+    location: location
+    tags: tags
     allowBlobPublicAccess: false
-    minimumTlsVersion: 'TLS1_2'
+    allowSharedKeyAccess: false
+    publicNetworkAccess: 'Disabled'
+    dnsEndpointType: 'Standard'
     networkAcls: {
-      bypass: 'AzureServices'
       defaultAction: 'Deny'
+      bypass: 'AzureServices'
     }
-    supportsHttpsTrafficOnly: true
-  }
-}
-
-resource vnet 'Microsoft.Network/virtualNetworks@2024-07-01' = {
-  name: vnetName
-  location: location
-  properties: {
-    addressSpace: {
-      addressPrefixes: [
-        '10.20.0.0/16'
+    minimumTlsVersion: 'TLS1_2'
+    blobServices: {
+      containers: [
+        { name: deploymentContainer }
       ]
     }
+    queueServices: {}
+    tableServices: {}
+  }
+}
+
+// ---------- Virtual Network + Subnets ----------
+module vnet 'br/public:avm/res/network/virtual-network:0.7.0' = {
+  name: 'vnet-${uniqueString(resourceGroup().id,vnetName)}'
+  params: {
+    name: vnetName
+    location: location
+    tags: tags
+    addressSpacePrefixes: [
+      '10.20.0.0/16'
+    ]
     subnets: [
       {
         name: funcSubnetName
-        properties: {
-          addressPrefix: '10.20.1.0/24'
-          delegations: [
-            {
-              name: 'webapp'
-              properties: {
-                serviceName: 'Microsoft.Web/serverFarms'
-              }
-            }
-          ]
-        }
+        addressPrefixes: [
+          '10.20.1.0/24'
+        ]
+        delegations: [
+          {
+            name: 'webapp'
+            serviceName: 'Microsoft.Web/serverFarms'
+          }
+        ]
       }
       {
         name: pepSubnetName
-        properties: {
-          addressPrefix: '10.20.2.0/24'
-          privateEndpointNetworkPolicies: 'Disabled'
-        }
+        addressPrefixes: [
+          '10.20.2.0/24'
+        ]
+        privateEndpointNetworkPolicies: 'Disabled'
       }
     ]
   }
 }
 
-resource keyVault 'Microsoft.KeyVault/vaults@2024-12-01-preview' = {
-  name: kvName
-  location: location
-  properties: {
-    tenantId: subscription().tenantId
+// ---------- Private DNS Zones ----------
+var privateZones = [
+  {
+    zone: 'privatelink.blob.core.windows.net'
+    label: 'blob'
+  }
+  {
+    zone: 'privatelink.queue.core.windows.net'
+    label: 'queue'
+  }
+  {
+    zone: 'privatelink.table.core.windows.net'
+    label: 'table'
+  }
+  {
+    zone: 'privatelink.vaultcore.azure.net'
+    label: 'vault'
+  }
+]
+
+module dnsZones 'br/public:avm/res/network/private-dns-zone:0.5.0' = [for z in privateZones: {
+  name: 'pdns-${uniqueString(resourceGroup().id,z.zone)}'
+  params: {
+    name: z.zone
+    location: 'global'
+    tags: tags
+    // Link VNet
+    virtualNetworkLinks: [
+      {
+        name: '${vnetName}-link'
+        virtualNetworkId: vnet.outputs.resourceId
+        registrationEnabled: false
+      }
+    ]
+  }
+}]
+
+// Helper map for zone ids
+var zoneIds = {
+  blob: dnsZones[0].outputs.resourceId
+  queue: dnsZones[1].outputs.resourceId
+  table: dnsZones[2].outputs.resourceId
+  vault: dnsZones[3].outputs.resourceId
+}
+
+module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
+  name: 'kv-${uniqueString(resourceGroup().id,kvName)}'
+  params: {
+    name: kvName
+    location: location
+    tags: tags
     enableRbacAuthorization: true
-    sku: {
-      family: 'A'
-      name: 'standard'
-    }
-    enabledForTemplateDeployment: true
     publicNetworkAccess: 'Disabled'
     networkAcls: {
       bypass: 'AzureServices'
       defaultAction: 'Deny'
     }
+    skuName: 'standard'
   }
 }
 
-resource privateDnsBlob 'Microsoft.Network/privateDnsZones@2024-06-01' = {
-  name: 'privatelink.blob.core.windows.net'
-  location: 'global'
-}
-
-resource privateDnsQueue 'Microsoft.Network/privateDnsZones@2024-06-01' = {
-  name: 'privatelink.queue.core.windows.net'
-  location: 'global'
-}
-
-resource privateDnsTable 'Microsoft.Network/privateDnsZones@2024-06-01' = {
-  name: 'privatelink.table.core.windows.net'
-  location: 'global'
-}
-
-resource privateDnsVault 'Microsoft.Network/privateDnsZones@2024-06-01' = {
-  name: 'privatelink.vaultcore.azure.net'
-  location: 'global'
-}
-
-resource vnetLinkBlob 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  name: '${vnet.name}-link'
-  parent: privateDnsBlob
-  location: 'global'
-  properties: {
-    virtualNetwork: {
-      id: vnet.id
-    }
-    registrationEnabled: false
-  }
-}
-
-resource vnetLinkQueue 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  name: '${vnet.name}-link'
-  parent: privateDnsQueue
-  location: 'global'
-  properties: {
-    virtualNetwork: {
-      id: vnet.id
-    }
-    registrationEnabled: false
-  }
-}
-
-resource vnetLinkTable 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  name: '${vnet.name}-link' 
-  parent: privateDnsTable
-  location: 'global'
-  properties: {
-    virtualNetwork: {
-      id: vnet.id
-    }
-    registrationEnabled: false
-  }
-}
-
-resource vnetLinkVault 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  name: '${vnet.name}-link' 
-  parent: privateDnsVault
-  location: 'global'
-  properties: {
-    virtualNetwork: {
-      id: vnet.id
-    }
-    registrationEnabled: false
-  }
-}
-
-// Private Endpoints (blob, queue, table)
-resource pepBlob 'Microsoft.Network/privateEndpoints@2024-07-01' = {
-  name: 'pep-${saName}-blob'
-  location: location
-  properties: {
-    subnet: {
-      id: '${vnet.id}/subnets/${pepSubnetName}'
-    }
-    privateLinkServiceConnections: [
-      {
-        name: 'blob'
-        properties: {
-          privateLinkServiceId: storage.id
-          groupIds: [
-            'blob'
-          ]
-        }
-      }
+// ---------- Private Endpoints (Storage + KV) ----------
+@description('Private endpoint groups for storage services')
+var storagePeGroups = [
+  {
+    label: 'blob'
+    groupIds: [
+      'blob'
     ]
-    customDnsConfigs: []
+    zoneId: zoneIds.blob
   }
-  dependsOn: [
-    storage
-    vnet
-  ]
-}
-
-resource pepQueue 'Microsoft.Network/privateEndpoints@2024-07-01' = {
-  name: 'pep-${saName}-queue'
-  location: location
-  properties: {
-    subnet: {
-      id: '${vnet.id}/subnets/${pepSubnetName}'
-    }
-    privateLinkServiceConnections: [
-      {
-        name: 'queue'
-        properties: {
-          privateLinkServiceId: storage.id
-          groupIds: [
-            'queue'
-          ]
-        }
-      }
+  {
+    label: 'queue'
+    groupIds: [
+      'queue'
     ]
+    zoneId: zoneIds.queue
   }
-}
-
-resource pepTable 'Microsoft.Network/privateEndpoints@2024-07-01' = {
-  name: 'pep-${saName}-table'
-  location: location
-  properties: {
-    subnet: {
-      id: '${vnet.id}/subnets/${pepSubnetName}'
-    }
-    privateLinkServiceConnections: [
-      {
-        name: 'table'
-        properties: {
-          privateLinkServiceId: storage.id
-          groupIds: [
-            'table'
-          ]
-        }
-      }
+  {
+    label: 'table'
+    groupIds: [
+      'table'
     ]
+    zoneId: zoneIds.table
   }
-}
+]
 
-// Key Vault Private Endpoint
-resource pepKv 'Microsoft.Network/privateEndpoints@2024-07-01' = {
-  name: 'pep-${kvName}'
-  location: location
-  properties: {
-    subnet: {
-      id: '${vnet.id}/subnets/${pepSubnetName}'
-    }
-    privateLinkServiceConnections: [
-      {
-        name: 'vault'
-        properties: {
-          privateLinkServiceId: keyVault.id
-          groupIds: [
-            'vault'
-          ]
-        }
-      }
-    ]
-  }
-}
-
-// Function Flex Consumption Plan (preview)
-resource funcPlan 'Microsoft.Web/serverfarms@2024-11-01' = {
-  name: planName
-  location: location
-  sku: {
-    name: 'FC1'
-    tier: 'FlexConsumption'
-  }
-  properties: {
-    reserved: true
-  }
-}
-
-resource functionApp 'Microsoft.Web/sites@2024-11-01' = {
-  name: funcName
-  location: location
-  kind: 'functionapp,linux'
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${uami.id}': {}
-    }
-  }
-  properties: {
-    httpsOnly: true
-    serverFarmId: funcPlan.id
-    siteConfig: {
-      appSettings: [
-        // Minimal until dedicated appsettings resource below
+module peStorage 'br/public:avm/res/network/private-endpoint:0.7.0' = [for s in storagePeGroups: {
+  name: 'pe-${uniqueString(resourceGroup().id,storageAccountName)}-${s.label}'
+  params: {
+    name: 'pep-${storageAccountName}-${s.label}'
+    location: location
+    tags: tags
+    subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
+    privateLinkServiceId: storage.outputs.resourceId
+    groupIds: s.groupIds
+    privateDnsZoneGroup: {
+      name: 'default'
+      privateDnsZoneConfigs: [
         {
-          name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: 'python'
+          name: s.label
+          privateDnsZoneId: s.zoneId
         }
       ]
-      ftpsState: 'Disabled'
+    }
+  }
+}]
+
+module peKeyVault 'br/public:avm/res/network/private-endpoint:0.7.0' = {
+  name: 'pe-${uniqueString(resourceGroup().id,kvName)}-vault'
+  params: {
+    name: 'pep-${kvName}'
+    location: location
+    tags: tags
+    subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
+    privateLinkServiceId: keyVault.outputs.resourceId
+    groupIds: [
+      'vault'
+    ]
+    privateDnsZoneGroup: {
+      name: 'default'
+      privateDnsZoneConfigs: [
+        {
+          name: 'vault'
+          privateDnsZoneId: zoneIds.vault
+        }
+      ]
+    }
+  }
+}
+
+// ---------- App Service Plan (Flex Consumption) ----------
+module appServicePlan 'br/public:avm/res/web/serverfarm:0.1.1' = {
+  name: 'plan-${uniqueString(resourceGroup().id,functionPlanName)}'
+  params: {
+    name: functionPlanName
+    location: location
+    tags: tags
+    sku: {
+      name: 'FC1'
+      tier: 'FlexConsumption'
+    }
+    reserved: true
+    zoneRedundant: zoneRedundant
+  }
+}
+
+// ---------- Function App (Flex) ----------
+module functionApp 'br/public:avm/res/web/site:0.16.0' = {
+  name: 'func-${uniqueString(resourceGroup().id,functionAppName)}'
+  params: {
+    name: functionAppName
+    kind: 'functionapp,linux'
+    location: location
+    tags: union(tags, { 'azd-service-name': 'api' })
+    serverFarmResourceId: appServicePlan.outputs.resourceId
+    managedIdentities: {
+      systemAssigned: true
+      userAssignedResourceIds: [
+        uami.outputs.resourceId
+      ]
     }
     functionAppConfig: {
       deployment: {
         storage: {
           type: 'blobContainer'
-          value: 'https://${saName}.blob.core.windows.net/deployment-packages'
+          value: '${storage.outputs.primaryBlobEndpoint}${deploymentContainer}'
           authentication: {
-            type: 'UserAssignedIdentity'
-            userAssignedIdentityResourceId: uami.id
+            type: 'SystemAssignedIdentity'
           }
         }
       }
       scaleAndConcurrency: {
-        maximumInstanceCount: 100
-        instanceMemoryMB: 2048
+        maximumInstanceCount: maximumInstanceCount
+        instanceMemoryMB: instanceMemoryMB
       }
       runtime: {
-        name: 'python'
-        version: '3.11'
+        name: functionAppRuntime
+        version: functionAppRuntimeVersion
       }
     }
+    siteConfig: {
+      alwaysOn: false
+    }
+    configs: [
+      {
+        name: 'appsettings'
+        properties: {
+          FUNCTIONS_EXTENSION_VERSION: '~4'
+          WEBSITE_RUN_FROM_PACKAGE: string(enableRunFromPackage)
+          APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.outputs.connectionString
+          APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
+          AzureWebJobsStorage__credential: 'managedidentity'
+          AzureWebJobsStorage__blobServiceUri: 'https://${storage.outputs.name}.blob.${environment().suffixes.storage}'
+          AzureWebJobsStorage__queueServiceUri: 'https://${storage.outputs.name}.queue.${environment().suffixes.storage}'
+          AzureWebJobsStorage__tableServiceUri: 'https://${storage.outputs.name}.table.${environment().suffixes.storage}'
+        }
+      }
+    ]
   }
   dependsOn: [
-    funcPlan
+    storage
+    applicationInsights
     uami
   ]
 }
 
-// Outbound VNet integration (Web Apps connection) - preview resource
+// ---------- Function VNet Integration (App Service VNet connection) ----------
 resource vnetConnection 'Microsoft.Web/sites/virtualNetworkConnections@2023-12-01' = {
-  name: '${functionApp.name}/${vnet.name}'
+  name: '${functionApp.outputs.name}/${vnet.outputs.name}'
   properties: {
-    vnetResourceId: vnet.id
-    subnetResourceId: '${vnet.id}/subnets/${funcSubnetName}'
+    vnetResourceId: vnet.outputs.resourceId
+    subnetResourceId: '${vnet.outputs.resourceId}/subnets/${funcSubnetName}'
   }
   dependsOn: [
     functionApp
@@ -403,9 +406,9 @@ resource funcAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
   ]
 }
 
-// Static Web App (Standard)
+// ---------------- Static Web App (no AVM module yet) ----------------
 resource staticWebApp 'Microsoft.Web/staticSites@2024-11-01' = {
-  name: swaName
+  name: staticWebAppName
   location: location
   sku: {
     name: 'Standard'
@@ -417,128 +420,74 @@ resource staticWebApp 'Microsoft.Web/staticSites@2024-11-01' = {
     provider: 'AzureDevOps'
     buildProperties: {
       skipGithubActionWorkflowGeneration: true
-      apiLocation: '' // external Function App
-      appLocation: '/'
+      apiLocation: ''          // external flex function app
+      appLocation: '/'         // root
       outputLocation: 'dist/browser'
     }
   }
 }
 
-// Role Assignments
+// ---------- Role Assignments (native) ----------
 resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('blobDataContributor', uami.id, storage.id)
+  name: guid('blobDataContributor', uami.outputs.resourceId, storage.outputs.resourceId)
   scope: storage
   properties: {
-    principalId: uami.properties.principalId
+    principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.blobDataContributor)
     principalType: 'ServicePrincipal'
   }
 }
 
 resource raQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('queueDataContributor', uami.id, storage.id)
+  name: guid('queueDataContributor', uami.outputs.resourceId, storage.outputs.resourceId)
   scope: storage
   properties: {
-    principalId: uami.properties.principalId
+    principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.queueDataContributor)
     principalType: 'ServicePrincipal'
   }
 }
 
 resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('tableDataContributor', uami.id, storage.id)
+  name: guid('tableDataContributor', uami.outputs.resourceId, storage.outputs.resourceId)
   scope: storage
   properties: {
-    principalId: uami.properties.principalId
+    principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.tableDataContributor)
     principalType: 'ServicePrincipal'
   }
 }
 
 resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('metricsPublisher', uami.id, logAnalytics.id)
+  name: guid('metricsPublisher', uami.outputs.resourceId, logAnalytics.outputs.resourceId)
   scope: logAnalytics
   properties: {
-    principalId: uami.properties.principalId
+    principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.metricsPublisher)
     principalType: 'ServicePrincipal'
   }
 }
 
 resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('kvSecretsUser', uami.id, keyVault.id)
+  name: guid('kvSecretsUser', uami.outputs.resourceId, keyVault.outputs.resourceId)
   scope: keyVault
   properties: {
-    principalId: uami.properties.principalId
+    principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.kvSecretsUser)
     principalType: 'ServicePrincipal'
   }
 }
 
-// DNS Zone Groups for Private Endpoints (required for proper DNS resolution)
-resource pepBlobDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-07-01' = {
-  name: '${pepBlob.name}/default'
-  properties: {
-    privateDnsZoneConfigs: [
-      {
-        name: 'blob'
-        properties: {
-          privateDnsZoneId: privateDnsBlob.id
-        }
-      }
-    ]
-  }
-}
-
-resource pepQueueDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-07-01' = {
-  name: '${pepQueue.name}/default'
-  properties: {
-    privateDnsZoneConfigs: [
-      {
-        name: 'queue'
-        properties: {
-          privateDnsZoneId: privateDnsQueue.id
-        }
-      }
-    ]
-  }
-}
-
-resource pepTableDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-07-01' = {
-  name: '${pepTable.name}/default'
-  properties: {
-    privateDnsZoneConfigs: [
-      {
-        name: 'table'
-        properties: {
-          privateDnsZoneId: privateDnsTable.id
-        }
-      }
-    ]
-  }
-}
-
-resource pepKvDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-07-01' = {
-  name: '${pepKv.name}/default'
-  properties: {
-    privateDnsZoneConfigs: [
-      {
-        name: 'vault'
-        properties: {
-          privateDnsZoneId: privateDnsVault.id
-        }
-      }
-    ]
-  }
-}
-
-output resourceGroupName string = resourceGroup().name
-output functionAppName string = functionApp.name
+// ---------- Outputs ----------
+output functionAppName string = functionApp.outputs.name
 output staticWebAppName string = staticWebApp.name
-output keyVaultName string = keyVault.name
-output storageAccountName string = storage.name
-output userAssignedIdentityName string = uami.name
-output userAssignedIdentityClientId string = uami.properties.clientId
+output storageAccountName string = storage.outputs.name
+output applicationInsightsConnectionString string = applicationInsights.outputs.connectionString
+output logAnalyticsWorkspaceId string = logAnalytics.outputs.resourceId
+output functionAppPrincipalId string = functionApp.outputs.systemAssignedMIPrincipalId
+output resourceGroupName string = resourceGroup().name
+output keyVaultName string = keyVault.outputs.name
+output userAssignedIdentityName string = uami.outputs.name
+output userAssignedIdentityClientId string = uami.outputs.clientId
 output groqSecretRef string = '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GROQ-API-KEY/)'
 output githubTokenRef string = '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GITHUB-TOKEN/)'
-output applicationInsightsConnectionString string = appInsights.properties.ConnectionString
