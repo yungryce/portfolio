@@ -34,28 +34,26 @@ param zoneRedundant bool = false
 @description('Toggle WEBSITE_RUN_FROM_PACKAGE setting on Function App.')
 param enableRunFromPackage bool = true
 
-// Name seeds
+// Naming - Centralized and consistent
 var namePrefix            = 'portfolio'
 var resourceBase          = '${namePrefix}-${suffix}'
-var storageAccountName    = toLower('st${resourceBase}')
+var storageAccountName    = toLower('st${replace(resourceBase, '-', '')}') // use resourceBase but remove '-' for valid
 var logAnalyticsName      = 'law-${resourceBase}'
 var appInsightsName       = 'appi-${resourceBase}'
 var functionPlanName      = 'fp-${resourceBase}'
 var functionAppName       = 'fa-${resourceBase}'
-var staticWebAppName      = 'swa-${resourceBase}' // kept for consistency; SWA standard uses global name
-var vnetName          = 'vnet-${resourceBase}'
-var funcSubnetName    = 'sn-func'
-var pepSubnetName     = 'sn-pep'
-var kvName            = 'kv-${resourceBase}'
-var uamiName          = 'uami-${resourceBase}'
-var laName            = 'law-${resourceBase}'
+var staticWebAppName      = 'swa-${resourceBase}'
 var deploymentContainer   = 'deployment-packages'
+var vnetName              = 'vnet-${resourceBase}'
+var funcSubnetName        = 'sn-func'
+var pepSubnetName         = 'sn-pep'
+var kvName                = 'kv-${resourceBase}'
+var uamiName              = 'uami-${resourceBase}'
 
-
-// Tag set (extendable later)
+// Tags
 var tags = {
   'azd-env-name': suffix
-  'owner': namePrefix
+  owner: namePrefix
 }
 
 // Role Definition IDs
@@ -189,7 +187,6 @@ module dnsZones 'br/public:avm/res/network/private-dns-zone:0.5.0' = [for z in p
     name: z.zone
     location: 'global'
     tags: tags
-    // Link VNet
     virtualNetworkLinks: [
       {
         name: '${vnetName}-link'
@@ -208,6 +205,7 @@ var zoneIds = {
   vault: dnsZones[3].outputs.resourceId
 }
 
+// ---------- Key Vault ----------
 module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
   name: 'kv-${uniqueString(resourceGroup().id,kvName)}'
   params: {
@@ -225,27 +223,20 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
 }
 
 // ---------- Private Endpoints (Storage + KV) ----------
-@description('Private endpoint groups for storage services')
 var storagePeGroups = [
   {
     label: 'blob'
-    groupIds: [
-      'blob'
-    ]
+    groupIds: ['blob']
     zoneId: zoneIds.blob
   }
   {
     label: 'queue'
-    groupIds: [
-      'queue'
-    ]
+    groupIds: ['queue']
     zoneId: zoneIds.queue
   }
   {
     label: 'table'
-    groupIds: [
-      'table'
-    ]
+    groupIds: ['table']
     zoneId: zoneIds.table
   }
 ]
@@ -279,9 +270,7 @@ module peKeyVault 'br/public:avm/res/network/private-endpoint:0.7.0' = {
     tags: tags
     subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
     privateLinkServiceId: keyVault.outputs.resourceId
-    groupIds: [
-      'vault'
-    ]
+    groupIds: ['vault']
     privateDnsZoneGroup: {
       name: 'default'
       privateDnsZoneConfigs: [
@@ -352,13 +341,17 @@ module functionApp 'br/public:avm/res/web/site:0.16.0' = {
         name: 'appsettings'
         properties: {
           FUNCTIONS_EXTENSION_VERSION: '~4'
+          FUNCTIONS_WORKER_RUNTIME: functionAppRuntime
           WEBSITE_RUN_FROM_PACKAGE: string(enableRunFromPackage)
           APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.outputs.connectionString
           APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
           AzureWebJobsStorage__credential: 'managedidentity'
-          AzureWebJobsStorage__blobServiceUri: 'https://${storage.outputs.name}.blob.${environment().suffixes.storage}'
-          AzureWebJobsStorage__queueServiceUri: 'https://${storage.outputs.name}.queue.${environment().suffixes.storage}'
-          AzureWebJobsStorage__tableServiceUri: 'https://${storage.outputs.name}.table.${environment().suffixes.storage}'
+          AzureWebJobsStorage__blobServiceUri: 'https://${storageAccountName}.blob.${environment().suffixes.storage}'
+          AzureWebJobsStorage__queueServiceUri: 'https://${storageAccountName}.queue.${environment().suffixes.storage}'
+          AzureWebJobsStorage__tableServiceUri: 'https://${storageAccountName}.table.${environment().suffixes.storage}'
+          AzureWebJobsStorage__ClientId: uami.outputs.clientId
+          GROQ_API_KEY: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GROQ-API-KEY/)'
+          GITHUB_TOKEN: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GITHUB-TOKEN/)'
         }
       }
     ]
@@ -367,10 +360,11 @@ module functionApp 'br/public:avm/res/web/site:0.16.0' = {
     storage
     applicationInsights
     uami
+    keyVault
   ]
 }
 
-// ---------- Function VNet Integration (App Service VNet connection) ----------
+// ---------- Function VNet Integration ----------
 resource vnetConnection 'Microsoft.Web/sites/virtualNetworkConnections@2023-12-01' = {
   name: '${functionApp.outputs.name}/${vnet.outputs.name}'
   properties: {
@@ -383,30 +377,7 @@ resource vnetConnection 'Microsoft.Web/sites/virtualNetworkConnections@2023-12-0
   ]
 }
 
-// Function App application settings (separate resource as requested)
-resource funcAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
-  name: '${functionApp.name}/appsettings'
-  properties: {
-    FUNCTIONS_EXTENSION_VERSION: '~4'
-    FUNCTIONS_WORKER_RUNTIME: 'python'
-    WEBSITE_RUN_FROM_PACKAGE: string(enableRunFromPackage)
-    APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
-    APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
-    AzureWebJobsStorage__blobServiceUri: 'https://${saName}.blob.core.windows.net/'
-    AzureWebJobsStorage__queueServiceUri: 'https://${saName}.queue.core.windows.net'
-    AzureWebJobsStorage__tableServiceUri: 'https://${saName}.table.core.windows.net'
-    AzureWebJobsStorage__credential: 'managedidentity'
-    AzureWebJobsStorage__ClientId: uami.properties.clientId
-    GROQ_API_KEY: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GROQ-API-KEY/)'
-    GITHUB_TOKEN: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GITHUB-TOKEN/)'
-  }
-  dependsOn: [
-    functionApp
-    keyVault
-  ]
-}
-
-// ---------------- Static Web App (no AVM module yet) ----------------
+// ---------- Static Web App ----------
 resource staticWebApp 'Microsoft.Web/staticSites@2024-11-01' = {
   name: staticWebAppName
   location: location
@@ -420,17 +391,16 @@ resource staticWebApp 'Microsoft.Web/staticSites@2024-11-01' = {
     provider: 'AzureDevOps'
     buildProperties: {
       skipGithubActionWorkflowGeneration: true
-      apiLocation: ''          // external flex function app
-      appLocation: '/'         // root
+      apiLocation: ''
+      appLocation: '/'
       outputLocation: 'dist/browser'
     }
   }
 }
 
-// ---------- Role Assignments (native) ----------
+// ---------- Role Assignments ----------
 resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('blobDataContributor', uami.outputs.resourceId, storage.outputs.resourceId)
-  scope: storage
+  name: guid('blobDataContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.blobDataContributor)
@@ -439,8 +409,7 @@ resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-
 }
 
 resource raQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('queueDataContributor', uami.outputs.resourceId, storage.outputs.resourceId)
-  scope: storage
+  name: guid('queueDataContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.queueDataContributor)
@@ -449,8 +418,7 @@ resource raQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04
 }
 
 resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('tableDataContributor', uami.outputs.resourceId, storage.outputs.resourceId)
-  scope: storage
+  name: guid('tableDataContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.tableDataContributor)
@@ -459,8 +427,7 @@ resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04
 }
 
 resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('metricsPublisher', uami.outputs.resourceId, logAnalytics.outputs.resourceId)
-  scope: logAnalytics
+  name: guid('metricsPublisher', uamiName, logAnalyticsName)
   properties: {
     principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.metricsPublisher)
@@ -469,8 +436,7 @@ resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01'
 }
 
 resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('kvSecretsUser', uami.outputs.resourceId, keyVault.outputs.resourceId)
-  scope: keyVault
+  name: guid('kvSecretsUser', uamiName, kvName)
   properties: {
     principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.kvSecretsUser)
