@@ -39,6 +39,7 @@ trigger:
   branches:
     include:
       - staging
+      - feature/infra-test   # TEMP: allow running pipeline automatically for test branch (optional)
   paths:
     include:
       - api/**
@@ -149,7 +150,7 @@ stages:
   # Backend: Deploy (staging only)
   # -----------------------------
   - stage: Backend_Deploy
-    displayName: "Backend (Functions) — Deploy to Staging"
+    displayName: "Backend (Functions)"
     dependsOn: Backend_Build_Package
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/staging'), eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true'))
     jobs:
