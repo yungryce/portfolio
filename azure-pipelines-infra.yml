@@ -8,7 +8,7 @@
 trigger:
   branches:
     include:
-      - staging
+      - feature/infra-test
       - main
   paths:
     include:
@@ -25,6 +25,7 @@ pr:
     include:
       - infra/**
       - azure-pipelines-infra.yml
+
 
 variables:
   - name: AzureServiceConnection
@@ -102,7 +103,7 @@ stages:
   - stage: Deploy_Infrastructure
     displayName: "Deploy Infrastructure"
     dependsOn: Validate_Infrastructure
-    condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/staging'), eq(variables['Build.SourceBranch'], 'refs/heads/main')))
+    condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/feature/infra-test'), eq(variables['Build.SourceBranch'], 'refs/heads/main')))
     jobs:
       - job: deploy_bicep
         displayName: "Deploy Bicep Template"
