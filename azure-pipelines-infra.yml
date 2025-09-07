@@ -136,29 +136,46 @@ stages:
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
-                set -e
+                set -euo pipefail
 
                 RG_NAME="portfolio$(GeneratedSuffix)"
                 echo "Deploying to Resource Group: $RG_NAME"
 
                 az group create --name "$RG_NAME" --location "$(Location)" --only-show-errors
 
-                az deployment group create \
-                  --name main \
-                  --resource-group "$RG_NAME" \
-                  --template-file infra/main.bicep \
-                  --parameters \
-                    location='$(Location)' \
-                    suffix='$(GeneratedSuffix)' \
-                    devOpsRepoUrl='$(DevOpsRepoUrl)' \
-                    devOpsBranch='$(DevOpsBranch)' \
-                    enablePurgeProtection=$(EnablePurgeProtection) \
-                    enableRunFromPackage=$(EnableRunFromPackage) \
-                  --only-show-errors \
-                  --output none
-                echo "✅ Bicep deployment done"
-                
-                # Output variables for consumption by other pipelines
+                echo "Running deployment (full output for diagnostics)..."
+                DEPLOY_OUTPUT=$(mktemp)
+                if ! az deployment group create \
+                    --name main \
+                    --resource-group "$RG_NAME" \
+                    --template-file infra/main.bicep \
+                    --parameters \
+                      location='$(Location)' \
+                      suffix='$(GeneratedSuffix)' \
+                      devOpsRepoUrl='$(DevOpsRepoUrl)' \
+                      devOpsBranch='$(DevOpsBranch)' \
+                      enablePurgeProtection=$(EnablePurgeProtection) \
+                      enableRunFromPackage=$(EnableRunFromPackage) \
+                    --output json \
+                    > "$DEPLOY_OUTPUT" 2>&1; then
+                  echo "❌ Deployment failed. Full CLI output:"
+                  sed -n '1,200p' "$DEPLOY_OUTPUT" || true
+                  echo "----"
+                  tail -n +1 "$DEPLOY_OUTPUT"
+                  exit 1
+                fi
+
+                echo "✅ Bicep deployment succeeded. Parsing outputs..."
+                cat "$DEPLOY_OUTPUT" | jq -r '.properties.outputs // {}' > /tmp/deploy_outputs.json || true
+
+                # attempt to read outputs safely
+                if [ -s /tmp/deploy_outputs.json ]; then
+                  jq -r 'to_entries[] | "  \(.key): \(.value.value)"' /tmp/deploy_outputs.json || true
+                else
+                  echo "  No outputs available"
+                fi
+
+                # Set minimal pipeline outputs (only if you know exact names)
                 echo "##vso[task.setvariable variable=FunctionAppName;isOutput=true]fa-portfolio-$(GeneratedSuffix)"
                 echo "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$RG_NAME"
                 echo "##vso[task.setvariable variable=StorageAccountName;isOutput=true]stportfolio$(GeneratedSuffix)"
