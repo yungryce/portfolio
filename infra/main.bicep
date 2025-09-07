@@ -14,9 +14,6 @@ param devOpsBranch string = 'staging'
 @description('Application Insights Authentication String (Authorization=AAD)')
 param appInsightsAuthString string = 'Authorization=AAD'
 
-@description('Application Insights Connection String')
-param appInsightsConnectionString string
-
 @description('Enable purge protection on Key Vault')
 param enablePurgeProtection bool = false
 
