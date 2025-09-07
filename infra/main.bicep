@@ -170,7 +170,7 @@ resource privateDnsVault 'Microsoft.Network/privateDnsZones@2024-06-01' = {
 }
 
 resource vnetLinkBlob 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  name: 'privatelink.blob.core.windows.net/${vnet.name}-link'
+  name: '${vnet.name}-link'
   parent: privateDnsBlob
   location: 'global'
   properties: {
@@ -182,7 +182,7 @@ resource vnetLinkBlob 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@202
 }
 
 resource vnetLinkQueue 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  name: 'privatelink.queue.core.windows.net/${vnet.name}-link'
+  name: '${vnet.name}-link'
   parent: privateDnsQueue
   location: 'global'
   properties: {
@@ -194,7 +194,7 @@ resource vnetLinkQueue 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@20
 }
 
 resource vnetLinkTable 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  name: 'privatelink.table.core.windows.net/${vnet.name}-link'
+  name: '${vnet.name}-link' 
   parent: privateDnsTable
   location: 'global'
   properties: {
@@ -206,7 +206,7 @@ resource vnetLinkTable 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@20
 }
 
 resource vnetLinkVault 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  name: 'privatelink.vaultcore.azure.net/${vnet.name}-link'
+  name: '${vnet.name}-link' 
   parent: privateDnsVault
   location: 'global'
   properties: {

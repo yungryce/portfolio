@@ -103,7 +103,13 @@ stages:
   - stage: Deploy_Infrastructure
     displayName: "Deploy Infrastructure"
     dependsOn: Validate_Infrastructure
-    condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/feature/infra-test'), eq(variables['Build.SourceBranch'], 'refs/heads/main')))
+    condition: and(
+        succeeded(),
+        or(
+          eq(variables['Build.SourceBranch'],'refs/heads/feature/infra-test'),
+          eq(variables['Build.SourceBranch'],'refs/heads/main')
+        )
+      )
     jobs:
       - job: deploy_bicep
         displayName: "Deploy Bicep Template"
@@ -132,51 +138,32 @@ stages:
               scriptLocation: inlineScript
               inlineScript: |
                 set -e
-                
-                # Resource group name with suffix
+                APPINSIGHTS_CS="$(AppInsightsConnectionString)"
+                if [ -z "$APPINSIGHTS_CS" ]; then
+                  echo "ERROR: AppInsightsConnectionString pipeline/variable-group value is missing."
+                  exit 1
+                fi
+
                 RG_NAME="portfolio$(GeneratedSuffix)"
                 echo "Deploying to Resource Group: $RG_NAME"
-                
-                # Create resource group
-                echo "Creating resource group..."
-                az group create \
-                  --name "$RG_NAME" \
-                  --location "$(Location)" \
-                  --only-show-errors
-                
-                # Deploy Bicep template
-                echo "Deploying Bicep template..."
+
+                az group create --name "$RG_NAME" --location "$(Location)" --only-show-errors
+
                 az deployment group create \
+                  --name main \
                   --resource-group "$RG_NAME" \
                   --template-file infra/main.bicep \
                   --parameters \
-                    location="$(Location)" \
-                    suffix="$(GeneratedSuffix)" \
-                    devOpsRepoUrl="$(DevOpsRepoUrl)" \
-                    devOpsBranch="$(DevOpsBranch)" \
-                    appInsightsConnectionString="$(AppInsightsConnectionString)" \
+                    location='$(Location)' \
+                    suffix='$(GeneratedSuffix)' \
+                    devOpsRepoUrl='$(DevOpsRepoUrl)' \
+                    devOpsBranch='$(DevOpsBranch)' \
+                    appInsightsConnectionString="$APPINSIGHTS_CS" \
                     enablePurgeProtection=$(EnablePurgeProtection) \
                     enableRunFromPackage=$(EnableRunFromPackage) \
                   --only-show-errors \
-                  --output table
-                
-                echo "✅ Infrastructure deployment completed successfully"
-                echo ""
-                echo "📋 Next Steps:"
-                echo "=============="
-                echo "1. Add secrets to Key Vault: kv-portfolio-$(GeneratedSuffix)"
-                echo "   az keyvault secret set --vault-name kv-portfolio-$(GeneratedSuffix) --name GROQ-API-KEY --value '<your-groq-key>'"
-                echo "   az keyvault secret set --vault-name kv-portfolio-$(GeneratedSuffix) --name GITHUB-TOKEN --value '<your-github-token>'"
-                echo ""
-                echo "2. Update azure-pipelines.yml variables:"
-                echo "   - FunctionAppName: fa-portfolio-$(GeneratedSuffix)"
-                echo "   - ResourceGroupName: $RG_NAME"
-                echo ""
-                echo "3. Set pipeline variables for application deployments:"
-                echo "   - AZURE_FUNCTION_APP_NAME=fa-portfolio-$(GeneratedSuffix)"
-                echo "   - AZURE_RESOURCE_GROUP=$RG_NAME"
-                echo "   - AZURE_STORAGE_ACCOUNT=stportfolio$(GeneratedSuffix)"
-                echo "   - AZURE_KEY_VAULT=kv-portfolio-$(GeneratedSuffix)"
+                  --output none
+                echo "✅ Bicep deployment done"
                 
                 # Output variables for consumption by other pipelines
                 echo "##vso[task.setvariable variable=FunctionAppName;isOutput=true]fa-portfolio-$(GeneratedSuffix)"
