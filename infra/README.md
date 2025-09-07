@@ -81,7 +81,6 @@ az keyvault secret set --vault-name kv-portfolio-<suffix> --name GITHUB-TOKEN --
 | `devOpsRepoUrl` | Azure DevOps repo URL | `https://dev.azure.com/chxgbx/portfolio/_git/portfolio` | No |
 | `devOpsBranch` | Branch to deploy from | `staging` | No |
 | `appInsightsAuthString` | Application Insights auth method | `Authorization=AAD` | No |
-| `enablePurgeProtection` | Enable Key Vault purge protection | `false` | No |
 | `enableRunFromPackage` | Enable WEBSITE_RUN_FROM_PACKAGE | `true` | No |
 
 ## Outputs

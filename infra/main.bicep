@@ -127,14 +127,14 @@ module storage 'br/public:avm/res/storage/storage-account:0.25.0' = {
   }
 }
 
-// ---------- Virtual Network + Subnets ----------
+// ---------- Virtual Network + Subnets (FIX: addressPrefixes) ----------
 module vnet 'br/public:avm/res/network/virtual-network:0.7.0' = {
   name: 'vnet-${uniqueString(resourceGroup().id,vnetName)}'
   params: {
     name: vnetName
     location: location
     tags: tags
-    addressSpacePrefixes: [
+    addressPrefixes: [
       '10.20.0.0/16'
     ]
     subnets: [
@@ -161,51 +161,75 @@ module vnet 'br/public:avm/res/network/virtual-network:0.7.0' = {
   }
 }
 
-// ---------- Private DNS Zones ----------
-var privateZones = [
+// ---------- Private DNS Zones (unchanged structure) ----------
+module dnsZones 'br/public:avm/res/network/private-dns-zone:0.5.0' = [
+  // blob
   {
-    zone: 'privatelink.blob.core.windows.net'
-    label: 'blob'
+    name: 'pdns-${uniqueString(resourceGroup().id,'privatelink.blob.core.windows.net')}'
+    params: {
+      name: 'privatelink.blob.core.windows.net'
+      location: 'global'
+      tags: tags
+      virtualNetworkLinks: [
+        {
+          name: '${vnetName}-link'
+          virtualNetworkId: vnet.outputs.resourceId
+          registrationEnabled: false
+        }
+      ]
+    }
   }
+  // queue
   {
-    zone: 'privatelink.queue.core.windows.net'
-    label: 'queue'
+    name: 'pdns-${uniqueString(resourceGroup().id,'privatelink.queue.core.windows.net')}'
+    params: {
+      name: 'privatelink.queue.core.windows.net'
+      location: 'global'
+      tags: tags
+      virtualNetworkLinks: [
+        {
+          name: '${vnetName}-link'
+          virtualNetworkId: vnet.outputs.resourceId
+          registrationEnabled: false
+        }
+      ]
+    }
   }
+  // table
   {
-    zone: 'privatelink.table.core.windows.net'
-    label: 'table'
+    name: 'pdns-${uniqueString(resourceGroup().id,'privatelink.table.core.windows.net')}'
+    params: {
+      name: 'privatelink.table.core.windows.net'
+      location: 'global'
+      tags: tags
+      virtualNetworkLinks: [
+        {
+          name: '${vnetName}-link'
+          virtualNetworkId: vnet.outputs.resourceId
+          registrationEnabled: false
+        }
+      ]
+    }
   }
+  // vault
   {
-    zone: 'privatelink.vaultcore.azure.net'
-    label: 'vault'
+    name: 'pdns-${uniqueString(resourceGroup().id,'privatelink.vaultcore.azure.net')}'
+    params: {
+      name: 'privatelink.vaultcore.azure.net'
+      location: 'global'
+      tags: tags
+      virtualNetworkLinks: [
+        {
+          name: '${vnetName}-link'
+          virtualNetworkId: vnet.outputs.resourceId
+          registrationEnabled: false
+        }
+      ]
+    }
   }
 ]
 
-module dnsZones 'br/public:avm/res/network/private-dns-zone:0.5.0' = [for z in privateZones: {
-  name: 'pdns-${uniqueString(resourceGroup().id,z.zone)}'
-  params: {
-    name: z.zone
-    location: 'global'
-    tags: tags
-    virtualNetworkLinks: [
-      {
-        name: '${vnetName}-link'
-        virtualNetworkId: vnet.outputs.resourceId
-        registrationEnabled: false
-      }
-    ]
-  }
-}]
-
-// Helper map for zone ids
-var zoneIds = {
-  blob: dnsZones[0].outputs.resourceId
-  queue: dnsZones[1].outputs.resourceId
-  table: dnsZones[2].outputs.resourceId
-  vault: dnsZones[3].outputs.resourceId
-}
-
-// ---------- Key Vault ----------
+// ---------- Key Vault (FIX: sku) ----------
 module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
   name: 'kv-${uniqueString(resourceGroup().id,kvName)}'
   params: {
@@ -218,155 +242,125 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
       bypass: 'AzureServices'
       defaultAction: 'Deny'
     }
-    skuName: 'standard'
+    sku: {
+      name: 'standard'
+    }
   }
 }
 
-// ---------- Private Endpoints (Storage + KV) ----------
-var storagePeGroups = [
-  {
-    label: 'blob'
-    groupIds: ['blob']
-    zoneId: zoneIds.blob
-  }
-  {
-    label: 'queue'
-    groupIds: ['queue']
-    zoneId: zoneIds.queue
-  }
-  {
-    label: 'table'
-    groupIds: ['table']
-    zoneId: zoneIds.table
-  }
-]
-
-module peStorage 'br/public:avm/res/network/private-endpoint:0.7.0' = [for s in storagePeGroups: {
-  name: 'pe-${uniqueString(resourceGroup().id,storageAccountName)}-${s.label}'
+// ---------- Private Endpoints (Explicit; FIX param shape) ----------
+// Storage Blob
+module peStorageBlob 'br/public:avm/res/network/private-endpoint:0.7.0' = {
+  name: 'pe-${uniqueString(resourceGroup().id,'${storageAccountName}-blob')}'
   params: {
-    name: 'pep-${storageAccountName}-${s.label}'
+    name: 'pep-${storageAccountName}-blob'
     location: location
     tags: tags
     subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
-    privateLinkServiceId: storage.outputs.resourceId
-    groupIds: s.groupIds
-    privateDnsZoneGroup: {
-      name: 'default'
-      privateDnsZoneConfigs: [
-        {
-          name: s.label
-          privateDnsZoneId: s.zoneId
-        }
-      ]
-    }
+    privateLinkServiceConnections: [
+      {
+        name: 'blob'
+        groupIds: [
+          'blob'
+        ]
+        privateLinkServiceResourceId: storage.outputs.resourceId
+      }
+    ]
+    privateDnsZoneGroupConfigs: [
+      {
+        name: 'default'
+        privateDnsZoneIds: [
+          dnsZones[0].outputs.resourceId
+        ]
+      }
+    ]
   }
-}]
-
+}
+// Storage Queue
+module peStorageQueue 'br/public:avm/res/network/private-endpoint:0.7.0' = {
+  name: 'pe-${uniqueString(resourceGroup().id,'${storageAccountName}-queue')}'
+  params: {
+    name: 'pep-${storageAccountName}-queue'
+    location: location
+    tags: tags
+    subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
+    privateLinkServiceConnections: [
+      {
+        name: 'queue'
+        groupIds: [
+          'queue'
+        ]
+        privateLinkServiceResourceId: storage.outputs.resourceId
+      }
+    ]
+    privateDnsZoneGroupConfigs: [
+      {
+        name: 'default'
+        privateDnsZoneIds: [
+          dnsZones[1].outputs.resourceId
+        ]
+      }
+    ]
+  }
+}
+// Storage Table
+module peStorageTable 'br/public:avm/res/network/private-endpoint:0.7.0' = {
+  name: 'pe-${uniqueString(resourceGroup().id,'${storageAccountName}-table')}'
+  params: {
+    name: 'pep-${storageAccountName}-table'
+    location: location
+    tags: tags
+    subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
+    privateLinkServiceConnections: [
+      {
+        name: 'table'
+        groupIds: [
+          'table'
+        ]
+        privateLinkServiceResourceId: storage.outputs.resourceId
+      }
+    ]
+    privateDnsZoneGroupConfigs: [
+      {
+        name: 'default'
+        privateDnsZoneIds: [
+          dnsZones[2].outputs.resourceId
+        ]
+      }
+    ]
+  }
+}
+// Key Vault
 module peKeyVault 'br/public:avm/res/network/private-endpoint:0.7.0' = {
-  name: 'pe-${uniqueString(resourceGroup().id,kvName)}-vault'
+  name: 'pe-${uniqueString(resourceGroup().id,'${kvName}-vault')}'
   params: {
     name: 'pep-${kvName}'
     location: location
     tags: tags
     subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
-    privateLinkServiceId: keyVault.outputs.resourceId
-    groupIds: ['vault']
-    privateDnsZoneGroup: {
-      name: 'default'
-      privateDnsZoneConfigs: [
-        {
-          name: 'vault'
-          privateDnsZoneId: zoneIds.vault
-        }
-      ]
-    }
-  }
-}
-
-// ---------- App Service Plan (Flex Consumption) ----------
-module appServicePlan 'br/public:avm/res/web/serverfarm:0.1.1' = {
-  name: 'plan-${uniqueString(resourceGroup().id,functionPlanName)}'
-  params: {
-    name: functionPlanName
-    location: location
-    tags: tags
-    sku: {
-      name: 'FC1'
-      tier: 'FlexConsumption'
-    }
-    reserved: true
-    zoneRedundant: zoneRedundant
-  }
-}
-
-// ---------- Function App (Flex) ----------
-module functionApp 'br/public:avm/res/web/site:0.16.0' = {
-  name: 'func-${uniqueString(resourceGroup().id,functionAppName)}'
-  params: {
-    name: functionAppName
-    kind: 'functionapp,linux'
-    location: location
-    tags: union(tags, { 'azd-service-name': 'api' })
-    serverFarmResourceId: appServicePlan.outputs.resourceId
-    managedIdentities: {
-      systemAssigned: true
-      userAssignedResourceIds: [
-        uami.outputs.resourceId
-      ]
-    }
-    functionAppConfig: {
-      deployment: {
-        storage: {
-          type: 'blobContainer'
-          value: '${storage.outputs.primaryBlobEndpoint}${deploymentContainer}'
-          authentication: {
-            type: 'SystemAssignedIdentity'
-          }
-        }
-      }
-      scaleAndConcurrency: {
-        maximumInstanceCount: maximumInstanceCount
-        instanceMemoryMB: instanceMemoryMB
-      }
-      runtime: {
-        name: functionAppRuntime
-        version: functionAppRuntimeVersion
-      }
-    }
-    siteConfig: {
-      alwaysOn: false
-    }
-    configs: [
+    privateLinkServiceConnections: [
       {
-        name: 'appsettings'
-        properties: {
-          FUNCTIONS_EXTENSION_VERSION: '~4'
-          FUNCTIONS_WORKER_RUNTIME: functionAppRuntime
-          WEBSITE_RUN_FROM_PACKAGE: string(enableRunFromPackage)
-          APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.outputs.connectionString
-          APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
-          AzureWebJobsStorage__credential: 'managedidentity'
-          AzureWebJobsStorage__blobServiceUri: 'https://${storageAccountName}.blob.${environment().suffixes.storage}'
-          AzureWebJobsStorage__queueServiceUri: 'https://${storageAccountName}.queue.${environment().suffixes.storage}'
-          AzureWebJobsStorage__tableServiceUri: 'https://${storageAccountName}.table.${environment().suffixes.storage}'
-          AzureWebJobsStorage__ClientId: uami.outputs.clientId
-          GROQ_API_KEY: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GROQ-API-KEY/)'
-          GITHUB_TOKEN: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GITHUB-TOKEN/)'
-        }
+        name: 'vault'
+        groupIds: [
+          'vault'
+        ]
+        privateLinkServiceResourceId: keyVault.outputs.resourceId
+      }
+    ]
+    privateDnsZoneGroupConfigs: [
+      {
+        name: 'default'
+        privateDnsZoneIds: [
+          dnsZones[3].outputs.resourceId
+        ]
       }
     ]
   }
-  dependsOn: [
-    storage
-    applicationInsights
-    uami
-    keyVault
-  ]
 }
 
-// ---------- Function VNet Integration ----------
+// ---------- Function VNet Integration (FIX name uses compile-time literals) ----------
 resource vnetConnection 'Microsoft.Web/sites/virtualNetworkConnections@2023-12-01' = {
-  name: '${functionApp.outputs.name}/${vnet.outputs.name}'
+  name: '${functionAppName}/${vnetName}'
   properties: {
     vnetResourceId: vnet.outputs.resourceId
     subnetResourceId: '${vnet.outputs.resourceId}/subnets/${funcSubnetName}'

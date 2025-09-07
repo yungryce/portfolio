@@ -14,9 +14,6 @@
     "devOpsBranch": {
       "value": "staging"
     },
-    "enablePurgeProtection": {
-      "value": false
-    },
     "enableRunFromPackage": {
       "value": true
     }
