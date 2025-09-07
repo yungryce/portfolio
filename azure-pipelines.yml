@@ -10,6 +10,19 @@
 #     - Service connection: 'porfolio-repro' (for Function App)
 #     - Variable group: 'portfolio-secrets' with SWA_TOKEN (fallback if needed)
 
+trigger:
+  branches:
+    include:
+      - staging
+      - main
+
+pr:
+  branches:
+    include:
+      - staging
+      - fe
+      - feature/*
+
 variables:
   - name: Node_Version
     value: '20.x'
@@ -23,18 +36,6 @@ variables:
     value: 'app-repro'  # Ensure this is defined at the top level
   - group: portfolio-secrets
 
-trigger:
-  branches:
-    include:
-      - staging
-
-pr:
-  branches:
-    include:
-      - staging
-      - fe
-      - feature/*
-
 stages:
   # -----------------------------
   # Backend: Build & Package
@@ -42,8 +43,28 @@ stages:
   - stage: Backend_Build_Package
     displayName: "Backend (Functions) — Build & Package"
     jobs:
+      - job: check_backend_changes
+        displayName: "Check Backend Changes"
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+            fetchDepth: 2
+          - script: |
+              if git diff HEAD~1 --name-only | grep -E '^api/'; then
+                echo "Backend changes detected"
+                echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
+              else
+                echo "No backend changes detected"
+                echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]false"
+              fi
+            name: checkChanges
+            displayName: "Detect backend changes"
+
       - job: build_backend
         displayName: "Build Function App (zip)"
+        dependsOn: check_backend_changes
+        condition: eq(dependencies.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
         pool:
           vmImage: 'ubuntu-latest'
         steps:
@@ -89,7 +110,11 @@ stages:
   - stage: Backend_Deploy
     displayName: "Backend (Functions) — Deploy to Staging"
     dependsOn: Backend_Build_Package
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/staging'))
+    condition: and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/staging'),
+        eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
+      )
     jobs:
       - deployment: deploy_backend
         displayName: "Deploy Functions"
@@ -130,14 +155,35 @@ stages:
   # -----------------------------
   - stage: Frontend_Deploy_SWA
     displayName: "Frontend (Angular) — Deploy to Azure Static Web Apps"
-    dependsOn: []   # independent of backend; keep if you want parallelism
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/staging'))
+    dependsOn: []
+    condition: and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/staging')
+      )
     jobs:
-      - deployment: deploy_frontend
-        displayName: "Build & Deploy SWA"
-        environment: "staging"
+      - job: check_frontend_changes
+        displayName: "Check Frontend Changes"
         pool:
           vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+            fetchDepth: 2
+          - script: |
+              if git diff HEAD~1 --name-only | grep -E '^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)'; then
+                echo "Frontend changes detected"
+                echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
+              else
+                echo "No frontend changes detected"
+                echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]false"
+              fi
+            name: checkChanges
+            displayName: "Detect frontend changes"
+
+      - deployment: deploy_frontend
+        displayName: "Build & Deploy SWA"
+        dependsOn: check_frontend_changes
+        condition: eq(dependencies.check_frontend_changes.outputs['checkChanges.FrontendChanged'], 'true')
+        environment: "staging"
         strategy:
           runOnce:
             deploy:
