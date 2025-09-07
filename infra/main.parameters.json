@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "suffix": {
+      "value": "abcd"
+    },
+    "appInsightsConnectionString": {
+      "value": "InstrumentationKey=xxxx;IngestionEndpoint=https://westeurope-1.in.applicationinsights.azure.com/;LiveEndpoint=https://westeurope.livediagnostics.monitor.azure.com/;ApplicationId=xxxx"
+    },
+    "appInsightsAuthString": {
+      "value": "Authorization=AAD"
+    },
+    "devOpsRepoUrl": {
+      "value": "https://dev.azure.com/chxgbx/portfolio/_git/portfolio"
+    },
+    "devOpsBranch": {
+      "value": "staging"
+    },
+    "enablePurgeProtection": {
+      "value": false
+    },
+    "enableRunFromPackage": {
+      "value": true
+    }
+  }
+}

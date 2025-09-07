@@ -1,14 +1,24 @@
 # .azure-pipelines.yml
-# Purpose: CI/CD to staging for a fullstack app
+# Purpose: CI/CD for fullstack app artifacts (DOES NOT DEPLOY INFRASTRUCTURE)
 # - Backend: Python Azure Functions (Flex Consumption)
 # - Frontend: Angular → Azure Static Web Apps
+# - Path-based conditions: only runs stages when relevant files change
+# - Infrastructure deployment is handled by azure-pipelines-infra.yml
 # Notes:
 # - Deploys only on branch 'staging' (builds on PRs too)
 # - Uses a stable Angular output path: 'dist/'
+# - Requires infrastructure to be deployed first via azure-pipelines-infra.yml
 # - Requires:
 #     - Service connection: 'portfolio' (for SWA)
 #     - Service connection: 'porfolio-repro' (for Function App)
 #     - Variable group: 'portfolio-secrets' with SWA_TOKEN (fallback if needed)
+
+resources:
+  pipelines:
+    - pipeline: infraPipeline               # local alias used below
+      project: 'portfolio'                  # DevOps project name (update if different)
+      source: 'azure-pipelines-infra'       # name of the infra pipeline
+      trigger: none                         # do not automatically trigger infra on app pipeline runs
 
 variables:
   - name: Node_Version
@@ -20,13 +30,29 @@ variables:
   - name: FunctionAppServiceConnection
     value: 'porfolio-repro'
   - name: FunctionAppName
-    value: 'app-repro'  # Ensure this is defined at the top level
+    value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'] ]
+  - name: ResourceGroupName
+    value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'] ]
   - group: portfolio-secrets
 
 trigger:
   branches:
     include:
       - staging
+  paths:
+    include:
+      - api/**
+      - src/**
+      - angular.json
+      - package.json
+      - package-lock.json
+      - tsconfig.json
+      - staticwebapp.config.json
+    exclude:
+      - infra/**
+      - azure-pipelines-infra.yml
+      - README.md
+      - docs/**
 
 pr:
   branches:
@@ -34,6 +60,20 @@ pr:
       - staging
       - fe
       - feature/*
+  paths:
+    include:
+      - api/**
+      - src/**
+      - angular.json
+      - package.json
+      - package-lock.json
+      - tsconfig.json
+      - staticwebapp.config.json
+    exclude:
+      - infra/**
+      - azure-pipelines-infra.yml
+      - README.md
+      - docs/**
 
 stages:
   # -----------------------------
@@ -41,9 +81,31 @@ stages:
   # -----------------------------
   - stage: Backend_Build_Package
     displayName: "Backend (Functions) — Build & Package"
+    condition: or(contains(variables['Build.SourceVersionMessage'], 'api/'), stageDependencies.CheckChanges.check_backend_changes.outputs['checkChanges.BackendChanged'])
     jobs:
+      - job: check_backend_changes
+        displayName: "Check Backend Changes"
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+            fetchDepth: "2"  # Need 2 commits to compare
+          - script: |
+              # Check if any backend files changed
+              if git diff HEAD~1 --name-only | grep -E '^api/'; then
+                echo "Backend changes detected"
+                echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
+              else
+                echo "No backend changes detected"
+                echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]false"
+              fi
+            name: checkChanges
+            displayName: "Check for backend changes"
+
       - job: build_backend
         displayName: "Build Function App (zip)"
+        dependsOn: check_backend_changes
+        condition: eq(dependencies.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
         pool:
           vmImage: 'ubuntu-latest'
         steps:
@@ -89,7 +151,7 @@ stages:
   - stage: Backend_Deploy
     displayName: "Backend (Functions) — Deploy to Staging"
     dependsOn: Backend_Build_Package
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/staging'))
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/staging'), eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true'))
     jobs:
       - deployment: deploy_backend
         displayName: "Deploy Functions"
@@ -109,21 +171,21 @@ stages:
                     scriptType: 'bash'
                     scriptLocation: 'inlineScript'
                     inlineScript: |
-                      if az functionapp show --name $(FunctionAppName) --resource-group porfolio-repro --query name -o tsv; then
+                      if az functionapp show --name $(FunctionAppName) --resource-group $(ResourceGroupName) --query name -o tsv; then
                         echo "Function App $(FunctionAppName) exists."
                       else
                         echo "Function App $(FunctionAppName) does not exist. Please create it first."
                         exit 1
                       fi
 
-                - task: AzureFunctionApp@2
+                - task: AzureFunctionApp@1
                   displayName: "Deploy Azure Function App"
                   inputs:
                     azureSubscription: '$(FunctionAppServiceConnection)'
                     appType: 'functionAppLinux'
                     appName: '$(FunctionAppName)'
                     package: '$(Pipeline.Workspace)/api/api.zip'
-                    resourceGroupName: 'porfolio-repro'
+                    resourceGroupName: '$(ResourceGroupName)'
 
   # -----------------------------
   # Frontend: Build & Deploy SWA
@@ -133,8 +195,29 @@ stages:
     dependsOn: []   # independent of backend; keep if you want parallelism
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/staging'))
     jobs:
+      - job: check_frontend_changes
+        displayName: "Check Frontend Changes"
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+            fetchDepth: "2"  # Need 2 commits to compare
+          - script: |
+              # Check if any frontend files changed
+              if git diff HEAD~1 --name-only | grep -E '^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)'; then
+                echo "Frontend changes detected"
+                echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
+              else
+                echo "No frontend changes detected"
+                echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]false"
+              fi
+            name: checkChanges
+            displayName: "Check for frontend changes"
+
       - deployment: deploy_frontend
         displayName: "Build & Deploy SWA"
+        dependsOn: check_frontend_changes
+        condition: eq(dependencies.check_frontend_changes.outputs['checkChanges.FrontendChanged'], 'true')
         environment: "staging"
         pool:
           vmImage: 'ubuntu-latest'
@@ -143,7 +226,7 @@ stages:
             deploy:
               steps:
                 - checkout: self    # ensure source is available for npm
-                  fetchDepth: 0
+                  fetchDepth: "1"
 
                 - task: NodeTool@0
                   inputs:
@@ -168,9 +251,6 @@ stages:
                   displayName: "Deploy to Azure Static Web Apps"
                   inputs:
                     azure_static_web_apps_api_token: '$(SWA_TOKEN)'
-                    action: 'upload'
-                    app_location: 'dist/browser'
-                    api_location: ''
-                    output_location: ''
-                    skip_app_build: true
-                    skip_api_build: true
+                    workingDirectory: '$(Build.SourcesDirectory)'
+                    app_build_command: ''
+                    api_build_command: ''

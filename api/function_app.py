@@ -5,7 +5,8 @@ logger.propagate = True
 
 import json
 import os
-import time
+import mimetypes
+import urllib.parse
 import azure.functions as func
 import azure.durable_functions as df
 from datetime import datetime
@@ -629,7 +630,7 @@ def list_survey_images(req: func.HttpRequest) -> func.HttpResponse:
                 # "name": infer_slug(bname),
                 "theme": t,
                 "path": bname,
-                "url": cache_manager.make_blob_sas_url(container, bname)
+                "url": f"/api/survey-image?path={urllib.parse.quote(bname)}"  # Changed: Use Function proxy URL
             })
 
         items.sort(key=lambda x: x["theme"])
@@ -641,3 +642,64 @@ def list_survey_images(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.error(f"Failed to list survey images: {str(e)}", exc_info=True)
         return create_error_response(f"Failed to list survey images: {str(e)}", 500)
+
+
+# Add this new route after the existing survey route
+@app.route(route="survey-image", methods=["GET"])
+def get_survey_image(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Proxy endpoint to serve survey images from private storage.
+    Query: ?path=<blob_name>
+    Supports ETag conditional requests.
+    """
+    blob_path = (req.params.get('path') or '').strip()
+    if not blob_path:
+        return create_error_response("Missing 'path'", 400)
+    if '..' in blob_path or blob_path.startswith('/') or '\\' in blob_path or len(blob_path) > 200:
+        return create_error_response("Invalid path", 400)
+
+    try:
+        container_client = cache_manager.get_container_client("surveys")
+        blob_client = container_client.get_blob_client(blob_path)
+
+        # Download (single call). If not found, raise HttpResponseError (status_code 404)
+        downloader = blob_client.download_blob()
+        props = downloader.properties  # has etag, last_modified, size, content_settings
+        etag = (props.etag or '').strip('"')
+
+        # Handle conditional request (If-None-Match)
+        inm = (req.headers.get('If-None-Match') or '').strip('"')
+        if inm and inm == etag:
+            return func.HttpResponse(status_code=304)
+
+        # Read content
+        content = downloader.readall()
+
+        # Content-Type: prefer stored, else guess
+        ctype = (props.content_settings.content_type
+                 if props.content_settings and props.content_settings.content_type
+                 else (mimetypes.guess_type(blob_path)[0] or 'application/octet-stream'))
+        if not ctype.startswith('image/'):
+            ctype = 'image/png'
+
+        resp = func.HttpResponse(
+            body=content,
+            mimetype=ctype,
+            status_code=200
+        )
+        resp.headers['Cache-Control'] = 'public, max-age=600'
+        if etag:
+            resp.headers['ETag'] = f'"{etag}"'
+        if props.last_modified:
+            resp.headers['Last-Modified'] = props.last_modified.strftime('%a, %d %b %Y %H:%M:%S GMT')
+        if props.size:
+            resp.headers['Content-Length'] = str(props.size)
+        return resp
+
+    except Exception as e:
+        # Distinguish 404
+        from azure.core.exceptions import ResourceNotFoundError
+        if isinstance(e, ResourceNotFoundError):
+            return create_error_response("Image not found", 404)
+        logger.error(f"survey-image error path='{blob_path}': {e}", exc_info=True)
+        return create_error_response("Failed to load image", 500)
