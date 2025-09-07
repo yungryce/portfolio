@@ -58,6 +58,8 @@ var tags = {
 
 // Role Definition IDs
 var roleIds = {
+  blobDataOwner: 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
+  storageAccountContributor: '17d1049b-9a84-46fb-8f53-869881c3d3ab' 
   blobDataContributor: 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
   queueDataContributor: '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
   tableDataContributor: '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
@@ -127,7 +129,7 @@ module storage 'br/public:avm/res/storage/storage-account:0.25.0' = {
   }
 }
 
-// ---------- Virtual Network + Subnets (FIX: addressPrefixes) ----------
+// ---------- Virtual Network + Subnets (AVM schema-compliant) ----------
 module vnet 'br/public:avm/res/network/virtual-network:0.7.0' = {
   name: 'vnet-${uniqueString(resourceGroup().id,vnetName)}'
   params: {
@@ -143,12 +145,8 @@ module vnet 'br/public:avm/res/network/virtual-network:0.7.0' = {
         addressPrefixes: [
           '10.20.1.0/24'
         ]
-        delegations: [
-          {
-            name: 'webapp'
-            serviceName: 'Microsoft.Web/serverFarms'
-          }
-        ]
+        // AVM param model: delegation is a single string (service name)
+        delegation: 'Microsoft.Web/serverFarms'
       }
       {
         name: pepSubnetName
@@ -191,14 +189,14 @@ module dnsZones 'br/public:avm/res/network/private-dns-zone:0.5.0' = [for (zone,
     virtualNetworkLinks: [
       {
         name: '${vnetName}-link'
-        virtualNetworkId: vnet.outputs.resourceId
+        virtualNetworkResourceId: vnet.outputs.resourceId
         registrationEnabled: false
       }
     ]
   }
 }]
 
-// ---------- Key Vault (FIX: sku) ----------
+// ---------- Key Vault (fix sku shape) ----------
 module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
   name: 'kv-${uniqueString(resourceGroup().id,kvName)}'
   params: {
@@ -211,132 +209,261 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
       bypass: 'AzureServices'
       defaultAction: 'Deny'
     }
-    sku: {
-      name: 'standard'
-    }
+    sku: 'standard'
   }
 }
 
-// ---------- Private Endpoints (Explicit; FIX param shape) ----------
-// Storage Blob
-module peStorageBlob 'br/public:avm/res/network/private-endpoint:0.7.0' = {
-  name: 'pe-${uniqueString(resourceGroup().id,'${storageAccountName}-blob')}'
+// ---------- App Service Plan (Flex Consumption) ----------
+module appServicePlan 'br/public:avm/res/web/serverfarm:0.1.1' = {
+  name: 'plan-${uniqueString(resourceGroup().id,functionPlanName)}'
   params: {
-    name: 'pep-${storageAccountName}-blob'
+    name: functionPlanName
     location: location
     tags: tags
-    subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
+    sku: {
+      name: 'FC1'
+      tier: 'FlexConsumption'
+    }
+    reserved: true
+    zoneRedundant: zoneRedundant
+  }
+}
+
+// ---------- Function App ----------
+module functionApp 'br/public:avm/res/web/site:0.16.0' = {
+  name: 'func-${uniqueString(resourceGroup().id,functionAppName)}'
+  params: {
+    name: functionAppName
+    kind: 'functionapp,linux'
+    location: location
+    tags: union(tags, { 'azd-service-name': 'api' })
+    serverFarmResourceId: appServicePlan.outputs.resourceId
+    managedIdentities: {
+      systemAssigned: true
+      userAssignedResourceIds: [
+        uami.outputs.resourceId
+      ]
+    }
+    functionAppConfig: {
+      deployment: {
+        storage: {
+          type: 'blobContainer'
+          value: '${storage.outputs.primaryBlobEndpoint}${deploymentContainer}'
+          authentication: {
+            type: 'SystemAssignedIdentity'
+          }
+        }
+      }
+      scaleAndConcurrency: {
+        maximumInstanceCount: maximumInstanceCount
+        instanceMemoryMB: instanceMemoryMB
+      }
+      runtime: {
+        name: functionAppRuntime
+        version: functionAppRuntimeVersion
+      }
+    }
+    siteConfig: {
+      alwaysOn: false
+    }
+    configs: [
+      {
+        name: 'appsettings'
+        properties: {
+          FUNCTIONS_EXTENSION_VERSION: '~4'
+          FUNCTIONS_WORKER_RUNTIME: functionAppRuntime
+          WEBSITE_RUN_FROM_PACKAGE: string(enableRunFromPackage)
+          APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.outputs.connectionString
+          APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
+          AzureWebJobsStorage__credential: 'managedidentity'
+          AzureWebJobsStorage__blobServiceUri: 'https://${storageAccountName}.blob.${environment().suffixes.storage}'
+          AzureWebJobsStorage__queueServiceUri: 'https://${storageAccountName}.queue.${environment().suffixes.storage}'
+          AzureWebJobsStorage__tableServiceUri: 'https://${storageAccountName}.table.${environment().suffixes.storage}'
+          AzureWebJobsStorage__ClientId: uami.outputs.clientId
+          GROQ_API_KEY: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GROQ_API_KEY/)'
+          GITHUB_TOKEN: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GITHUB_TOKEN/)'
+        }
+      }
+    ]
+  }
+  dependsOn: [
+    keyVault
+  ]
+}
+
+// ---------- Private Endpoints (native resources) ----------
+
+// Storage Blob
+resource peStorageBlob 'Microsoft.Network/privateEndpoints@2023-09-01' = {
+  name: 'pe-${storageAccountName}-blob'
+  location: location
+  tags: tags
+  properties: {
+    subnet: {
+      id: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
+    }
     privateLinkServiceConnections: [
       {
         name: 'blob'
-        groupIds: [
-          'blob'
-        ]
-        privateLinkServiceResourceId: storage.outputs.resourceId
-      }
-    ]
-    privateDnsZoneGroupConfigs: [
-      {
-        name: 'default'
-        privateDnsZoneIds: [
-          dnsZones[0].outputs.resourceId
-        ]
-      }
-    ]
-  }
-}
-// Storage Queue
-module peStorageQueue 'br/public:avm/res/network/private-endpoint:0.7.0' = {
-  name: 'pe-${uniqueString(resourceGroup().id,'${storageAccountName}-queue')}'
-  params: {
-    name: 'pep-${storageAccountName}-queue'
-    location: location
-    tags: tags
-    subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
-    privateLinkServiceConnections: [
-      {
-        name: 'queue'
-        groupIds: [
-          'queue'
-        ]
-        privateLinkServiceResourceId: storage.outputs.resourceId
-      }
-    ]
-    privateDnsZoneGroupConfigs: [
-      {
-        name: 'default'
-        privateDnsZoneIds: [
-          dnsZones[1].outputs.resourceId
-        ]
-      }
-    ]
-  }
-}
-// Storage Table
-module peStorageTable 'br/public:avm/res/network/private-endpoint:0.7.0' = {
-  name: 'pe-${uniqueString(resourceGroup().id,'${storageAccountName}-table')}'
-  params: {
-    name: 'pep-${storageAccountName}-table'
-    location: location
-    tags: tags
-    subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
-    privateLinkServiceConnections: [
-      {
-        name: 'table'
-        groupIds: [
-          'table'
-        ]
-        privateLinkServiceResourceId: storage.outputs.resourceId
-      }
-    ]
-    privateDnsZoneGroupConfigs: [
-      {
-        name: 'default'
-        privateDnsZoneIds: [
-          dnsZones[2].outputs.resourceId
-        ]
-      }
-    ]
-  }
-}
-// Key Vault
-module peKeyVault 'br/public:avm/res/network/private-endpoint:0.7.0' = {
-  name: 'pe-${uniqueString(resourceGroup().id,'${kvName}-vault')}'
-  params: {
-    name: 'pep-${kvName}'
-    location: location
-    tags: tags
-    subnetResourceId: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
-    privateLinkServiceConnections: [
-      {
-        name: 'vault'
-        groupIds: [
-          'vault'
-        ]
-        privateLinkServiceResourceId: keyVault.outputs.resourceId
-      }
-    ]
-    privateDnsZoneGroupConfigs: [
-      {
-        name: 'default'
-        privateDnsZoneIds: [
-          dnsZones[3].outputs.resourceId
-        ]
+        properties: {
+          privateLinkServiceId: storage.outputs.resourceId
+          groupIds: [
+            'blob'
+          ]
+        }
       }
     ]
   }
 }
 
-// ---------- Function VNet Integration (FIX name uses compile-time literals) ----------
-resource vnetConnection 'Microsoft.Web/sites/virtualNetworkConnections@2023-12-01' = {
-  name: '${functionAppName}/${vnetName}'
+resource peStorageBlobDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-09-01' = {
+  parent: peStorageBlob
+  name: 'default'
   properties: {
-    vnetResourceId: vnet.outputs.resourceId
-    subnetResourceId: '${vnet.outputs.resourceId}/subnets/${funcSubnetName}'
+    privateDnsZoneConfigs: [
+      {
+        name: 'blob'
+        properties: {
+          privateDnsZoneId: dnsZones[0].outputs.resourceId
+        }
+      }
+    ]
+  }
+  dependsOn: [
+    dnsZones
+  ]
+}
+
+// Storage Queue
+resource peStorageQueue 'Microsoft.Network/privateEndpoints@2023-09-01' = {
+  name: 'pe-${storageAccountName}-queue'
+  location: location
+  tags: tags
+  properties: {
+    subnet: {
+      id: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
+    }
+    privateLinkServiceConnections: [
+      {
+        name: 'queue'
+        properties: {
+          privateLinkServiceId: storage.outputs.resourceId
+          groupIds: [
+            'queue'
+          ]
+        }
+      }
+    ]
+  }
+}
+
+resource peStorageQueueDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-09-01' = {
+  parent: peStorageQueue
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'queue'
+        properties: {
+          privateDnsZoneId: dnsZones[1].outputs.resourceId
+        }
+      }
+    ]
+  }
+  dependsOn: [
+    dnsZones
+  ]
+}
+
+// Storage Table
+resource peStorageTable 'Microsoft.Network/privateEndpoints@2023-09-01' = {
+  name: 'pe-${storageAccountName}-table'
+  location: location
+  tags: tags
+  properties: {
+    subnet: {
+      id: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
+    }
+    privateLinkServiceConnections: [
+      {
+        name: 'table'
+        properties: {
+          privateLinkServiceId: storage.outputs.resourceId
+          groupIds: [
+            'table'
+          ]
+        }
+      }
+    ]
+  }
+}
+
+resource peStorageTableDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-09-01' = {
+  parent: peStorageTable
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'table'
+        properties: {
+          privateDnsZoneId: dnsZones[2].outputs.resourceId
+        }
+      }
+    ]
+  }
+  dependsOn: [
+    dnsZones
+  ]
+}
+
+// Key Vault
+resource peKeyVault 'Microsoft.Network/privateEndpoints@2023-09-01' = {
+  name: 'pe-${kvName}-vault'
+  location: location
+  tags: tags
+  properties: {
+    subnet: {
+      id: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
+    }
+    privateLinkServiceConnections: [
+      {
+        name: 'vault'
+        properties: {
+          privateLinkServiceId: keyVault.outputs.resourceId
+          groupIds: [
+            'vault'
+          ]
+        }
+      }
+    ]
+  }
+}
+
+resource peKeyVaultDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-09-01' = {
+  parent: peKeyVault
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'vault'
+        properties: {
+          privateDnsZoneId: dnsZones[3].outputs.resourceId
+        }
+      }
+    ]
+  }
+  dependsOn: [
+    dnsZones
+  ]
+}
+
+resource vnetIntegration 'Microsoft.Web/sites/config@2024-11-01' = {
+  name: '${functionAppName}/web'
+  properties: {
+    virtualNetworkSubnetId: '${vnet.outputs.resourceId}/subnets/${funcSubnetName}'
   }
   dependsOn: [
     functionApp
-    vnet
   ]
 }
 
@@ -362,6 +489,24 @@ resource staticWebApp 'Microsoft.Web/staticSites@2024-11-01' = {
 }
 
 // ---------- Role Assignments ----------
+resource raBlobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid('blobDataOwner', uamiName, storageAccountName)
+  properties: {
+    principalId: uami.outputs.principalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.blobDataOwner)
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource raStorageAccountContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid('storageAccountContributor', uamiName, storageAccountName)
+  properties: {
+    principalId: uami.outputs.principalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.storageAccountContributor)
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid('blobDataContributor', uamiName, storageAccountName)
   properties: {
