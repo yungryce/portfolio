@@ -91,7 +91,6 @@ stages:
                     suffix="$(GeneratedSuffix)" \
                     devOpsRepoUrl="$(DevOpsRepoUrl)" \
                     devOpsBranch="$(DevOpsBranch)" \
-                    appInsightsConnectionString="$(AppInsightsConnectionString)" \
                     enablePurgeProtection=$(EnablePurgeProtection) \
                     enableRunFromPackage=$(EnableRunFromPackage) \
                   --only-show-errors || true
@@ -138,11 +137,6 @@ stages:
               scriptLocation: inlineScript
               inlineScript: |
                 set -e
-                APPINSIGHTS_CS="$(AppInsightsConnectionString)"
-                if [ -z "$APPINSIGHTS_CS" ]; then
-                  echo "ERROR: AppInsightsConnectionString pipeline/variable-group value is missing."
-                  exit 1
-                fi
 
                 RG_NAME="portfolio$(GeneratedSuffix)"
                 echo "Deploying to Resource Group: $RG_NAME"
@@ -158,7 +152,6 @@ stages:
                     suffix='$(GeneratedSuffix)' \
                     devOpsRepoUrl='$(DevOpsRepoUrl)' \
                     devOpsBranch='$(DevOpsBranch)' \
-                    appInsightsConnectionString="$APPINSIGHTS_CS" \
                     enablePurgeProtection=$(EnablePurgeProtection) \
                     enableRunFromPackage=$(EnableRunFromPackage) \
                   --only-show-errors \
