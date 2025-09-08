@@ -39,7 +39,7 @@ variables:
   - name: DevOpsRepoUrl
     value: 'https://dev.azure.com/chxgbx/portfolio/_git/portfolio'
   - name: DevOpsBranch
-    value: 'staging'
+    value: 'feature/infra-test'  # Branch to deploy from
   - name: EnableRunFromPackage
     value: 'true'
   - group: portfolio-secrets
