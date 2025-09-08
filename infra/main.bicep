@@ -3,7 +3,7 @@ param location string = 'westeurope'
 
 @description('Random suffix for global uniqueness (4-12 chars)')
 @minLength(4)
-param suffix string = 'dev01' // made static default suffix
+param suffix string
 
 @description('Azure DevOps repo URL (Azure Repos)')
 param devOpsRepoUrl string = 'https://dev.azure.com/chxgbx/portfolio/_git/portfolio'
