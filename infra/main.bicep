@@ -3,7 +3,7 @@ param location string = 'westeurope'
 
 @description('Random suffix for global uniqueness (4-12 chars)')
 @minLength(4)
-param suffix string
+param suffix string = 'dev01' // made static default suffix
 
 @description('Azure DevOps repo URL (Azure Repos)')
 param devOpsRepoUrl string = 'https://dev.azure.com/chxgbx/portfolio/_git/portfolio'
@@ -69,7 +69,7 @@ var roleIds = {
 
 // ---------- Identity (User Assigned) ----------
 module uami 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.0' = {
-  name: 'uami-${uniqueString(resourceGroup().id,uamiName)}'
+  name: 'uami-${resourceBase}'
   params: {
     name: uamiName
     location: location
@@ -79,7 +79,7 @@ module uami 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.0' = 
 
 // ---------- Log Analytics ----------
 module logAnalytics 'br/public:avm/res/operational-insights/workspace:0.11.1' = {
-  name: 'law-${uniqueString(resourceGroup().id,logAnalyticsName)}'
+  name: 'law-${resourceBase}'
   params: {
     name: logAnalyticsName
     location: location
@@ -93,7 +93,7 @@ module logAnalytics 'br/public:avm/res/operational-insights/workspace:0.11.1' = 
 
 // ---------- Application Insights ----------
 module applicationInsights 'br/public:avm/res/insights/component:0.6.0' = {
-  name: 'appi-${uniqueString(resourceGroup().id,appInsightsName)}'
+  name: 'appi-${resourceBase}'
   params: {
     name: appInsightsName
     location: location
@@ -105,7 +105,7 @@ module applicationInsights 'br/public:avm/res/insights/component:0.6.0' = {
 
 // ---------- Storage Account ----------
 module storage 'br/public:avm/res/storage/storage-account:0.25.0' = {
-  name: 'st-${uniqueString(resourceGroup().id,storageAccountName)}'
+  name: 'st-${resourceBase}'
   params: {
     name: storageAccountName
     location: location
@@ -131,7 +131,7 @@ module storage 'br/public:avm/res/storage/storage-account:0.25.0' = {
 
 // ---------- Virtual Network + Subnets (AVM schema-compliant) ----------
 module vnet 'br/public:avm/res/network/virtual-network:0.7.0' = {
-  name: 'vnet-${uniqueString(resourceGroup().id,vnetName)}'
+  name: 'vnet-${resourceBase}'
   params: {
     name: vnetName
     location: location
@@ -181,7 +181,7 @@ var privateZones = [
 
 // Then use a for loop to create the DNS zone modules
 module dnsZones 'br/public:avm/res/network/private-dns-zone:0.5.0' = [for (zone, i) in privateZones: {
-  name: 'pdns-${uniqueString(resourceGroup().id, zone.name)}'
+  name: 'pdns-${replace(zone.name, '.', '-')}-${resourceBase}'
   params: {
     name: zone.name
     location: 'global'
@@ -198,7 +198,7 @@ module dnsZones 'br/public:avm/res/network/private-dns-zone:0.5.0' = [for (zone,
 
 // ---------- Key Vault (fix sku shape) ----------
 module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
-  name: 'kv-${uniqueString(resourceGroup().id,kvName)}'
+  name: 'kv-${resourceBase}'
   params: {
     name: kvName
     location: location
@@ -215,7 +215,7 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
 
 // ---------- App Service Plan (Flex Consumption) ----------
 module appServicePlan 'br/public:avm/res/web/serverfarm:0.1.1' = {
-  name: 'plan-${uniqueString(resourceGroup().id,functionPlanName)}'
+  name: 'plan-${resourceBase}'
   params: {
     name: functionPlanName
     location: location
@@ -231,7 +231,7 @@ module appServicePlan 'br/public:avm/res/web/serverfarm:0.1.1' = {
 
 // ---------- Function App ----------
 module functionApp 'br/public:avm/res/web/site:0.16.0' = {
-  name: 'func-${uniqueString(resourceGroup().id,functionAppName)}'
+  name: 'func-${resourceBase}'
   params: {
     name: functionAppName
     kind: 'functionapp,linux'
@@ -271,7 +271,6 @@ module functionApp 'br/public:avm/res/web/site:0.16.0' = {
         name: 'appsettings'
         properties: {
           FUNCTIONS_EXTENSION_VERSION: '~4'
-          FUNCTIONS_WORKER_RUNTIME: functionAppRuntime
           WEBSITE_RUN_FROM_PACKAGE: string(enableRunFromPackage)
           APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.outputs.connectionString
           APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
