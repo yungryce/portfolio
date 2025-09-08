@@ -18,9 +18,9 @@ trigger:
 pr:
   branches:
     include:
+      - feature/infra-test
       - staging
       - main
-      - feature/*
   paths:
     include:
       - infra/**
