@@ -48,12 +48,12 @@ var functionAppName       = 'fa-${resourceBase}'
 var staticWebAppName      = 'swa-${resourceBase}'
 var deploymentContainer   = 'deployment-packages'
 var vnetName              = 'vnet-${resourceBase}'
-var funcSubnetName        = 'sn-func'
+var funcSubnetName        = 'sn-func' 
 var pepSubnetName         = 'sn-pep'
 var kvName                = toLower(substring('kv${resourceBase}${uniqueString(resourceGroup().id)}', 0, 24))
 var uamiName              = 'uami-${resourceBase}'
 
-// Tags
+// Tags - consistent across all resources
 var tags = {
   'azd-env-name': suffix
   owner: namePrefix
