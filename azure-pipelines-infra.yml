@@ -143,13 +143,13 @@ stages:
                       enableRunFromPackage=$(EnableRunFromPackage) \
                     --mode Incremental \
                     --output json \
-                    > "$DEPLOY_OUTPUT" 2>&1; then
-                  echo "❌ Deployment failed. Full CLI output:"
-                  sed -n '1,200p' "$DEPLOY_OUTPUT" || true
-                  echo "----"
-                  tail -n +1 "$DEPLOY_OUTPUT"
+                    --only-show-errors \
+                    --query properties.outputs \
+                    > /tmp/deploy_outputs.json; then
+                  echo "❌ Deployment failed"
                   exit 1
                 fi
+
 
                 echo "✅ Bicep deployment succeeded. Parsing outputs..."
                 cat "$DEPLOY_OUTPUT" | jq -r '.properties.outputs // {}' > /tmp/deploy_outputs.json || true
