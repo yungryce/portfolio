@@ -34,6 +34,9 @@ param zoneRedundant bool = false
 @description('Toggle WEBSITE_RUN_FROM_PACKAGE setting on Function App.')
 param enableRunFromPackage bool = true
 
+@description('Create RBAC role assignments (requires Owner/User Access Administrator).')
+param createRoleAssignments bool = false
+
 // Naming - Centralized and consistent
 var namePrefix            = 'portfolio'
 var resourceBase          = '${namePrefix}-${suffix}'
@@ -488,7 +491,7 @@ resource staticWebApp 'Microsoft.Web/staticSites@2024-11-01' = {
 }
 
 // ---------- Role Assignments ----------
-resource raBlobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource raBlobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
   name: guid('blobDataOwner', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
@@ -497,7 +500,7 @@ resource raBlobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   }
 }
 
-resource raStorageAccountContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource raStorageAccountContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
   name: guid('storageAccountContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
@@ -506,7 +509,7 @@ resource raStorageAccountContributor 'Microsoft.Authorization/roleAssignments@20
   }
 }
 
-resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
   name: guid('blobDataContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
@@ -515,7 +518,7 @@ resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-
   }
 }
 
-resource raQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource raQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
   name: guid('queueDataContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
@@ -524,7 +527,7 @@ resource raQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04
   }
 }
 
-resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
   name: guid('tableDataContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
@@ -533,7 +536,7 @@ resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04
   }
 }
 
-resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
   name: guid('metricsPublisher', uamiName, logAnalyticsName)
   properties: {
     principalId: uami.outputs.principalId
@@ -542,7 +545,7 @@ resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01'
   }
 }
 
-resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
   name: guid('kvSecretsUser', uamiName, kvName)
   properties: {
     principalId: uami.outputs.principalId
