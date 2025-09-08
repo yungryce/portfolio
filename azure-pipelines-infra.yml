@@ -33,7 +33,7 @@ variables:
   - name: Location  
     value: 'westeurope'
   - name: ResourceGroupName
-    value: 'portfolioRG1WestEU'  # Static RG name
+    value: 'portfolioRGWestEU'  # Static RG name
   - name: Suffix
     value: 'dev01'  # Stable environment suffix (keep constant for this environment)
   - name: DevOpsRepoUrl
