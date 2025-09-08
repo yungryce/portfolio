@@ -50,7 +50,7 @@ var deploymentContainer   = 'deployment-packages'
 var vnetName              = 'vnet-${resourceBase}'
 var funcSubnetName        = 'sn-func'
 var pepSubnetName         = 'sn-pep'
-var kvName                = 'kv-${resourceBase}'
+var kvName                = toLower(substring('kv${resourceBase}${uniqueString(resourceGroup().id)}', 0, 24))
 var uamiName              = 'uami-${resourceBase}'
 
 // Tags
