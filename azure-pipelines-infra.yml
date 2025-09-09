@@ -161,12 +161,13 @@ stages:
                   echo "  No outputs available"
                 fi
 
-                # Set pipeline outputs with static RG name
+                # Set pipeline outputs with identity information
                 echo "##vso[task.setvariable variable=FunctionAppName;isOutput=true]fa-portfolio-$(Suffix)"
                 echo "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$(ResourceGroupName)"
                 echo "##vso[task.setvariable variable=StorageAccountName;isOutput=true]stportfolio$(Suffix)"
                 echo "##vso[task.setvariable variable=KeyVaultName;isOutput=true]kv-portfolio-$(Suffix)"
                 echo "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]swa-portfolio-$(Suffix)"
+                echo "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]uami-portfolio-$(Suffix)"
             env:
               AZURE_CORE_ONLY_SHOW_ERRORS: "true"
 

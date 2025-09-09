@@ -34,9 +34,6 @@ param zoneRedundant bool = false
 @description('Toggle WEBSITE_RUN_FROM_PACKAGE setting on Function App.')
 param enableRunFromPackage bool = true
 
-@description('Create RBAC role assignments (requires Owner/User Access Administrator).')
-param createRoleAssignments bool = false
-
 // Naming - Centralized and consistent
 var namePrefix            = 'portfolio'
 var resourceBase          = '${namePrefix}-${suffix}'
@@ -242,18 +239,20 @@ module functionApp 'br/public:avm/res/web/site:0.16.0' = {
     tags: union(tags, { 'azd-service-name': 'api' })
     serverFarmResourceId: appServicePlan.outputs.resourceId
     managedIdentities: {
-      systemAssigned: true
       userAssignedResourceIds: [
         uami.outputs.resourceId
       ]
     }
+    // Add VNet integration directly in the module
+    virtualNetworkSubnetId: '${vnet.outputs.resourceId}/subnets/${funcSubnetName}'
     functionAppConfig: {
       deployment: {
         storage: {
           type: 'blobContainer'
           value: '${storage.outputs.primaryBlobEndpoint}${deploymentContainer}'
           authentication: {
-            type: 'SystemAssignedIdentity'
+            type: 'UserAssignedIdentity'
+            userAssignedIdentityResourceId: uami.outputs.resourceId
           }
         }
       }
@@ -268,6 +267,12 @@ module functionApp 'br/public:avm/res/web/site:0.16.0' = {
     }
     siteConfig: {
       alwaysOn: false
+      cors: {
+        allowedOrigins: [
+          'https://${staticWebAppName}.azurestaticapps.net'
+        ]
+        supportCredentials: false
+      }
     }
     configs: [
       {
@@ -290,6 +295,8 @@ module functionApp 'br/public:avm/res/web/site:0.16.0' = {
   }
   dependsOn: [
     keyVault
+    vnet
+    uami
   ]
 }
 
@@ -459,20 +466,11 @@ resource peKeyVaultDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@
   ]
 }
 
-resource vnetIntegration 'Microsoft.Web/sites/config@2024-11-01' = {
-  name: '${functionAppName}/web'
-  properties: {
-    virtualNetworkSubnetId: '${vnet.outputs.resourceId}/subnets/${funcSubnetName}'
-  }
-  dependsOn: [
-    functionApp
-  ]
-}
-
 // ---------- Static Web App ----------
 resource staticWebApp 'Microsoft.Web/staticSites@2024-11-01' = {
   name: staticWebAppName
   location: location
+  tags: tags
   sku: {
     name: 'Standard'
     tier: 'Standard'
@@ -490,8 +488,27 @@ resource staticWebApp 'Microsoft.Web/staticSites@2024-11-01' = {
   }
 }
 
+// Link Static Web App to Function App
+resource staticWebAppFunctionLink 'Microsoft.Web/staticSites/linkedBackends@2024-11-01' = {
+  parent: staticWebApp
+  name: 'backend'
+  properties: {
+    backendResourceId: functionApp.outputs.resourceId
+    region: location
+  }
+}
+
+// Add environment variables to Static Web App
+resource staticWebAppConfig 'Microsoft.Web/staticSites/config@2024-11-01' = {
+  parent: staticWebApp
+  name: 'appsettings'
+  properties: {
+    API_BASE_URL: 'https://${functionApp.outputs.defaultHostname}/api'
+  }
+}
+
 // ---------- Role Assignments ----------
-resource raBlobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
+resource raBlobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid('blobDataOwner', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
@@ -500,7 +517,7 @@ resource raBlobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   }
 }
 
-resource raStorageAccountContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
+resource raStorageAccountContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid('storageAccountContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
@@ -509,7 +526,7 @@ resource raStorageAccountContributor 'Microsoft.Authorization/roleAssignments@20
   }
 }
 
-resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
+resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid('blobDataContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
@@ -518,7 +535,7 @@ resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-
   }
 }
 
-resource raQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
+resource raQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid('queueDataContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
@@ -527,7 +544,7 @@ resource raQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04
   }
 }
 
-resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
+resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid('tableDataContributor', uamiName, storageAccountName)
   properties: {
     principalId: uami.outputs.principalId
@@ -536,8 +553,9 @@ resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04
   }
 }
 
-resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
+resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid('metricsPublisher', uamiName, logAnalyticsName)
+  scope: logAnalytics
   properties: {
     principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.metricsPublisher)
@@ -545,7 +563,7 @@ resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01'
   }
 }
 
-resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (createRoleAssignments) {
+resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid('kvSecretsUser', uamiName, kvName)
   properties: {
     principalId: uami.outputs.principalId
@@ -556,7 +574,9 @@ resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
 
 // ---------- Outputs ----------
 output functionAppName string = functionApp.outputs.name
+output functionAppUrl string = 'https://${functionApp.outputs.defaultHostname}'
 output staticWebAppName string = staticWebApp.name
+output staticWebAppUrl string = 'https://${staticWebApp.properties.defaultHostname}'
 output storageAccountName string = storage.outputs.name
 output applicationInsightsConnectionString string = applicationInsights.outputs.connectionString
 output logAnalyticsWorkspaceId string = logAnalytics.outputs.resourceId
