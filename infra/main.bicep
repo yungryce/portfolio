@@ -28,16 +28,13 @@ param maximumInstanceCount int = 100
 @allowed([512,2048,4096])
 param instanceMemoryMB int = 2048
 
-@description('Enable zone redundancy where supported (plan).')
-param zoneRedundant bool = false
-
 @description('Toggle WEBSITE_RUN_FROM_PACKAGE setting on Function App.')
 param enableRunFromPackage bool = true
 
 // Naming - Centralized and consistent
 var namePrefix            = 'portfolio'
 var resourceBase          = '${namePrefix}-${suffix}'
-var storageAccountName    = toLower('st${replace(resourceBase, '-', '')}') // use resourceBase but remove '-' for valid
+var storageAccountName    = toLower('stg${replace(resourceBase, '-', '')}') // use resourceBase but remove '-' for valid
 var logAnalyticsName      = 'law-${resourceBase}'
 var appInsightsName       = 'appi-${resourceBase}'
 var functionPlanName      = 'fp-${resourceBase}'
@@ -47,7 +44,7 @@ var deploymentContainer   = 'deployment-packages'
 var vnetName              = 'vnet-${resourceBase}'
 var funcSubnetName        = 'sn-func' 
 var pepSubnetName         = 'sn-pep'
-var kvName                = toLower(substring('kv${resourceBase}${uniqueString(resourceGroup().id)}', 0, 24))
+var kvName                = toLower(substring('kv${resourceBase}${uniqueString(resourceGroup().id, subscription().id)}', 0, 24))
 var uamiName              = 'uami-${resourceBase}'
 
 // Tags - consistent across all resources
@@ -68,191 +65,207 @@ var roleIds = {
 }
 
 // ---------- Identity (User Assigned) ----------
-module uami 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.0' = {
-  name: 'uami-${resourceBase}'
-  params: {
-    name: uamiName
-    location: location
-    tags: tags
-  }
+resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2025-01-31-preview' = {
+  name: uamiName
+  location: location
+  tags: tags
 }
 
-// ---------- Log Analytics ----------
-module logAnalytics 'br/public:avm/res/operational-insights/workspace:0.11.1' = {
-  name: 'law-${resourceBase}'
-  params: {
-    name: logAnalyticsName
-    location: location
-    tags: tags
-    dataRetention: 30
+// ---------- Log Analytics Workspace ----------
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2025-02-01' = {
+  name: logAnalyticsName
+  location: location
+  tags: tags
+  properties: {
+    retentionInDays: 30
     features: {
       enableLogAccessUsingOnlyResourcePermissions: true
+      searchVersion: 1
     }
+    publicNetworkAccessForIngestion: 'Disabled'
+    publicNetworkAccessForQuery: 'Disabled'
+    sku: { name: 'PerGB2018' }
   }
 }
 
-// ---------- Application Insights ----------
-module applicationInsights 'br/public:avm/res/insights/component:0.6.0' = {
-  name: 'appi-${resourceBase}'
-  params: {
-    name: appInsightsName
-    location: location
-    tags: tags
-    workspaceResourceId: logAnalytics.outputs.resourceId
-    disableLocalAuth: true
+// ---------- Application Insights (linked to LAW) ----------
+resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: appInsightsName
+  location: location
+  kind: 'web'
+  tags: tags
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logAnalytics.id
+    DisableLocalAuth: true
   }
 }
 
-// ---------- Storage Account ----------
-module storage 'br/public:avm/res/storage/storage-account:0.25.0' = {
-  name: 'st-${resourceBase}'
-  params: {
-    name: storageAccountName
-    location: location
-    tags: tags
+// ---------- Storage Account & Container ----------
+resource storage 'Microsoft.Storage/storageAccounts@2025-01-01' = {
+  name: storageAccountName
+  location: location
+  kind: 'StorageV2'
+  tags: tags
+  sku: { name: 'Standard_LRS' }
+  properties: {
+    accessTier: 'Hot'
     allowBlobPublicAccess: false
     allowSharedKeyAccess: false
-    publicNetworkAccess: 'Disabled'
     dnsEndpointType: 'Standard'
-    networkAcls: {
-      defaultAction: 'Deny'
-      bypass: 'AzureServices'
-    }
+    publicNetworkAccess: 'Disabled'
     minimumTlsVersion: 'TLS1_2'
-    blobServices: {
-      containers: [
-        { name: deploymentContainer }
-      ]
+    networkAcls: {
+      bypass: 'AzureServices'
+      defaultAction: 'Deny'
     }
-    queueServices: {}
-    tableServices: {}
+  }
+  resource blobServices 'blobServices' = {
+    name: 'default'
+    properties: {
+      deleteRetentionPolicy: {}
+    }
+    resource storageContainerDeployment 'containers' = {
+      name: deploymentContainer
+      properties: {
+        publicAccess: 'None'
+      }
+    }
   }
 }
 
-// ---------- Virtual Network + Subnets (AVM schema-compliant) ----------
-module vnet 'br/public:avm/res/network/virtual-network:0.7.0' = {
-  name: 'vnet-${resourceBase}'
-  params: {
-    name: vnetName
-    location: location
-    tags: tags
-    addressPrefixes: [
-      '10.20.0.0/16'
-    ]
+// ---------- Virtual Network & Subnets ----------
+resource vnet 'Microsoft.Network/virtualNetworks@2024-07-01' = {
+  name: vnetName
+  location: location
+  tags: tags
+  properties: {
+    addressSpace: {
+      addressPrefixes: [ '10.20.0.0/16' ]
+    }
     subnets: [
       {
         name: funcSubnetName
-        addressPrefixes: [
-          '10.20.1.0/24'
-        ]
-        // AVM param model: delegation is a single string (service name)
-        delegation: 'Microsoft.Web/serverFarms'
+        properties: {
+          addressPrefix: '10.20.1.0/24'
+          delegations: [
+            {
+              name: 'functions-delegation'
+              properties: {
+                serviceName: 'Microsoft.Web/serverFarms'
+              }
+            }
+          ]
+        }
       }
       {
         name: pepSubnetName
-        addressPrefixes: [
-          '10.20.2.0/24'
-        ]
-        privateEndpointNetworkPolicies: 'Disabled'
+        properties: {
+          addressPrefix: '10.20.2.0/24'
+          privateEndpointNetworkPolicies: 'Disabled'
+        }
       }
     ]
   }
 }
 
-// ---------- Private DNS Zones (unchanged structure) ----------
-var privateZones = [
-  {
-    name: 'privatelink.blob.core.windows.net'
-    label: 'blob'
-  }
-  {
-    name: 'privatelink.queue.core.windows.net'
-    label: 'queue'
-  }
-  {
-    name: 'privatelink.table.core.windows.net'
-    label: 'table'
-  }
-  {
-    name: 'privatelink.vaultcore.azure.net'
-    label: 'vault'
-  }
+// ---------- Private DNS Zones & Links ----------
+// Normalize key vault DNS suffix because some environments may return a leading '.' in keyvaultDns
+var keyVaultDnsSuffix = startsWith(environment().suffixes.keyvaultDns, '.') ? substring(environment().suffixes.keyvaultDns, 1) : environment().suffixes.keyvaultDns
+var privateDnsZoneNames = [
+  'privatelink.blob.${environment().suffixes.storage}'
+  'privatelink.queue.${environment().suffixes.storage}'
+  'privatelink.table.${environment().suffixes.storage}'
+  'privatelink.vaultcore.${keyVaultDnsSuffix}'
 ]
 
-// Then use a for loop to create the DNS zone modules
-module dnsZones 'br/public:avm/res/network/private-dns-zone:0.5.0' = [for (zone, i) in privateZones: {
-  name: 'pdns-${replace(zone.name, '.', '-')}-${resourceBase}'
-  params: {
-    name: zone.name
-    location: 'global'
-    tags: tags
-    virtualNetworkLinks: [
-      {
-        name: '${vnetName}-link'
-        virtualNetworkResourceId: vnet.outputs.resourceId
-        registrationEnabled: false
-      }
-    ]
-  }
+resource privateDnsZones 'Microsoft.Network/privateDnsZones@2024-06-01' = [for zoneName in privateDnsZoneNames: {
+  name: zoneName
+  location: 'global'
+  tags: tags
 }]
 
-// ---------- Key Vault (fix sku shape) ----------
-module keyVault 'br/public:avm/res/key-vault/vault:0.12.0' = {
-  name: 'kv-${resourceBase}'
-  params: {
-    name: kvName
-    location: location
-    tags: tags
+resource privateDnsZoneLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = [for (zoneName, i) in privateDnsZoneNames: {
+  name: '${zoneName}/${vnetName}-link'
+  location: 'global'
+  properties: {
+    virtualNetwork: {
+      id: vnet.id
+    }
+    registrationEnabled: false
+  }
+  dependsOn: [
+    privateDnsZones[i]
+  ]
+}]
+
+// ---------- Key Vault ----------
+resource keyVault 'Microsoft.KeyVault/vaults@2024-12-01-preview' = {
+  name: kvName
+  location: location
+  tags: tags
+  properties: {
+    tenantId: subscription().tenantId
     enableRbacAuthorization: true
-    publicNetworkAccess: 'Disabled'
+    sku: {
+      name: 'standard'
+      family: 'A'
+    }
     networkAcls: {
       bypass: 'AzureServices'
       defaultAction: 'Deny'
     }
-    sku: 'standard'
+    publicNetworkAccess: 'Disabled'
   }
 }
 
 // ---------- App Service Plan (Flex Consumption) ----------
-module appServicePlan 'br/public:avm/res/web/serverfarm:0.1.1' = {
-  name: 'plan-${resourceBase}'
-  params: {
-    name: functionPlanName
-    location: location
-    tags: tags
-    sku: {
-      name: 'FC1'
-      tier: 'FlexConsumption'
-    }
+resource appServicePlan 'Microsoft.Web/serverfarms@2024-11-01' = {
+  name: functionPlanName
+  location: location
+  kind: 'functionapp,linux'
+  tags: tags
+  sku: {
+    name: 'FC1'
+    tier: 'FlexConsumption'
+  }
+  properties: {
     reserved: true
-    zoneRedundant: zoneRedundant
   }
 }
 
 // ---------- Function App ----------
-module functionApp 'br/public:avm/res/web/site:0.16.0' = {
-  name: 'func-${resourceBase}'
-  params: {
-    name: functionAppName
-    kind: 'functionapp,linux'
-    location: location
-    tags: union(tags, { 'azd-service-name': 'api' })
-    serverFarmResourceId: appServicePlan.outputs.resourceId
-    managedIdentities: {
-      userAssignedResourceIds: [
-        uami.outputs.resourceId
-      ]
+resource functionApp 'Microsoft.Web/sites@2024-11-01' = {
+  name: functionAppName
+  location: location
+  kind: 'functionapp,linux'
+  tags: union(tags, { 'azd-service-name': 'api' })
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${uami.id}': {}
     }
-    // Add VNet integration directly in the module
-    virtualNetworkSubnetId: '${vnet.outputs.resourceId}/subnets/${funcSubnetName}'
+  }
+  properties: {
+    serverFarmId: appServicePlan.id
+    httpsOnly: true
+    siteConfig: {
+      alwaysOn: false
+      minTlsVersion: '1.2'
+      ftpsState: 'Disabled'
+      cors: {
+        allowedOrigins: [ 'https://${staticWebAppName}.azurestaticapps.net' ]
+        supportCredentials: false
+      }
+    }
     functionAppConfig: {
       deployment: {
         storage: {
           type: 'blobContainer'
-          value: '${storage.outputs.primaryBlobEndpoint}${deploymentContainer}'
+          value: '${storage.properties.primaryEndpoints.blob}${deploymentContainer}'
           authentication: {
             type: 'UserAssignedIdentity'
-            userAssignedIdentityResourceId: uami.outputs.resourceId
+            userAssignedIdentityResourceId: uami.id
           }
         }
       }
@@ -260,210 +273,140 @@ module functionApp 'br/public:avm/res/web/site:0.16.0' = {
         maximumInstanceCount: maximumInstanceCount
         instanceMemoryMB: instanceMemoryMB
       }
-      runtime: {
+      runtime: { 
         name: functionAppRuntime
         version: functionAppRuntimeVersion
       }
     }
-    siteConfig: {
-      alwaysOn: false
-      cors: {
-        allowedOrigins: [
-          'https://${staticWebAppName}.azurestaticapps.net'
-        ]
-        supportCredentials: false
-      }
-    }
-    configs: [
-      {
-        name: 'appsettings'
-        properties: {
-          FUNCTIONS_EXTENSION_VERSION: '~4'
-          WEBSITE_RUN_FROM_PACKAGE: string(enableRunFromPackage)
-          APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.outputs.connectionString
-          APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
-          AzureWebJobsStorage__credential: 'managedidentity'
-          AzureWebJobsStorage__blobServiceUri: 'https://${storageAccountName}.blob.${environment().suffixes.storage}'
-          AzureWebJobsStorage__queueServiceUri: 'https://${storageAccountName}.queue.${environment().suffixes.storage}'
-          AzureWebJobsStorage__tableServiceUri: 'https://${storageAccountName}.table.${environment().suffixes.storage}'
-          AzureWebJobsStorage__ClientId: uami.outputs.clientId
-          GROQ_API_KEY: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GROQ_API_KEY/)'
-          GITHUB_TOKEN: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GITHUB_TOKEN/)'
-        }
-      }
-    ]
+    virtualNetworkSubnetId: '${vnet.id}/subnets/${funcSubnetName}'
   }
   dependsOn: [
     keyVault
-    vnet
-    uami
   ]
 }
 
-// ---------- Private Endpoints (native resources) ----------
+resource functionAppAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
+  parent: functionApp
+  name: 'appsettings'
+  properties: {
+    FUNCTIONS_EXTENSION_VERSION: '~4'
+    FUNCTIONS_WORKER_RUNTIME: functionAppRuntime
+    WEBSITE_RUN_FROM_PACKAGE: string(enableRunFromPackage)
+    APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.properties.ConnectionString
+    APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
+    AzureWebJobsStorage__credential: 'managedidentity'
+    AzureWebJobsStorage__blobServiceUri: 'https://${storageAccountName}.blob.${environment().suffixes.storage}'
+    AzureWebJobsStorage__queueServiceUri: 'https://${storageAccountName}.queue.${environment().suffixes.storage}'
+    AzureWebJobsStorage__tableServiceUri: 'https://${storageAccountName}.table.${environment().suffixes.storage}'
+    AzureWebJobsStorage__ClientId: uami.properties.clientId
+    GROQ_API_KEY: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GROQ_API_KEY/)'
+    GITHUB_TOKEN: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GITHUB_TOKEN/)'
+  }
+}
 
-// Storage Blob
-resource peStorageBlob 'Microsoft.Network/privateEndpoints@2023-09-01' = {
+// ---------- Private Endpoints ----------
+resource peStorageBlob 'Microsoft.Network/privateEndpoints@2024-07-01' = {
   name: 'pe-${storageAccountName}-blob'
   location: location
   tags: tags
   properties: {
-    subnet: {
-      id: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
-    }
-    privateLinkServiceConnections: [
-      {
-        name: 'blob'
-        properties: {
-          privateLinkServiceId: storage.outputs.resourceId
-          groupIds: [
-            'blob'
-          ]
-        }
+    subnet: { id: '${vnet.id}/subnets/${pepSubnetName}' }
+    privateLinkServiceConnections: [ {
+      name: 'blob'
+      properties: {
+        privateLinkServiceId: storage.id
+        groupIds: [ 'blob' ]
       }
-    ]
+    } ]
   }
 }
-
-resource peStorageBlobDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-09-01' = {
+resource peStorageBlobDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-07-01' = {
   parent: peStorageBlob
   name: 'default'
   properties: {
-    privateDnsZoneConfigs: [
-      {
-        name: 'blob'
-        properties: {
-          privateDnsZoneId: dnsZones[0].outputs.resourceId
-        }
-      }
-    ]
+    privateDnsZoneConfigs: [ {
+      name: 'blob'
+      properties: { privateDnsZoneId: privateDnsZones[0].id }
+    } ]
   }
-  dependsOn: [
-    dnsZones
-  ]
 }
 
-// Storage Queue
-resource peStorageQueue 'Microsoft.Network/privateEndpoints@2023-09-01' = {
+resource peStorageQueue 'Microsoft.Network/privateEndpoints@2024-07-01' = {
   name: 'pe-${storageAccountName}-queue'
   location: location
   tags: tags
   properties: {
-    subnet: {
-      id: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
-    }
-    privateLinkServiceConnections: [
-      {
-        name: 'queue'
-        properties: {
-          privateLinkServiceId: storage.outputs.resourceId
-          groupIds: [
-            'queue'
-          ]
-        }
+    subnet: { id: '${vnet.id}/subnets/${pepSubnetName}' }
+    privateLinkServiceConnections: [ {
+      name: 'queue'
+      properties: {
+        privateLinkServiceId: storage.id
+        groupIds: [ 'queue' ]
       }
-    ]
+    } ]
   }
 }
-
-resource peStorageQueueDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-09-01' = {
+resource peStorageQueueDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-07-01' = {
   parent: peStorageQueue
   name: 'default'
   properties: {
-    privateDnsZoneConfigs: [
-      {
-        name: 'queue'
-        properties: {
-          privateDnsZoneId: dnsZones[1].outputs.resourceId
-        }
-      }
-    ]
+    privateDnsZoneConfigs: [ {
+      name: 'queue'
+      properties: { privateDnsZoneId: privateDnsZones[1].id }
+    } ]
   }
-  dependsOn: [
-    dnsZones
-  ]
 }
 
-// Storage Table
-resource peStorageTable 'Microsoft.Network/privateEndpoints@2023-09-01' = {
+resource peStorageTable 'Microsoft.Network/privateEndpoints@2024-07-01' = {
   name: 'pe-${storageAccountName}-table'
   location: location
   tags: tags
   properties: {
-    subnet: {
-      id: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
-    }
-    privateLinkServiceConnections: [
-      {
-        name: 'table'
-        properties: {
-          privateLinkServiceId: storage.outputs.resourceId
-          groupIds: [
-            'table'
-          ]
-        }
+    subnet: { id: '${vnet.id}/subnets/${pepSubnetName}' }
+    privateLinkServiceConnections: [ {
+      name: 'table'
+      properties: {
+        privateLinkServiceId: storage.id
+        groupIds: [ 'table' ]
       }
-    ]
+    } ]
   }
 }
-
-resource peStorageTableDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-09-01' = {
+resource peStorageTableDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-07-01' = {
   parent: peStorageTable
   name: 'default'
   properties: {
-    privateDnsZoneConfigs: [
-      {
-        name: 'table'
-        properties: {
-          privateDnsZoneId: dnsZones[2].outputs.resourceId
-        }
-      }
-    ]
+    privateDnsZoneConfigs: [ {
+      name: 'table'
+      properties: { privateDnsZoneId: privateDnsZones[2].id }
+    } ]
   }
-  dependsOn: [
-    dnsZones
-  ]
 }
 
-// Key Vault
-resource peKeyVault 'Microsoft.Network/privateEndpoints@2023-09-01' = {
+resource peKeyVault 'Microsoft.Network/privateEndpoints@2024-07-01' = {
   name: 'pe-${kvName}-vault'
   location: location
   tags: tags
   properties: {
-    subnet: {
-      id: '${vnet.outputs.resourceId}/subnets/${pepSubnetName}'
-    }
-    privateLinkServiceConnections: [
-      {
-        name: 'vault'
-        properties: {
-          privateLinkServiceId: keyVault.outputs.resourceId
-          groupIds: [
-            'vault'
-          ]
-        }
+    subnet: { id: '${vnet.id}/subnets/${pepSubnetName}' }
+    privateLinkServiceConnections: [ {
+      name: 'vault'
+      properties: {
+        privateLinkServiceId: keyVault.id
+        groupIds: [ 'vault' ]
       }
-    ]
+    } ]
   }
 }
-
-resource peKeyVaultDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-09-01' = {
+resource peKeyVaultDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-07-01' = {
   parent: peKeyVault
   name: 'default'
   properties: {
-    privateDnsZoneConfigs: [
-      {
-        name: 'vault'
-        properties: {
-          privateDnsZoneId: dnsZones[3].outputs.resourceId
-        }
-      }
-    ]
+    privateDnsZoneConfigs: [ {
+      name: 'vault'
+      properties: { privateDnsZoneId: privateDnsZones[3].id }
+    } ]
   }
-  dependsOn: [
-    dnsZones
-  ]
 }
 
 // ---------- Static Web App ----------
@@ -493,96 +436,98 @@ resource staticWebAppFunctionLink 'Microsoft.Web/staticSites/linkedBackends@2024
   parent: staticWebApp
   name: 'backend'
   properties: {
-    backendResourceId: functionApp.outputs.resourceId
+    backendResourceId: functionApp.id
     region: location
   }
 }
 
-// Add environment variables to Static Web App
 resource staticWebAppConfig 'Microsoft.Web/staticSites/config@2024-11-01' = {
   parent: staticWebApp
   name: 'appsettings'
   properties: {
-    API_BASE_URL: 'https://${functionApp.outputs.defaultHostname}/api'
+    API_BASE_URL: 'https://${functionApp.properties.defaultHostName}/api'
   }
+  dependsOn: [ staticWebAppFunctionLink ]
 }
 
 // ---------- Role Assignments ----------
+// Role assignments scoped at resource group (could refine to resource scope if needed)
 resource raBlobDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('blobDataOwner', uamiName, storageAccountName)
+  name: guid(storage.id, roleIds.blobDataOwner, uami.name)
+  scope: storage
   properties: {
-    principalId: uami.outputs.principalId
+    principalId: uami.properties.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.blobDataOwner)
     principalType: 'ServicePrincipal'
   }
 }
-
 resource raStorageAccountContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('storageAccountContributor', uamiName, storageAccountName)
+  name: guid(storage.id, roleIds.storageAccountContributor, uami.name)
+  scope: storage
   properties: {
-    principalId: uami.outputs.principalId
+    principalId: uami.properties.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.storageAccountContributor)
     principalType: 'ServicePrincipal'
   }
 }
-
 resource raBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('blobDataContributor', uamiName, storageAccountName)
+  name: guid(storage.id, roleIds.blobDataContributor, uami.name)
+  scope: storage
   properties: {
-    principalId: uami.outputs.principalId
+    principalId: uami.properties.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.blobDataContributor)
     principalType: 'ServicePrincipal'
   }
 }
-
 resource raQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('queueDataContributor', uamiName, storageAccountName)
+  name: guid(storage.id, roleIds.queueDataContributor, uami.name)
+  scope: storage
   properties: {
-    principalId: uami.outputs.principalId
+    principalId: uami.properties.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.queueDataContributor)
     principalType: 'ServicePrincipal'
   }
 }
-
 resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('tableDataContributor', uamiName, storageAccountName)
+  name: guid(storage.id, roleIds.tableDataContributor, uami.name)
+  scope: storage
   properties: {
-    principalId: uami.outputs.principalId
+    principalId: uami.properties.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.tableDataContributor)
     principalType: 'ServicePrincipal'
   }
 }
-
 resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('metricsPublisher', uamiName, logAnalyticsName)
+  name: guid(applicationInsights.id, roleIds.metricsPublisher, uami.name)
+  scope: applicationInsights
   properties: {
-    principalId: uami.outputs.principalId
+    principalId: uami.properties.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.metricsPublisher)
     principalType: 'ServicePrincipal'
   }
 }
-
 resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid('kvSecretsUser', uamiName, kvName)
+  name: guid(keyVault.id, roleIds.kvSecretsUser, uami.name)
+  scope: keyVault
   properties: {
-    principalId: uami.outputs.principalId
+    principalId: uami.properties.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.kvSecretsUser)
     principalType: 'ServicePrincipal'
   }
 }
 
 // ---------- Outputs ----------
-output functionAppName string = functionApp.outputs.name
-output functionAppUrl string = 'https://${functionApp.outputs.defaultHostname}'
+output functionAppName string = functionApp.name
+output functionAppUrl string = 'https://${functionApp.properties.defaultHostName}'
 output staticWebAppName string = staticWebApp.name
 output staticWebAppUrl string = 'https://${staticWebApp.properties.defaultHostname}'
-output storageAccountName string = storage.outputs.name
-output applicationInsightsConnectionString string = applicationInsights.outputs.connectionString
-output logAnalyticsWorkspaceId string = logAnalytics.outputs.resourceId
-output functionAppPrincipalId string = functionApp.outputs.systemAssignedMIPrincipalId
+output storageAccountName string = storage.name
+output applicationInsightsConnectionString string = applicationInsights.properties.ConnectionString
+output logAnalyticsWorkspaceId string = logAnalytics.id
+output functionAppPrincipalId string = uami.properties.principalId
 output resourceGroupName string = resourceGroup().name
-output keyVaultName string = keyVault.outputs.name
-output userAssignedIdentityName string = uami.outputs.name
-output userAssignedIdentityClientId string = uami.outputs.clientId
+output keyVaultName string = keyVault.name
+output userAssignedIdentityName string = uami.name
+output userAssignedIdentityClientId string = uami.properties.clientId
 output groqSecretRef string = '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GROQ-API-KEY/)'
 output githubTokenRef string = '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GITHUB-TOKEN/)'
