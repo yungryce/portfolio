@@ -555,7 +555,6 @@ resource raTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04
 
 resource raMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid('metricsPublisher', uamiName, logAnalyticsName)
-  scope: logAnalytics
   properties: {
     principalId: uami.outputs.principalId
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.metricsPublisher)
