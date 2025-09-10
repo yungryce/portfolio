@@ -33,15 +33,13 @@ variables:
   - name: Location  
     value: 'westeurope'
   - name: ResourceGroupName
-    value: 'portfolioRGWestEU' 
+    value: 'RGportfolioWestEU' 
   - name: Suffix
-    value: 'dev00'  # Stable environment suffix (keep constant for this environment)
+    value: 'dev000'  # Stable environment suffix (keep constant for this environment)
   - name: DevOpsRepoUrl
     value: 'https://dev.azure.com/chxgbx/portfolio/_git/portfolio'
   - name: DevOpsBranch
     value: 'feature/infra-test'  # Branch to deploy from
-  - name: EnableRunFromPackage
-    value: 'true'
   - group: portfolio-secrets
 
 pool:
@@ -78,7 +76,6 @@ stages:
                     suffix="$(Suffix)" \
                     devOpsRepoUrl="$(DevOpsRepoUrl)" \
                     devOpsBranch="$(DevOpsBranch)" \
-                    enableRunFromPackage=$(EnableRunFromPackage) \
                   --only-show-errors || true
                 
                 echo "✅ Bicep template validation completed"
@@ -140,7 +137,6 @@ stages:
                       suffix='$(Suffix)' \
                       devOpsRepoUrl='$(DevOpsRepoUrl)' \
                       devOpsBranch='$(DevOpsBranch)' \
-                      enableRunFromPackage=$(EnableRunFromPackage) \
                     --mode Incremental \
                     --output json \
                     --only-show-errors \

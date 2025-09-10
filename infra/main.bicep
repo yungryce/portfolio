@@ -28,9 +28,6 @@ param maximumInstanceCount int = 100
 @allowed([512,2048,4096])
 param instanceMemoryMB int = 2048
 
-@description('Toggle WEBSITE_RUN_FROM_PACKAGE setting on Function App.')
-param enableRunFromPackage bool = true
-
 // Naming - Centralized and consistent
 var namePrefix            = 'portfolio'
 var resourceBase          = '${namePrefix}-${suffix}'
@@ -289,9 +286,6 @@ resource functionAppAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
   parent: functionApp
   name: 'appsettings'
   properties: {
-    FUNCTIONS_EXTENSION_VERSION: '~4'
-    FUNCTIONS_WORKER_RUNTIME: functionAppRuntime
-    WEBSITE_RUN_FROM_PACKAGE: string(enableRunFromPackage)
     APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.properties.ConnectionString
     APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
     AzureWebJobsStorage__credential: 'managedidentity'
