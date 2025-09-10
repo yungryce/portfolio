@@ -35,7 +35,7 @@ variables:
   - name: ResourceGroupName
     value: 'portfolioRGWestEU' 
   - name: Suffix
-    value: 'dev01'  # Stable environment suffix (keep constant for this environment)
+    value: 'dev00'  # Stable environment suffix (keep constant for this environment)
   - name: DevOpsRepoUrl
     value: 'https://dev.azure.com/chxgbx/portfolio/_git/portfolio'
   - name: DevOpsBranch
