@@ -8,7 +8,7 @@
 trigger:
   branches:
     include:
-      - feature/infra-test
+      - feature/infra
       - main
   paths:
     include:
@@ -18,7 +18,7 @@ trigger:
 pr:
   branches:
     include:
-      - feature/infra-test
+      - feature/infra
       - staging
       - main
   paths:
@@ -39,7 +39,7 @@ variables:
   - name: DevOpsRepoUrl
     value: 'https://dev.azure.com/chxgbx/portfolio/_git/portfolio'
   - name: DevOpsBranch
-    value: 'feature/infra-test'  # Branch to deploy from
+    value: 'feature/infra'  # Branch to deploy from
   - group: portfolio-secrets
 
 pool:
@@ -88,7 +88,7 @@ stages:
     condition: and(
         succeeded(),
         or(
-          eq(variables['Build.SourceBranch'],'refs/heads/feature/infra-test'),
+          eq(variables['Build.SourceBranch'],'refs/heads/feature/infra'),
           eq(variables['Build.SourceBranch'],'refs/heads/main')
         )
       )

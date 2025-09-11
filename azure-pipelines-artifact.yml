@@ -5,7 +5,7 @@
 # - Path-based conditions: only runs stages when relevant files change
 # - Infrastructure deployment is handled by azure-pipelines-infra.yml
 # Notes:
-# - Deploys only on branch 'staging' (builds on PRs too)
+# - Deploys on branch 'staging' and 'feature/artifact' temporaily (builds on PRs too)
 # - Uses a stable Angular output path: 'dist/'
 # - Requires infrastructure to be deployed first via azure-pipelines-infra.yml
 # - Requires:
@@ -46,6 +46,7 @@ trigger:
     include:
       - main
       - staging
+      - feature/artifact
   paths:
     include:
       - api/**
@@ -153,7 +154,7 @@ stages:
               publishLocation: 'Container'
 
   # -----------------------------
-  # Backend: Deploy (staging only)
+  # Backend: Deploy 
   # -----------------------------
   - stage: Backend_Deploy
     displayName: "Backend (Functions)"
@@ -161,6 +162,7 @@ stages:
     condition: and(
       succeeded(),
       eq(variables['Build.SourceBranch'], 'refs/heads/feature/staging'),
+      eq(variables['Build.SourceBranch'], 'refs/heads/feature/feature/artifact'),
       eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
       )
     jobs:
@@ -206,7 +208,8 @@ stages:
     dependsOn: []   # independent of backend; keep if you want parallelism
     condition: and(
       succeeded(),
-      eq(variables['Build.SourceBranch'], 'refs/heads/feature/staging')
+      eq(variables['Build.SourceBranch'], 'refs/heads/feature/staging'),
+      eq(variables['Build.SourceBranch'], 'refs/heads/feature/feature/artifact')
       )
     jobs:
       - job: check_frontend_changes
