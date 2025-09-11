@@ -16,9 +16,9 @@
 resources:
   pipelines:
     - pipeline: infraPipeline               # local alias used below
-      project: 'portfolio'                  # DevOps project name (update if different)
-      source: 'azure-pipelines-infra'       # name of the infra pipeline
-      trigger: none                         # do not automatically trigger infra on app pipeline runs
+      project: 'portfolio'                  # DevOps project name (case-sensitive)
+      source: 'yungryce.portfolio (3)'      # <- set to the exact infra pipeline display name
+      trigger: none                         # keep none or set true to auto-trigger
 
 variables:
   - name: Node_Version
@@ -190,6 +190,11 @@ stages:
                         echo "Function App $(FunctionAppName) does not exist. Please create it first."
                         exit 1
                       fi
+
+                - script: |
+                    echo "FunctionAppName=$(FunctionAppName)"
+                    echo "ResourceGroupName=$(ResourceGroupName)"
+                  displayName: "Debug resolved infra outputs"
 
                 - task: AzureFunctionApp@1
                   displayName: "Deploy Azure Function App"
