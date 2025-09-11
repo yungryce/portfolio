@@ -180,7 +180,6 @@ stages:
                 - task: AzureCLI@2
                   displayName: "Verify Function App Exists"
                   inputs:
-                    azureSubscription: '$(FunctionAppServiceConnection)'
                     scriptType: 'bash'
                     scriptLocation: 'inlineScript'
                     inlineScript: |
@@ -199,7 +198,6 @@ stages:
                 - task: AzureFunctionApp@1
                   displayName: "Deploy Azure Function App"
                   inputs:
-                    azureSubscription: '$(FunctionAppServiceConnection)'
                     appType: 'functionAppLinux'
                     appName: '$(FunctionAppName)'
                     package: '$(Pipeline.Workspace)/api/api.zip'
