@@ -1,0 +1,3 @@
+WARNING: /home/juk/portfolio/infra/main.bicep(32,7) : Warning no-unused-params: Parameter "enableRunFromPackage" is declared but never used. [https://aka.ms/bicep/linter-diagnostics#no-unused-params]
+
+ERROR: {"status":"Failed","error":{"code":"DeploymentFailed","target":"/subscriptions/105a58e6-5ddb-4fca-a952-fc0f81314fdc/resourceGroups/RGportfolioWestEU/providers/Microsoft.Resources/deployments/main","message":"At least one resource deployment operation failed. Please list deployment operations for details. Please see https://aka.ms/arm-deployment-operations for usage details.","details":[{"code":"InternalServerError","message":"There was an unexpected InternalServerError.  Please try again later.  x-ms-correlation-request-id: 86fe8ca4-f820-4146-8124-8ca621e335c5"}]}}

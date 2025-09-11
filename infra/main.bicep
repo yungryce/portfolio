@@ -149,7 +149,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-07-01' = {
             {
               name: 'functions-delegation'
               properties: {
-                serviceName: 'Microsoft.Web/serverFarms'
+                serviceName: 'Microsoft.App/environments'
               }
             }
           ]
@@ -275,10 +275,22 @@ resource functionApp 'Microsoft.Web/sites@2024-11-01' = {
         version: functionAppRuntimeVersion
       }
     }
-    virtualNetworkSubnetId: '${vnet.id}/subnets/${funcSubnetName}'
   }
   dependsOn: [
     keyVault
+  ]
+}
+
+// ---------- Function App VNet Integration ----------
+resource functionAppVnetIntegration 'Microsoft.Web/sites/networkConfig@2024-11-01' = {
+  parent: functionApp
+  name: 'virtualNetwork'
+  properties: {
+    subnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, funcSubnetName)
+    swiftSupported: true
+  }
+  dependsOn: [
+    vnet
   ]
 }
 
@@ -286,6 +298,8 @@ resource functionAppAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
   parent: functionApp
   name: 'appsettings'
   properties: {
+    WEBSITE_VNET_ROUTE_ALL: '1'
+    WEBSITE_CONTENTOVERVNET: '1'
     APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.properties.ConnectionString
     APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
     AzureWebJobsStorage__credential: 'managedidentity'
