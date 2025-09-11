@@ -26,22 +26,26 @@ variables:
   - name: Python_Version
     value: '3.11'
   - name: AzureServiceConnection
-    value: 'portfolio'
+    value: 'Infra-test'
   # - name: FunctionAppName
   #   value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'] ]
   # - name: ResourceGroupName
   #   value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'] ]
+  # - name: FunctionAppName
+  #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'], 'fa-portfolio-test') ]
+  # - name: ResourceGroupName
+  #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'], 'portfolio-test') ]
   - name: FunctionAppName
-    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'], 'fa-portfolio-test') ]
+    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.FunctionAppName'], 'fa-portfolio-def') ]
   - name: ResourceGroupName
-    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'], 'portfolio-test') ]
+    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.ResourceGroupName'], 'portfolio-def') ]
   - group: portfolio-secrets
 
 trigger:
   branches:
     include:
-      - feature/infra-test
       - main
+      - staging
   paths:
     include:
       - api/**
@@ -154,7 +158,11 @@ stages:
   - stage: Backend_Deploy
     displayName: "Backend (Functions)"
     dependsOn: Backend_Build_Package
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/feature/infra-test'), eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true'))
+    condition: and(
+      succeeded(),
+      eq(variables['Build.SourceBranch'], 'refs/heads/feature/staging'),
+      eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
+      )
     jobs:
       - deployment: deploy_backend
         displayName: "Deploy Functions"
@@ -196,7 +204,10 @@ stages:
   - stage: Frontend_Deploy_SWA
     displayName: "Frontend (Angular) — Deploy to Azure Static Web Apps"
     dependsOn: []   # independent of backend; keep if you want parallelism
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/feature/infra-test'))
+    condition: and(
+      succeeded(),
+      eq(variables['Build.SourceBranch'], 'refs/heads/feature/staging')
+      )
     jobs:
       - job: check_frontend_changes
         displayName: "Check Frontend Changes"

@@ -250,6 +250,7 @@ resource functionApp 'Microsoft.Web/sites@2024-11-01' = {
       alwaysOn: false
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
+      keyVaultReferenceIdentity: uami.id
       cors: {
         allowedOrigins: [ 'https://${staticWebAppName}.azurestaticapps.net' ]
         supportCredentials: false
@@ -299,7 +300,7 @@ resource functionAppAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
   name: 'appsettings'
   properties: {
     WEBSITE_VNET_ROUTE_ALL: '1'
-    WEBSITE_CONTENTOVERVNET: '1'
+    // WEBSITE_CONTENTOVERVNET: '1'
     APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.properties.ConnectionString
     APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
     AzureWebJobsStorage__credential: 'managedidentity'
@@ -307,8 +308,8 @@ resource functionAppAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
     AzureWebJobsStorage__queueServiceUri: 'https://${storageAccountName}.queue.${environment().suffixes.storage}'
     AzureWebJobsStorage__tableServiceUri: 'https://${storageAccountName}.table.${environment().suffixes.storage}'
     AzureWebJobsStorage__ClientId: uami.properties.clientId
-    GROQ_API_KEY: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GROQ_API_KEY/)'
-    GITHUB_TOKEN: '@Microsoft.KeyVault(SecretUri=https://${kvName}.vault.azure.net/secrets/GITHUB_TOKEN/)'
+    GROQ_API_KEY: '@Microsoft.KeyVault(VaultName=${kvName};SecretName=GROQ-API-KEY)'
+    GITHUB_TOKEN: '@Microsoft.KeyVault(VaultName=${kvName};SecretName=GITHUB-TOKEN)'
   }
 }
 
