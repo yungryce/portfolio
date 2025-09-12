@@ -15,10 +15,10 @@
 
 resources:
   pipelines:
-    - pipeline: infraPipeline               # local alias used below
-      project: 'portfolio'                  # DevOps project name (case-sensitive)
-      source: 'yungryce.portfolio (3)'      # <- set to the exact infra pipeline display name
-      trigger: true                      # keep none or set true to auto-trigger
+    - pipeline: infraPipeline 
+      project: 'portfolio'
+      source: 'yungryce.portfolio (3)'
+      trigger: true
 
 variables:
   - name: Node_Version
@@ -31,7 +31,7 @@ variables:
     value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'] ]
   - name: ResourceGroupName
     value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'] ]
-  - name: FunctionAppName
+  # - name: FunctionAppName
   #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'], 'fa-portfolio-test') ]
   # - name: ResourceGroupName
   #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'], 'portfolio-test') ]
