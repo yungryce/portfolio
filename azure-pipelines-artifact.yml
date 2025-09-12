@@ -27,18 +27,18 @@ variables:
     value: '3.11'
   - name: AzureServiceConnection
     value: 'Infra-test'
-  - name: FunctionAppName
-    value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'] ]
-  - name: ResourceGroupName
-    value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'] ]
+  # - name: FunctionAppName
+  #   value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'] ]
+  # - name: ResourceGroupName
+  #   value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'] ]
   # - name: FunctionAppName
   #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'], 'fa-portfolio-test') ]
   # - name: ResourceGroupName
   #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'], 'portfolio-test') ]
-  # - name: FunctionAppName
-  #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.FunctionAppName'], 'fa-portfolio-def') ]
-  # - name: ResourceGroupName
-  #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.ResourceGroupName'], 'portfolio-def') ]
+  - name: FunctionAppName
+    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.FunctionAppName'], 'fa-portfolio-def') ]
+  - name: ResourceGroupName
+    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.ResourceGroupName'], 'portfolio-def') ]
   - group: portfolio-secrets
 
 trigger:
@@ -169,6 +169,7 @@ stages:
     jobs:
       - deployment: deploy_backend
         displayName: "Deploy Functions"
+        environment: "staging"
         strategy:
           runOnce:
             deploy:
@@ -185,6 +186,7 @@ stages:
                 - task: AzureCLI@2
                   displayName: "Verify Function App Exists"
                   inputs:
+                    azureSubscription: '$(AzureServiceConnection)'
                     scriptType: 'bash'
                     scriptLocation: 'inlineScript'
                     inlineScript: |
