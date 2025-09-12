@@ -17,7 +17,7 @@ resources:
   pipelines:
     - pipeline: infraPipeline               # local alias used below
       project: 'portfolio'                  # DevOps project name (case-sensitive)
-      source: 'yungryce.portfolio (3)'      # <- set to the exact infra pipeline display name
+      source: 'yungryce.portfolio (4)'      # <- set to the exact infra pipeline display name
       trigger: true                      # keep none or set true to auto-trigger
 
 variables:

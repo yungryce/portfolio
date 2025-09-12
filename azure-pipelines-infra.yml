@@ -5,6 +5,13 @@
 # - Outputs resource names/IDs for application pipeline consumption
 # - Uses portfolio service connection for authentication
 
+resources:
+  pipelines:
+    - pipeline: infraPipeline
+      project: 'portfolio'
+      source: 'yungryce.portfolio (3)'
+      trigger: true  
+
 trigger:
   branches:
     include:
