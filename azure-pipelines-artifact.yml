@@ -13,6 +13,12 @@
 #     - Service connection: 'porfolio-repro' (for Function App)
 #     - Variable group: 'portfolio-secrets' with SWA_TOKEN (fallback if needed)
 
+resources:
+  pipelines:
+    - pipeline: infraPipeline               # local alias used below
+      project: 'portfolio'                  # DevOps project name (case-sensitive)
+      source: 'yungryce.portfolio (3)'      # <- set to the exact infra pipeline display name
+      trigger: true                      # keep none or set true to auto-trigger
 
 variables:
   - name: Node_Version
@@ -21,18 +27,18 @@ variables:
     value: '3.11'
   - name: AzureServiceConnection
     value: 'Infra-test'
-  # - name: FunctionAppName
-  #   value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'] ]
-  # - name: ResourceGroupName
-  #   value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'] ]
-  # - name: FunctionAppName
+  - name: FunctionAppName
+    value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'] ]
+  - name: ResourceGroupName
+    value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'] ]
+  - name: FunctionAppName
   #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'], 'fa-portfolio-test') ]
   # - name: ResourceGroupName
   #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'], 'portfolio-test') ]
-  - name: FunctionAppName
-    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.FunctionAppName'], 'fa-portfolio-def') ]
-  - name: ResourceGroupName
-    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.ResourceGroupName'], 'portfolio-def') ]
+  # - name: FunctionAppName
+  #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.FunctionAppName'], 'fa-portfolio-def') ]
+  # - name: ResourceGroupName
+  #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.ResourceGroupName'], 'portfolio-def') ]
   - group: portfolio-secrets
 
 trigger:
