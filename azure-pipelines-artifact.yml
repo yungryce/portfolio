@@ -17,7 +17,7 @@ resources:
   pipelines:
     - pipeline: infraPipeline               # local alias used below
       project: 'portfolio'                  # DevOps project name (case-sensitive)
-      source: 'yungryce.portfolio (4)'      # <- set to the exact infra pipeline display name
+      source: 'yungryce.portfolio (3)'      # <- set to the exact infra pipeline display name
       trigger: true                      # keep none or set true to auto-trigger
 
 variables:
@@ -89,7 +89,6 @@ stages:
   # -----------------------------
   - stage: Backend_Build_Package
     displayName: "Backend (Functions) — Build & Package"
-    condition: or(contains(variables['Build.SourceVersionMessage'], 'api/'), stageDependencies.CheckChanges.check_backend_changes.outputs['checkChanges.BackendChanged'])
     jobs:
       - job: check_backend_changes
         displayName: "Check Backend Changes"
@@ -99,7 +98,7 @@ stages:
           - checkout: self
             fetchDepth: "0"
           - script: |
-              git fetch origin --prune
+              git fetch origin --prune || true
               if git diff --name-only origin/main...HEAD | grep -E '^api/'; then
                 echo "Backend changes detected"
                 echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
@@ -170,7 +169,6 @@ stages:
     jobs:
       - deployment: deploy_backend
         displayName: "Deploy Functions"
-        environment: "staging"
         strategy:
           runOnce:
             deploy:
@@ -178,7 +176,12 @@ stages:
                 - download: current
                   artifact: api
 
-                # Optional: Verify the Function App exists before deployment
+                - script: |
+                    echo "FunctionAppName=$(FunctionAppName)"
+                    echo "ResourceGroupName=$(ResourceGroupName)"
+                    echo "Build.SourceBranch=$(Build.SourceBranch)"
+                  displayName: "Debug resolved variables"
+
                 - task: AzureCLI@2
                   displayName: "Verify Function App Exists"
                   inputs:
@@ -192,14 +195,10 @@ stages:
                         exit 1
                       fi
 
-                - script: |
-                    echo "FunctionAppName=$(FunctionAppName)"
-                    echo "ResourceGroupName=$(ResourceGroupName)"
-                  displayName: "Debug resolved infra outputs"
-
                 - task: AzureFunctionApp@1
                   displayName: "Deploy Azure Function App"
                   inputs:
+                    azureSubscription: '$(AzureServiceConnection)'
                     appType: 'functionAppLinux'
                     appName: '$(FunctionAppName)'
                     package: '$(Pipeline.Workspace)/api/api.zip'
@@ -210,11 +209,10 @@ stages:
   # -----------------------------
   - stage: Frontend_Deploy_SWA
     displayName: "Frontend (Angular) — Deploy to Azure Static Web Apps"
-    dependsOn: []   # independent of backend; keep if you want parallelism
-    condition: and(
-      succeeded(),
-      eq(variables['Build.SourceBranch'], 'refs/heads/feature/staging'),
-      eq(variables['Build.SourceBranch'], 'refs/heads/feature/feature/artifact')
+    dependsOn: []
+    condition: or(
+      eq(variables['Build.SourceBranch'], 'refs/heads/staging'),
+      eq(variables['Build.SourceBranch'], 'refs/heads/feature/artifact')
       )
     jobs:
       - job: check_frontend_changes
@@ -226,7 +224,7 @@ stages:
             fetchDepth: "0"
           - script: |
               # Check if any frontend files changed
-              git fetch origin --prune
+              git fetch origin --prune || true
               if git diff --name-only origin/main...HEAD | grep -E '^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)'; then
                 echo "Frontend changes detected"
                 echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
@@ -248,14 +246,13 @@ stages:
           runOnce:
             deploy:
               steps:
-                - checkout: self    # ensure source is available for npm
+                - checkout: self
                   fetchDepth: "1"
 
                 - task: NodeTool@0
                   inputs:
                     versionSpec: '$(Node_Version)'
 
-                # Optional but recommended: clean install
                 - script: |
                     npm ci
                     npm run build:prod
