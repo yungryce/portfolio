@@ -18,7 +18,7 @@ resources:
     - pipeline: infraPipeline               # local alias used below
       project: 'portfolio'                  # DevOps project name (case-sensitive)
       source: 'yungryce.portfolio (3)'      # <- set to the exact infra pipeline display name
-      trigger: none                         # keep none or set true to auto-trigger
+      trigger: true                      # keep none or set true to auto-trigger
 
 variables:
   - name: Node_Version
@@ -97,10 +97,10 @@ stages:
           vmImage: 'ubuntu-latest'
         steps:
           - checkout: self
-            fetchDepth: "2"  # Need 2 commits to compare
+            fetchDepth: "0"
           - script: |
-              # Check if any backend files changed
-              if git diff HEAD~1 --name-only | grep -E '^api/'; then
+              git fetch origin --prune
+              if git diff --name-only origin/main...HEAD | grep -E '^api/'; then
                 echo "Backend changes detected"
                 echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
               else
@@ -161,10 +161,12 @@ stages:
     dependsOn: Backend_Build_Package
     condition: and(
       succeeded(),
-      eq(variables['Build.SourceBranch'], 'refs/heads/feature/staging'),
-      eq(variables['Build.SourceBranch'], 'refs/heads/feature/feature/artifact'),
+      or(
+        eq(variables['Build.SourceBranch'], 'refs/heads/staging'),
+        eq(variables['Build.SourceBranch'], 'refs/heads/feature/artifact')
+      ),
       eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
-      )
+    )
     jobs:
       - deployment: deploy_backend
         displayName: "Deploy Functions"
@@ -221,10 +223,11 @@ stages:
           vmImage: 'ubuntu-latest'
         steps:
           - checkout: self
-            fetchDepth: "2"  # Need 2 commits to compare
+            fetchDepth: "0"
           - script: |
               # Check if any frontend files changed
-              if git diff HEAD~1 --name-only | grep -E '^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)'; then
+              git fetch origin --prune
+              if git diff --name-only origin/main...HEAD | grep -E '^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)'; then
                 echo "Frontend changes detected"
                 echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
               else
