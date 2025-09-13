@@ -45,8 +45,6 @@ trigger:
   branches:
     include:
       - feature/artifact
-      - main
-      - staging
   paths:
     include:
       - api/**
@@ -212,12 +210,7 @@ stages:
   - stage: Frontend_Deploy_SWA
     displayName: "Frontend (Angular) — Deploy to Azure Static Web Apps"
     dependsOn: []   # independent of backend; keep if you want parallelism
-    condition: and(
-      succeeded(),
-      or (
-        eq(variables['Build.SourceBranch'], 'refs/heads/feature/staging'),
-        eq(variables['Build.SourceBranch'], 'refs/heads/feature/feature/artifact')
-      )
+    condition: "and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/staging'), eq(variables['Build.SourceBranch'], 'refs/heads/feature/artifact')))"
     jobs:
       - job: check_frontend_changes
         displayName: "Check Frontend Changes"
