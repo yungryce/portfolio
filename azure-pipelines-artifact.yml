@@ -17,7 +17,7 @@ resources:
   pipelines:
     - pipeline: infraPipeline 
       project: 'portfolio'
-      source: 'yungryce.portfolio (4)'
+      source: 'yungryce.portfolio (3)'
       trigger: true
 
 variables:
