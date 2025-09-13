@@ -45,6 +45,7 @@ trigger:
   branches:
     include:
       - feature/artifact
+      - staging
   paths:
     include:
       - api/**
@@ -270,5 +271,9 @@ stages:
                   inputs:
                     azure_static_web_apps_api_token: '$(SWA_TOKEN)'
                     workingDirectory: '$(Build.SourcesDirectory)'
-                    app_build_command: ''
-                    api_build_command: ''
+                    action: 'upload'
+                    app_location: 'dist/browser'
+                    api_location: ''
+                    output_location: ''
+                    skip_app_build: true
+                    skip_api_build: true
