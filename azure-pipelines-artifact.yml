@@ -100,7 +100,7 @@ stages:
             fetchDepth: "0"
           - script: |
               git fetch origin --prune
-              if git diff --name-only origin/main...HEAD | grep -E '^api/'; then
+              if git diff --name-only origin/main...HEAD | grep -E "^api/"; then
                 echo "Backend changes detected"
                 echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
               else
@@ -166,7 +166,7 @@ stages:
         eq(variables['Build.SourceBranch'], 'refs/heads/feature/artifact')
       ),
       eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
-    )
+      )
     jobs:
       - deployment: deploy_backend
         displayName: "Deploy Functions"
@@ -211,11 +211,7 @@ stages:
   - stage: Frontend_Deploy_SWA
     displayName: "Frontend (Angular) — Deploy to Azure Static Web Apps"
     dependsOn: []   # independent of backend; keep if you want parallelism
-    condition: and(
-      succeeded(),
-      eq(variables['Build.SourceBranch'], 'refs/heads/feature/staging'),
-      eq(variables['Build.SourceBranch'], 'refs/heads/feature/feature/artifact')
-      )
+    condition: "and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/staging'), eq(variables['Build.SourceBranch'], 'refs/heads/feature/artifact')))"
     jobs:
       - job: check_frontend_changes
         displayName: "Check Frontend Changes"
@@ -227,7 +223,7 @@ stages:
           - script: |
               # Check if any frontend files changed
               git fetch origin --prune
-              if git diff --name-only origin/main...HEAD | grep -E '^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)'; then
+              if git diff --name-only origin/main...HEAD | grep -E "^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)"; then
                 echo "Frontend changes detected"
                 echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
               else
