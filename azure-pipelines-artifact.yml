@@ -44,9 +44,9 @@ variables:
 trigger:
   branches:
     include:
+      - feature/artifact
       - main
       - staging
-      - feature/artifact
   paths:
     include:
       - api/**
