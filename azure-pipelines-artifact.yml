@@ -26,7 +26,7 @@ variables:
   - name: Python_Version
     value: '3.11'
   - name: AzureServiceConnection
-    value: 'Infra-test'
+    value: 'svc-portfolio-rg-conn'
   # - name: FunctionAppName
   #   value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'] ]
   # - name: ResourceGroupName

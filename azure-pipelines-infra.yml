@@ -29,7 +29,7 @@ pr:
 
 variables:
   - name: AzureServiceConnection
-    value: 'Infra-test'
+    value: 'svc-portfolio-rg-conn'
   - name: Location  
     value: 'westeurope'
   - name: ResourceGroupName
