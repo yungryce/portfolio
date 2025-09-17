@@ -1,3 +1,4 @@
+---
 # Infrastructure Deployment Pipeline
 # Purpose: Deploy Azure infrastructure for portfolio project
 # - Triggers only on infrastructure changes or manual runs
@@ -23,14 +24,13 @@ pr:
       - infra/**
       - azure-pipelines-infra.yml
 
-
 variables:
   - name: AzureServiceConnection
     value: 'svc-portfolio-rg-conn'
-  - name: Location  
+  - name: Location
     value: 'westeurope'
   - name: ResourceGroupName
-    value: 'RGportfolioWestEU' 
+    value: 'RGportfolioWestEU'
   - name: Suffix
     value: 'dev000'  # Stable environment suffix (keep constant for this environment)
   - name: DevOpsRepoUrl
@@ -61,9 +61,9 @@ stages:
               scriptLocation: inlineScript
               inlineScript: |
                 set -e
-                
+
                 echo "Validating Bicep template for Resource Group: $(ResourceGroupName)"
-                
+
                 # What-if deployment to preview changes
                 az deployment group what-if \
                   --resource-group "$(ResourceGroupName)" \
@@ -74,7 +74,7 @@ stages:
                     devOpsRepoUrl="$(DevOpsRepoUrl)" \
                     devOpsBranch="$(DevOpsBranch)" \
                   --only-show-errors || true
-                
+
                 echo "✅ Bicep template validation completed"
             env:
               AZURE_CORE_ONLY_SHOW_ERRORS: "true"
@@ -82,17 +82,13 @@ stages:
   - stage: Deploy_Infrastructure
     displayName: "Deploy Infrastructure"
     dependsOn: Validate_Infrastructure
-    condition: and(
-        succeeded(),
-        eq(variables['Build.SourceBranch'],'refs/heads/feature/infra')   # deploy infra only from infra branch
-      )
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/feature/infra'))
     jobs:
       - job: deploy_bicep
         displayName: "Deploy Bicep Template"
         steps:
           - checkout: self
             fetchDepth: "1"
-
           - script: |
               echo "Current Azure CLI version:"
               az version --output table
@@ -140,7 +136,6 @@ stages:
                   exit 1
                 fi
 
-
                 echo "✅ Bicep deployment succeeded. Parsing outputs..."
                 cat "$DEPLOY_OUTPUT" | jq -r '.properties.outputs // {}' > /tmp/deploy_outputs.json || true
 
@@ -171,21 +166,21 @@ stages:
               inlineScript: |
                 echo "🔍 Deployment Summary:"
                 echo "=========================="
-                
+
                 # Get deployment outputs
                 OUTPUTS=$(az deployment group show \
                   --resource-group "$(ResourceGroupName)" \
                   --name main \
                   --query "properties.outputs" \
                   --output json 2>/dev/null || echo "{}")
-                
+
                 if [ "$OUTPUTS" != "{}" ]; then
                   echo "📊 Outputs:"
                   echo "$OUTPUTS" | jq -r 'to_entries[] | "  \(.key): \(.value.value)"'
                 else
                   echo "  No outputs available"
                 fi
-                
+
                 echo ""
                 echo "🔑 Key Vault Secrets to Add:"
                 echo "  az keyvault secret set --vault-name kv-portfolio-$(Suffix) --name GROQ-API-KEY --value '<your-groq-key>'"

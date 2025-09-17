@@ -20,7 +20,7 @@ resources:
       type: git
       ref: refs/heads/main
   pipelines:
-    - pipeline: infraPipeline 
+    - pipeline: infraPipeline
       project: 'portfolio'          # update if your new DevOps project name differs
       source: 'Infra'               # update if your infra pipeline name differs
       trigger: true                 # trigger app pipeline when infra completes successfully
@@ -87,6 +87,7 @@ pr:
       - docs/**
 
 stages:
+
   # -----------------------------
   # Backend: Build & Package
   # -----------------------------
@@ -159,7 +160,7 @@ stages:
               publishLocation: 'Container'
 
   # -----------------------------
-  # Backend: Deploy 
+  # Backend: Deploy
   # -----------------------------
   - stage: Backend_Deploy
     displayName: "Backend (Functions)"
