@@ -14,19 +14,25 @@
 #     - Variable group: 'portfolio-secrets' with SWA_TOKEN (fallback if needed)
 
 resources:
+  # Force this pipeline to always check out main, even when triggered by infra
+  repositories:
+    - repository: self
+      type: git
+      ref: refs/heads/main
   pipelines:
     - pipeline: infraPipeline 
-      project: 'portfolio'
-      source: 'yungryce.portfolio (3)'
-      trigger: true
+      project: 'portfolio'          # update if your new DevOps project name differs
+      source: 'Infra'               # update if your infra pipeline name differs
+      trigger: true                 # trigger app pipeline when infra completes successfully
+      branch: feature/infra
 
 variables:
-  - name: Node_Version
-    value: '20.x'
-  - name: Python_Version
-    value: '3.11'
   - name: AzureServiceConnection
     value: 'svc-portfolio-rg-conn'
+  - name: Python_Version
+    value: '3.11'
+  - name: Node_Version
+    value: '20.x'
   # - name: FunctionAppName
   #   value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'] ]
   # - name: ResourceGroupName
@@ -44,8 +50,7 @@ variables:
 trigger:
   branches:
     include:
-      - feature/artifact
-      - staging
+      - main
   paths:
     include:
       - api/**
@@ -64,8 +69,7 @@ trigger:
 pr:
   branches:
     include:
-      - staging
-      - fe
+      - main
       - feature/*
   paths:
     include:
@@ -98,7 +102,10 @@ stages:
             fetchDepth: "0"
           - script: |
               git fetch origin --prune || true
-              if git diff --name-only origin/main...HEAD | grep -E "^api/"; then
+              if [ "$BUILD_REASON" = "ResourceTrigger" ]; then
+                echo "Triggered by infra pipeline; forcing backend deploy"
+                echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
+              elif git diff --name-only origin/main...HEAD | grep -E "^api/"; then
                 echo "Backend changes detected"
                 echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
               else
@@ -160,11 +167,11 @@ stages:
     condition: and(
       succeeded(),
       or(
-        eq(variables['Build.SourceBranch'], 'refs/heads/staging'),
-        eq(variables['Build.SourceBranch'], 'refs/heads/feature/artifact')
+        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+        eq(variables['Build.Reason'], 'ResourceTrigger')    # allow deploy when infra triggers this pipeline
       ),
       eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
-      )
+    )
     jobs:
       - deployment: deploy_backend
         displayName: "Deploy Functions"
@@ -210,8 +217,14 @@ stages:
   # -----------------------------
   - stage: Frontend_Deploy_SWA
     displayName: "Frontend (Angular) — Deploy to Azure Static Web Apps"
-    dependsOn: []   # independent of backend; keep if you want parallelism
-    condition: "and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/staging'), eq(variables['Build.SourceBranch'], 'refs/heads/feature/artifact')))"
+    dependsOn: []
+    condition: and(
+      succeeded(),
+      or(
+        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+        eq(variables['Build.Reason'], 'ResourceTrigger')    # allow deploy when infra triggers this pipeline
+      )
+    )
     jobs:
       - job: check_frontend_changes
         displayName: "Check Frontend Changes"
@@ -221,9 +234,11 @@ stages:
           - checkout: self
             fetchDepth: "0"
           - script: |
-              # Check if any frontend files changed
               git fetch origin --prune || true
-              if git diff --name-only origin/main...HEAD | grep -E "^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)"; then
+              if [ "$BUILD_REASON" = "ResourceTrigger" ]; then
+                echo "Triggered by infra pipeline; forcing frontend deploy"
+                echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
+              elif git diff --name-only origin/main...HEAD | grep -E "^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)"; then
                 echo "Frontend changes detected"
                 echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
               else

@@ -9,7 +9,6 @@ trigger:
   branches:
     include:
       - feature/infra
-      - main
   paths:
     include:
       - infra/**
@@ -19,8 +18,6 @@ pr:
   branches:
     include:
       - feature/infra
-      - staging
-      - main
   paths:
     include:
       - infra/**
@@ -39,7 +36,7 @@ variables:
   - name: DevOpsRepoUrl
     value: 'https://dev.azure.com/chxgbx/portfolio/_git/portfolio'
   - name: DevOpsBranch
-    value: 'feature/infra'  # Branch to deploy from
+    value: 'main'   # SWA/app branch to link to (change if you truly want infra to point at feature/infra)
   - group: portfolio-secrets
 
 pool:
@@ -87,10 +84,7 @@ stages:
     dependsOn: Validate_Infrastructure
     condition: and(
         succeeded(),
-        or(
-          eq(variables['Build.SourceBranch'],'refs/heads/feature/infra'),
-          eq(variables['Build.SourceBranch'],'refs/heads/main')
-        )
+        eq(variables['Build.SourceBranch'],'refs/heads/feature/infra')   # deploy infra only from infra branch
       )
     jobs:
       - job: deploy_bicep
