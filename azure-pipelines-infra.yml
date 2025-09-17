@@ -117,8 +117,10 @@ stages:
                 fi
 
                 echo "Running deployment (full output for diagnostics)..."
-                DEPLOY_OUTPUT=$(mktemp)
-                if ! az deployment group create \
+
+                # Deploy and capture outputs properly
+                DEPLOYMENT_RESULT=$(mktemp)
+                if az deployment group create \
                     --name main \
                     --resource-group "$(ResourceGroupName)" \
                     --template-file infra/main.bicep \
@@ -129,21 +131,31 @@ stages:
                       devOpsBranch='$(DevOpsBranch)' \
                     --mode Incremental \
                     --output json \
-                    --only-show-errors \
-                    --query properties.outputs \
-                    > /tmp/deploy_outputs.json; then
-                  echo "❌ Deployment failed"
-                  exit 1
-                fi
-
-                echo "✅ Bicep deployment succeeded. Parsing outputs..."
-                cat "$DEPLOY_OUTPUT" | jq -r '.properties.outputs // {}' > /tmp/deploy_outputs.json || true
-
-                # attempt to read outputs safely
-                if [ -s /tmp/deploy_outputs.json ]; then
-                  jq -r 'to_entries[] | "  \(.key): \(.value.value)"' /tmp/deploy_outputs.json || true
+                    --only-show-errors > "$DEPLOYMENT_RESULT"; then
+                  
+                  echo "✅ Bicep deployment succeeded. Parsing outputs..."
+                  
+                  # Extract outputs from deployment result
+                  if [ -s "$DEPLOYMENT_RESULT" ]; then
+                    cat "$DEPLOYMENT_RESULT" | jq -r '.properties.outputs // {}' > /tmp/deploy_outputs.json || true
+                    
+                    # Display outputs
+                    if [ -s /tmp/deploy_outputs.json ]; then
+                      echo "📊 Deployment Outputs:"
+                      jq -r 'to_entries[] | "  \(.key): \(.value.value)"' /tmp/deploy_outputs.json || true
+                    fi
+                  else
+                    echo "  No deployment result available"
+                  fi
+                  
                 else
-                  echo "  No outputs available"
+                  echo "❌ Deployment failed"
+                  # Show any error details
+                  if [ -s "$DEPLOYMENT_RESULT" ]; then
+                    echo "Error details:"
+                    cat "$DEPLOYMENT_RESULT"
+                  fi
+                  exit 1
                 fi
 
                 # Set pipeline outputs with identity information
@@ -153,6 +165,9 @@ stages:
                 echo "##vso[task.setvariable variable=KeyVaultName;isOutput=true]kv-portfolio-$(Suffix)"
                 echo "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]swa-portfolio-$(Suffix)"
                 echo "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]uami-portfolio-$(Suffix)"
+                
+                # Cleanup
+                rm -f "$DEPLOYMENT_RESULT" || true
             env:
               AZURE_CORE_ONLY_SHOW_ERRORS: "true"
 
