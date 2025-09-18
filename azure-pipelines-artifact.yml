@@ -33,18 +33,10 @@ variables:
     value: '3.11'
   - name: Node_Version
     value: '20.x'
-  # - name: FunctionAppName
-  #   value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'] ]
-  # - name: ResourceGroupName
-  #   value: $[ resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'] ]
-  # - name: FunctionAppName
-  #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.FunctionAppName'], 'fa-portfolio-test') ]
-  # - name: ResourceGroupName
-  #   value: $[ coalesce(resources.pipeline.infraPipeline.outputs['deploy_bicep.ResourceGroupName'], 'portfolio-test') ]
   - name: FunctionAppName
-    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.FunctionAppName'], 'fa-portfolio-def') ]
+    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.deployInfra.FunctionAppName'], 'fa-portfolio-def') ]
   - name: ResourceGroupName
-    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.ResourceGroupName'], 'portfolio-def') ]
+    value: $[ coalesce(resources.pipeline.infraPipeline.outputs['Deploy_Infrastructure.deploy_bicep.deployInfra.ResourceGroupName'], 'portfolio-def') ]
   - group: portfolio-secrets
 
 trigger:

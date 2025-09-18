@@ -90,16 +90,12 @@ stages:
           - checkout: self
             fetchDepth: "1"
           - script: |
-              echo "Current Azure CLI version:"
-              az version --output table
-              echo "Updating Azure CLI..."
-              curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-              echo "Updated Azure CLI version:"
-              az version --output table
-            displayName: "Update Azure CLI"
-
+              echo "Azure CLI (preinstalled) version:"
+              az version --output table || az --version
+            displayName: "Show Azure CLI Version"
           # Deploy infrastructure with static RG and existence check
           - task: AzureCLI@2
+            name: deployInfra            # <-- NAME REQUIRED FOR OUTPUTS
             displayName: "Deploy Bicep Template"
             inputs:
               azureSubscription: '$(AzureServiceConnection)'
@@ -108,66 +104,75 @@ stages:
               inlineScript: |
                 set -euo pipefail
 
-                # Check if RG exists and create only if it doesn't
-                if ! az group show --name "$(ResourceGroupName)" --query "name" --output tsv 2>/dev/null; then
+                echo "Resource Group target: $(ResourceGroupName)"
+
+                if ! az group show --name "$(ResourceGroupName)" --query "name" -o tsv 2>/dev/null; then
                   echo "Creating Resource Group: $(ResourceGroupName)"
-                  az group create --name "$(ResourceGroupName)" --location "$(Location)" --only-show-errors
+                  az group create --name "$(ResourceGroupName)" --location "$(Location)" --only-show-errors 1>/dev/null
                 else
                   echo "Resource Group $(ResourceGroupName) already exists"
                 fi
 
-                echo "Running deployment (full output for diagnostics)..."
-
-                # Deploy and capture outputs properly
-                DEPLOYMENT_RESULT=$(mktemp)
-                if az deployment group create \
-                    --name main \
-                    --resource-group "$(ResourceGroupName)" \
-                    --template-file infra/main.bicep \
-                    --parameters \
-                      location='$(Location)' \
-                      suffix='$(Suffix)' \
-                      devOpsRepoUrl='$(DevOpsRepoUrl)' \
-                      devOpsBranch='$(DevOpsBranch)' \
-                    --mode Incremental \
-                    --output json \
-                    --only-show-errors > "$DEPLOYMENT_RESULT"; then
-                  
-                  echo "✅ Bicep deployment succeeded. Parsing outputs..."
-                  
-                  # Extract outputs from deployment result
-                  if [ -s "$DEPLOYMENT_RESULT" ]; then
-                    cat "$DEPLOYMENT_RESULT" | jq -r '.properties.outputs // {}' > /tmp/deploy_outputs.json || true
-                    
-                    # Display outputs
-                    if [ -s /tmp/deploy_outputs.json ]; then
-                      echo "📊 Deployment Outputs:"
-                      jq -r 'to_entries[] | "  \(.key): \(.value.value)"' /tmp/deploy_outputs.json || true
-                    fi
-                  else
-                    echo "  No deployment result available"
-                  fi
-                  
-                else
+                echo "Starting deployment..."
+                # Run deployment (no redirection to avoid double stream consumption)
+                if ! az deployment group create \
+                  --name main \
+                  --resource-group "$(ResourceGroupName)" \
+                  --template-file infra/main.bicep \
+                  --parameters \
+                    location='$(Location)' \
+                    suffix='$(Suffix)' \
+                    devOpsRepoUrl='$(DevOpsRepoUrl)' \
+                    devOpsBranch='$(DevOpsBranch)' \
+                  --mode Incremental \
+                  --only-show-errors \
+                  --no-prompt; then
                   echo "❌ Deployment failed"
-                  # Show any error details
-                  if [ -s "$DEPLOYMENT_RESULT" ]; then
-                    echo "Error details:"
-                    cat "$DEPLOYMENT_RESULT"
-                  fi
                   exit 1
                 fi
 
-                # Set pipeline outputs with identity information
-                echo "##vso[task.setvariable variable=FunctionAppName;isOutput=true]fa-portfolio-$(Suffix)"
+                echo "✅ Deployment finished. Fetching outputs..."
+                OUTPUTS_JSON=$(az deployment group show \
+                  --resource-group "$(ResourceGroupName)" \
+                  --name main \
+                  --query "properties.outputs" -o json 2>/dev/null || echo "{}")
+
+                echo "$OUTPUTS_JSON" > /tmp/deploy_outputs.json
+
+                if command -v jq >/dev/null 2>&1; then
+                  echo "📊 Outputs:"
+                  echo "$OUTPUTS_JSON" | jq -r 'to_entries[] | "  \(.key): \(.value.value)"' || true
+                else
+                  echo "Raw outputs:"
+                  cat /tmp/deploy_outputs.json
+                fi
+
+                # Safe extraction helper
+                get_output () {
+                  echo "$OUTPUTS_JSON" | jq -r --arg k "$1" '(.[$k].value // empty)' 2>/dev/null || true
+                }
+
+                # Fallback to deterministic names if template output absent (should exist)
+                FUNCTION_APP_NAME="$(get_output functionAppName)"
+                STORAGE_ACCOUNT_NAME="$(get_output storageAccountName)"
+                STATIC_WEB_APP_NAME="$(get_output staticWebAppName)"
+                KEY_VAULT_NAME="$(get_output keyVaultName)"
+                UAMI_NAME="$(get_output userAssignedIdentityName)"
+
+                # If any critical value empty, infer from naming convention
+                : "${FUNCTION_APP_NAME:=fa-portfolio-$(Suffix)}"
+                : "${STORAGE_ACCOUNT_NAME:=stgportfolio$(Suffix)}"
+                : "${STATIC_WEB_APP_NAME:=swa-portfolio-$(Suffix)}"
+                : "${KEY_VAULT_NAME:=kv-portfolio-$(Suffix)}"
+                : "${UAMI_NAME:=uami-portfolio-$(Suffix)}"
+
+                echo "Setting pipeline output variables..."
+                echo "##vso[task.setvariable variable=FunctionAppName;isOutput=true]${FUNCTION_APP_NAME}"
                 echo "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$(ResourceGroupName)"
-                echo "##vso[task.setvariable variable=StorageAccountName;isOutput=true]stportfolio$(Suffix)"
-                echo "##vso[task.setvariable variable=KeyVaultName;isOutput=true]kv-portfolio-$(Suffix)"
-                echo "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]swa-portfolio-$(Suffix)"
-                echo "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]uami-portfolio-$(Suffix)"
-                
-                # Cleanup
-                rm -f "$DEPLOYMENT_RESULT" || true
+                echo "##vso[task.setvariable variable=StorageAccountName;isOutput=true]${STORAGE_ACCOUNT_NAME}"
+                echo "##vso[task.setvariable variable=KeyVaultName;isOutput=true]${KEY_VAULT_NAME}"
+                echo "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]${STATIC_WEB_APP_NAME}"
+                echo "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]${UAMI_NAME}"
             env:
               AZURE_CORE_ONLY_SHOW_ERRORS: "true"
 
