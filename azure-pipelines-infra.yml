@@ -127,7 +127,7 @@ stages:
                   --mode Incremental \
                   --only-show-errors \
                   --no-prompt; then
-                  echo "❌ Deployment failed"
+                  echo "❌❌❌ Deployment failed"
                   exit 1
                 fi
 
