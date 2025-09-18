@@ -36,7 +36,7 @@ variables:
   - name: DevOpsRepoUrl
     value: 'https://dev.azure.com/chxgbx/portfolio/_git/portfolio'
   - name: DevOpsBranch
-    value: 'main'   # SWA/app branch to link to (change if you truly want infra to point at feature/infra)
+    value: 'feature/infra'   # SWA/app branch to link to (change if you truly want infra to point at feature/infra)
   - group: portfolio-secrets
 
 pool:
@@ -72,7 +72,7 @@ stages:
                     location="$(Location)" \
                     suffix="$(Suffix)" \
                     devOpsRepoUrl="$(DevOpsRepoUrl)" \
-                    devOpsBranch="$(DevOpsBranch)" \
+                    devOpsBranch="$(Build.SourceBranchName)" \
                   --only-show-errors || true
 
                 echo "✅ Bicep template validation completed"
@@ -123,10 +123,9 @@ stages:
                     location='$(Location)' \
                     suffix='$(Suffix)' \
                     devOpsRepoUrl='$(DevOpsRepoUrl)' \
-                    devOpsBranch='$(DevOpsBranch)' \
+                    devOpsBranch='$(Build.SourceBranchName)' \
                   --mode Incremental \
-                  --only-show-errors \
-                  --no-prompt; then
+                  --output json; then
                   echo "❌❌❌ Deployment failed"
                   exit 1
                 fi
@@ -139,31 +138,27 @@ stages:
 
                 echo "$OUTPUTS_JSON" > /tmp/deploy_outputs.json
 
-                if command -v jq >/dev/null 2>&1; then
-                  echo "📊 Outputs:"
-                  echo "$OUTPUTS_JSON" | jq -r 'to_entries[] | "  \(.key): \(.value.value)"' || true
-                else
-                  echo "Raw outputs:"
-                  cat /tmp/deploy_outputs.json
-                fi
-
-                # Safe extraction helper
-                get_output () {
-                  echo "$OUTPUTS_JSON" | jq -r --arg k "$1" '(.[$k].value // empty)' 2>/dev/null || true
+                get_output() {
+                  if command -v jq >/dev/null 2>&1; then
+                    echo "$OUTPUTS_JSON" | jq -r --arg k "$1" '(.[$k].value // empty)' 2>/dev/null || true
+                  else
+                    # fallback: try grep/parsing (less robust)
+                    echo ""
+                  fi
                 }
 
-                # Fallback to deterministic names if template output absent (should exist)
-                FUNCTION_APP_NAME="$(get_output functionAppName)"
-                STORAGE_ACCOUNT_NAME="$(get_output storageAccountName)"
-                STATIC_WEB_APP_NAME="$(get_output staticWebAppName)"
-                KEY_VAULT_NAME="$(get_output keyVaultName)"
-                UAMI_NAME="$(get_output userAssignedIdentityName)"
+                # extract outputs (names must match Bicep outputs keys)
+                FUNCTION_APP_NAME=$(get_output functionAppName)
+                STORAGE_ACCOUNT_NAME=$(get_output storageAccountName)
+                KEY_VAULT_NAME=$(get_output keyVaultName)
+                STATIC_WEB_APP_NAME=$(get_output staticWebAppName)
+                UAMI_NAME=$(get_output userAssignedIdentityName)
 
-                # If any critical value empty, infer from naming convention
+                # fallbacks using naming convention if outputs missing
                 : "${FUNCTION_APP_NAME:=fa-portfolio-$(Suffix)}"
                 : "${STORAGE_ACCOUNT_NAME:=stgportfolio$(Suffix)}"
-                : "${STATIC_WEB_APP_NAME:=swa-portfolio-$(Suffix)}"
                 : "${KEY_VAULT_NAME:=kv-portfolio-$(Suffix)}"
+                : "${STATIC_WEB_APP_NAME:=swa-portfolio-$(Suffix)}"
                 : "${UAMI_NAME:=uami-portfolio-$(Suffix)}"
 
                 echo "Setting pipeline output variables..."
