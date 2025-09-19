@@ -254,7 +254,7 @@ stages:
         dependsOn: check_frontend_changes
         condition: >-
           eq(dependencies.check_frontend_changes.outputs['checkChanges.FrontendChanged'], 'true')
-        environment: "staging"
+        environment: "portfolio-dev"
         pool:
           vmImage: 'ubuntu-latest'
         strategy:
