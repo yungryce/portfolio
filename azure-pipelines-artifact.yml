@@ -1,3 +1,4 @@
+---
 # .azure-pipelines.yml
 # Purpose: CI/CD for fullstack app artifacts (DOES NOT DEPLOY INFRASTRUCTURE)
 # - Backend: Python Azure Functions (Flex Consumption)
@@ -94,7 +95,8 @@ stages:
       - job: build_backend
         displayName: "Build Function App (zip)"
         dependsOn: check_backend_changes
-        condition: eq(dependencies.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
+        condition: >-
+          eq(dependencies.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
         pool:
           vmImage: 'ubuntu-latest'
         steps:
@@ -140,14 +142,15 @@ stages:
   - stage: Backend_Deploy
     displayName: "Backend (Functions)"
     dependsOn: Backend_Build_Package
-    condition: and(
-      succeeded(),
-      or(
-        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
-        eq(variables['Build.Reason'], 'ResourceTrigger')    # allow deploy when infra triggers this pipeline
-      ),
-      eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
-    )
+    condition: >-
+      and(
+        succeeded(),
+        or(
+          eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+          eq(variables['Build.Reason'], 'ResourceTrigger')
+        ),
+        eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
+      )
     jobs:
       - deployment: deploy_backend
         displayName: "Deploy Functions"
@@ -190,7 +193,9 @@ stages:
                     scriptType: 'bash'
                     scriptLocation: 'inlineScript'
                     inlineScript: |
-                      if az functionapp show --name $(FunctionAppName) --resource-group $(ResourceGroupName) --query name -o tsv; then
+                      if az functionapp show --name $(FunctionAppName) \
+                          --resource-group $(ResourceGroupName) \
+                          --query name -o tsv; then
                         echo "Function App $(FunctionAppName) exists."
                       else
                         echo "Function App $(FunctionAppName) does not exist. Please create it first."
@@ -212,13 +217,14 @@ stages:
   - stage: Frontend_Deploy_SWA
     displayName: "Frontend (Angular) — Deploy to Azure Static Web Apps"
     dependsOn: []
-    condition: and(
-      succeeded(),
-      or(
-        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
-        eq(variables['Build.Reason'], 'ResourceTrigger')    # allow deploy when infra triggers this pipeline
+    condition: >-
+      and(
+        succeeded(),
+        or(
+          eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+          eq(variables['Build.Reason'], 'ResourceTrigger')
+        )
       )
-    )
     jobs:
       - job: check_frontend_changes
         displayName: "Check Frontend Changes"
@@ -232,7 +238,8 @@ stages:
               if [ "$BUILD_REASON" = "ResourceTrigger" ]; then
                 echo "Triggered by infra pipeline; forcing frontend deploy"
                 echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
-              elif git diff --name-only origin/main...HEAD | grep -E "^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)"; then
+              elif git diff --name-only origin/main...HEAD | \
+                  grep -E "^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)"; then
                 echo "Frontend changes detected"
                 echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
               else
@@ -245,7 +252,8 @@ stages:
       - deployment: deploy_frontend
         displayName: "Build & Deploy SWA"
         dependsOn: check_frontend_changes
-        condition: eq(dependencies.check_frontend_changes.outputs['checkChanges.FrontendChanged'], 'true')
+        condition: >-
+          eq(dependencies.check_frontend_changes.outputs['checkChanges.FrontendChanged'], 'true')
         environment: "staging"
         pool:
           vmImage: 'ubuntu-latest'
