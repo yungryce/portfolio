@@ -57,25 +57,29 @@ stages:
             displayName: "Validate Bicep Template"
             inputs:
               azureSubscription: '$(AzureServiceConnection)'
-              scriptType: bash
+              scriptType: pscore
               scriptLocation: inlineScript
               inlineScript: |
-                set -e
+                $ErrorActionPreference = 'Stop'
 
-                echo "Validating Bicep template for Resource Group: $(ResourceGroupName)"
+                Write-Host "Validating Bicep template for Resource Group: $(ResourceGroupName)"
 
                 # What-if deployment to preview changes
-                az deployment group what-if \
-                  --resource-group "$(ResourceGroupName)" \
-                  --template-file infra/main.bicep \
-                  --parameters \
-                    location="$(Location)" \
-                    suffix="$(Suffix)" \
-                    devOpsRepoUrl="$(DevOpsRepoUrl)" \
-                    devOpsBranch="$(Build.SourceBranchName)" \
-                  --only-show-errors || true
+                try {
+                    az deployment group what-if `
+                      --resource-group "$(ResourceGroupName)" `
+                      --template-file infra/main.bicep `
+                      --parameters `
+                        location="$(Location)" `
+                        suffix="$(Suffix)" `
+                        devOpsRepoUrl="$(DevOpsRepoUrl)" `
+                        devOpsBranch="$(Build.SourceBranchName)" `
+                      --only-show-errors
+                } catch {
+                    Write-Host "What-if validation completed with warnings (expected for initial run)"
+                }
 
-                echo "✅ Bicep template validation completed"
+                Write-Host "✅ Bicep template validation completed"
             env:
               AZURE_CORE_ONLY_SHOW_ERRORS: "true"
 
@@ -84,136 +88,178 @@ stages:
     dependsOn: Validate_Infrastructure
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/feature/infra'))
     jobs:
-      - job: deploy_bicep
+      - deployment: deploy_bicep
         displayName: "Deploy Bicep Template"
-        steps:
-          - checkout: self
-            fetchDepth: "1"
-          - script: |
-              echo "Azure CLI (preinstalled) version:"
-              az version --output table || az --version
-            displayName: "Show Azure CLI Version"
+        environment: 'portfolio-dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  fetchDepth: "1"
+                
+                - task: PowerShell@2
+                  displayName: "Show Azure CLI Version"
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      Write-Host "Azure CLI version:"
+                      az version --output table
+                    pwsh: true
 
-          - task: AzureCLI@2
-            name: deployInfra
-            displayName: "Deploy Bicep Template"
-            inputs:
-              azureSubscription: '$(AzureServiceConnection)'
-              scriptType: ps
-              scriptLocation: inlineScript
-              inlineScript: |
-                $ErrorActionPreference = 'Stop'
-                
-                Write-Host "Resource Group target: $(ResourceGroupName)"
-                
-                # Check if resource group exists, create if it doesn't
-                $rgExists = az group show --name "$(ResourceGroupName)" --query "name" -o tsv 2>$null
-                if (-not $rgExists) {
-                    Write-Host "Creating Resource Group: $(ResourceGroupName)"
-                    az group create --name "$(ResourceGroupName)" --location "$(Location)" --only-show-errors | Out-Null
-                } else {
-                    Write-Host "Resource Group $(ResourceGroupName) already exists"
-                }
-                
-                Write-Host "Starting deployment..."
-                
-                # Deploy using PowerShell with table output
-                $deployResult = az deployment group create `
-                  --name "infra-$(Build.SourceBranchName)-$(Build.BuildId)" `
-                  --resource-group "$(ResourceGroupName)" `
-                  --template-file infra/main.bicep `
-                  --parameters `
-                    location='$(Location)' `
-                    suffix='$(Suffix)' `
-                    devOpsRepoUrl='$(DevOpsRepoUrl)' `
-                    devOpsBranch='$(Build.SourceBranchName)' `
-                  --mode Incremental `
-                  --output table
-                
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Error "❌❌❌ Deployment failed with exit code: $LASTEXITCODE"
-                    exit $LASTEXITCODE
-                }
-                
-                Write-Host "✅ Deployment completed successfully"
-                
-                # Fetch and set output variables for other pipelines
-                Write-Host "Fetching deployment outputs..."
-                $outputsJson = az deployment group show `
-                  --resource-group "$(ResourceGroupName)" `
-                  --name "infra-$(Build.SourceBranchName)-$(Build.BuildId)" `
-                  --query "properties.outputs" `
-                  --output json 2>$null
-                
-                if ($outputsJson -and $outputsJson -ne "{}") {
-                    $outputs = $outputsJson | ConvertFrom-Json
-                    
-                    # Extract output values with fallbacks
-                    $functionAppName = if ($outputs.functionAppName) { $outputs.functionAppName.value } else { "fa-portfolio-$(Suffix)" }
-                    $storageAccountName = if ($outputs.storageAccountName) { $outputs.storageAccountName.value } else { "stgportfolio$(Suffix)" }
-                    $keyVaultName = if ($outputs.keyVaultName) { $outputs.keyVaultName.value } else { "kv-portfolio-$(Suffix)" }
-                    $staticWebAppName = if ($outputs.staticWebAppName) { $outputs.staticWebAppName.value } else { "swa-portfolio-$(Suffix)" }
-                    $uamiName = if ($outputs.userAssignedIdentityName) { $outputs.userAssignedIdentityName.value } else { "uami-portfolio-$(Suffix)" }
-                    
-                    Write-Host "📊 Retrieved outputs:"
-                    Write-Host "  FunctionAppName: $functionAppName"
-                    Write-Host "  StorageAccountName: $storageAccountName"
-                    Write-Host "  KeyVaultName: $keyVaultName"
-                    Write-Host "  StaticWebAppName: $staticWebAppName"
-                    Write-Host "  UserAssignedIdentityName: $uamiName"
-                    
-                    # Set pipeline output variables for consumption by other pipelines
-                    Write-Host "Setting pipeline output variables..."
-                    Write-Host "##vso[task.setvariable variable=FunctionAppName;isOutput=true]$functionAppName"
-                    Write-Host "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$(ResourceGroupName)"
-                    Write-Host "##vso[task.setvariable variable=StorageAccountName;isOutput=true]$storageAccountName"
-                    Write-Host "##vso[task.setvariable variable=KeyVaultName;isOutput=true]$keyVaultName"
-                    Write-Host "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]$staticWebAppName"
-                    Write-Host "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]$uamiName"
-                } else {
-                    Write-Host "No outputs available, using fallback values"
-                    # Set fallback values
-                    Write-Host "##vso[task.setvariable variable=FunctionAppName;isOutput=true]fa-portfolio-$(Suffix)"
-                    Write-Host "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$(ResourceGroupName)"
-                    Write-Host "##vso[task.setvariable variable=StorageAccountName;isOutput=true]stgportfolio$(Suffix)"
-                    Write-Host "##vso[task.setvariable variable=KeyVaultName;isOutput=true]kv-portfolio-$(Suffix)"
-                    Write-Host "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]swa-portfolio-$(Suffix)"
-                    Write-Host "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]uami-portfolio-$(Suffix)"
-                }
+                - task: AzureCLI@2
+                  name: deployInfra
+                  displayName: "Deploy Bicep Template"
+                  inputs:
+                    azureSubscription: '$(AzureServiceConnection)'
+                    scriptType: pscore
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      $ErrorActionPreference = 'Stop'
+                      
+                      Write-Host "Resource Group target: $(ResourceGroupName)"
+                      
+                      # Check if resource group exists, create if it doesn't
+                      try {
+                          $rgExists = az group show --name "$(ResourceGroupName)" --query "name" -o tsv 2>$null
+                          if (-not $rgExists -or $rgExists -eq "") {
+                              Write-Host "Creating Resource Group: $(ResourceGroupName)"
+                              az group create --name "$(ResourceGroupName)" --location "$(Location)" --only-show-errors | Out-Null
+                          } else {
+                              Write-Host "Resource Group $(ResourceGroupName) already exists"
+                          }
+                      } catch {
+                          Write-Host "Creating Resource Group: $(ResourceGroupName)"
+                          az group create --name "$(ResourceGroupName)" --location "$(Location)" --only-show-errors | Out-Null
+                      }
+                      
+                      Write-Host "Starting deployment..."
+                      
+                      # Deploy using PowerShell Core with JSON output to avoid stream issues
+                      try {
+                          $deploymentName = "infra-$(Build.SourceBranchName)-$(Build.BuildId)"
+                          Write-Host "Deployment name: $deploymentName"
+                          
+                          az deployment group create `
+                            --name $deploymentName `
+                            --resource-group "$(ResourceGroupName)" `
+                            --template-file infra/main.bicep `
+                            --parameters `
+                              location='$(Location)' `
+                              suffix='$(Suffix)' `
+                              devOpsRepoUrl='$(DevOpsRepoUrl)' `
+                              devOpsBranch='$(Build.SourceBranchName)' `
+                            --mode Incremental `
+                            --output json `
+                            --only-show-errors
+                          
+                          if ($LASTEXITCODE -ne 0) {
+                              throw "Deployment failed with exit code: $LASTEXITCODE"
+                          }
+                          
+                          Write-Host "✅ Deployment completed successfully"
+                          
+                          # Fetch and set output variables for other pipelines
+                          Write-Host "Fetching deployment outputs..."
+                          
+                          $outputsJson = az deployment group show `
+                            --resource-group "$(ResourceGroupName)" `
+                            --name $deploymentName `
+                            --query "properties.outputs" `
+                            --output json 2>$null
+                          
+                          if ($outputsJson -and $outputsJson -ne "{}" -and $outputsJson -ne "null") {
+                              try {
+                                  $outputs = $outputsJson | ConvertFrom-Json
+                                  
+                                  # Extract output values with fallbacks
+                                  $functionAppName = if ($outputs.functionAppName) { $outputs.functionAppName.value } else { "fa-portfolio-$(Suffix)" }
+                                  $storageAccountName = if ($outputs.storageAccountName) { $outputs.storageAccountName.value } else { "stgportfolio$(Suffix)" }
+                                  $keyVaultName = if ($outputs.keyVaultName) { $outputs.keyVaultName.value } else { "kv-portfolio-$(Suffix)" }
+                                  $staticWebAppName = if ($outputs.staticWebAppName) { $outputs.staticWebAppName.value } else { "swa-portfolio-$(Suffix)" }
+                                  $uamiName = if ($outputs.userAssignedIdentityName) { $outputs.userAssignedIdentityName.value } else { "uami-portfolio-$(Suffix)" }
+                                  
+                                  Write-Host "📊 Retrieved outputs:"
+                                  Write-Host "  FunctionAppName: $functionAppName"
+                                  Write-Host "  StorageAccountName: $storageAccountName"
+                                  Write-Host "  KeyVaultName: $keyVaultName"
+                                  Write-Host "  StaticWebAppName: $staticWebAppName"
+                                  Write-Host "  UserAssignedIdentityName: $uamiName"
+                                  
+                                  # Set pipeline output variables for consumption by other pipelines
+                                  Write-Host "Setting pipeline output variables..."
+                                  Write-Host "##vso[task.setvariable variable=FunctionAppName;isOutput=true]$functionAppName"
+                                  Write-Host "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$(ResourceGroupName)"
+                                  Write-Host "##vso[task.setvariable variable=StorageAccountName;isOutput=true]$storageAccountName"
+                                  Write-Host "##vso[task.setvariable variable=KeyVaultName;isOutput=true]$keyVaultName"
+                                  Write-Host "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]$staticWebAppName"
+                                  Write-Host "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]$uamiName"
+                              } catch {
+                                  Write-Host "Error parsing outputs, using fallback values"
+                                  # Set fallback values
+                                  Write-Host "##vso[task.setvariable variable=FunctionAppName;isOutput=true]fa-portfolio-$(Suffix)"
+                                  Write-Host "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$(ResourceGroupName)"
+                                  Write-Host "##vso[task.setvariable variable=StorageAccountName;isOutput=true]stgportfolio$(Suffix)"
+                                  Write-Host "##vso[task.setvariable variable=KeyVaultName;isOutput=true]kv-portfolio-$(Suffix)"
+                                  Write-Host "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]swa-portfolio-$(Suffix)"
+                                  Write-Host "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]uami-portfolio-$(Suffix)"
+                              }
+                          } else {
+                              Write-Host "No outputs available, using fallback values"
+                              # Set fallback values
+                              Write-Host "##vso[task.setvariable variable=FunctionAppName;isOutput=true]fa-portfolio-$(Suffix)"
+                              Write-Host "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$(ResourceGroupName)"
+                              Write-Host "##vso[task.setvariable variable=StorageAccountName;isOutput=true]stgportfolio$(Suffix)"
+                              Write-Host "##vso[task.setvariable variable=KeyVaultName;isOutput=true]kv-portfolio-$(Suffix)"
+                              Write-Host "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]swa-portfolio-$(Suffix)"
+                              Write-Host "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]uami-portfolio-$(Suffix)"
+                          }
+                      } catch {
+                          Write-Error "❌❌❌ Deployment failed: $($_.Exception.Message)"
+                          throw
+                      }
 
-          # Show Deployment Outputs with static RG
-          - task: AzureCLI@2
-            displayName: "Show Deployment Outputs"
-            inputs:
-              azureSubscription: '$(AzureServiceConnection)'
-              scriptType: ps
-              scriptLocation: inlineScript
-              inlineScript: |
-                Write-Host "🔍 Deployment Summary:"
-                Write-Host "=========================="
-                
-                # Get deployment outputs
-                $outputsJson = az deployment group show `
-                  --resource-group "$(ResourceGroupName)" `
-                  --name "infra-$(Build.SourceBranchName)-$(Build.BuildId)" `
-                  --query "properties.outputs" `
-                  --output json 2>$null
-                
-                if ($outputsJson -and $outputsJson -ne "{}") {
-                    Write-Host "📊 Outputs:"
-                    $outputs = $outputsJson | ConvertFrom-Json
-                    $outputs | Get-Member -MemberType NoteProperty | ForEach-Object {
-                        $key = $_.Name
-                        $value = $outputs.$key.value
-                        Write-Host "  $key`: $value"
-                    }
-                } else {
-                    Write-Host "  No outputs available"
-                }
-                
-                Write-Host ""
-                Write-Host "🔑 Key Vault Secrets to Add:"
-                Write-Host "  az keyvault secret set --vault-name kv-portfolio-$(Suffix) --name GROQ-API-KEY --value '<your-groq-key>'"
-                Write-Host "  az keyvault secret set --vault-name kv-portfolio-$(Suffix) --name GITHUB-TOKEN --value '<your-github-token>'"
+                # Show Deployment Outputs with static RG
+                - task: AzureCLI@2
+                  displayName: "Show Deployment Outputs"
+                  inputs:
+                    azureSubscription: '$(AzureServiceConnection)'
+                    scriptType: pscore
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      $ErrorActionPreference = 'Stop'
+                      
+                      Write-Host "🔍 Deployment Summary:"
+                      Write-Host "=========================="
+                      
+                      $deploymentName = "infra-$(Build.SourceBranchName)-$(Build.BuildId)"
+                      
+                      # Get deployment outputs
+                      try {
+                          $outputsJson = az deployment group show `
+                            --resource-group "$(ResourceGroupName)" `
+                            --name $deploymentName `
+                            --query "properties.outputs" `
+                            --output json 2>$null
+                          
+                          if ($outputsJson -and $outputsJson -ne "{}" -and $outputsJson -ne "null") {
+                              Write-Host "📊 Outputs:"
+                              $outputs = $outputsJson | ConvertFrom-Json
+                              $outputs.PSObject.Properties | ForEach-Object {
+                                  $key = $_.Name
+                                  $value = $_.Value.value
+                                  Write-Host "  ${key}: $value"
+                              }
+                          } else {
+                              Write-Host "  No outputs available"
+                          }
+                      } catch {
+                          Write-Host "  Error retrieving outputs: $($_.Exception.Message)"
+                      }
+                      
+                      Write-Host ""
+                      Write-Host "🔑 Key Vault Secrets to Add:"
+                      Write-Host "  az keyvault secret set --vault-name kv-portfolio-$(Suffix) --name GROQ-API-KEY --value '<your-groq-key>'"
+                      Write-Host "  az keyvault secret set --vault-name kv-portfolio-$(Suffix) --name GITHUB-TOKEN --value '<your-github-token>'"
 
 
