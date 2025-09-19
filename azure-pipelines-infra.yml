@@ -182,8 +182,8 @@ stages:
                 echo "##vso[task.setvariable variable=KeyVaultName;isOutput=true]${KEY_VAULT_NAME}"
                 echo "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]${STATIC_WEB_APP_NAME}"
                 echo "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]${UAMI_NAME}"
-            env:
-              AZURE_CORE_ONLY_SHOW_ERRORS: "true"
+            # env:
+            #   AZURE_CORE_ONLY_SHOW_ERRORS: "true"
 
           # Show Deployment Outputs with static RG
           - task: AzureCLI@2
