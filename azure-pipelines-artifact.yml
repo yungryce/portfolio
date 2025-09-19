@@ -78,30 +78,30 @@ stages:
           - checkout: self
             fetchDepth: "0"
           - script: |
-            set -e
-            file="infra/outputs.env"
-            if [ ! -f "$file" ]; then
-              echo "Missing $file. Run infra-run.sh locally and commit it."
-              exit 1
-            fi
-            . "$file"
+              set -e
+              file="infra/outputs.env"
+              if [ ! -f "$file" ]; then
+                echo "Missing $file. Run infra-run.sh locally and commit it."
+                exit 1
+              fi
+              . "$file"
 
-            echo "🔍 Resolved Infrastructure Resources:"
-            echo "  Resource Group: ${ResourceGroupName:-'Not set'}"
-            echo "  Function App: ${FunctionAppName:-'Not set'}"
-            echo "  Static Web App: ${StaticWebAppName:-'Not set'}"
-            echo "  Storage Account: ${StorageAccountName:-'Not set'}"
-            echo "  Key Vault: ${KeyVaultName:-'Not set'}"
-            echo "  User Assigned Identity: ${UserAssignedIdentityName:-'Not set'}"
+              echo "🔍 Resolved Infrastructure Resources:"
+              echo "  Resource Group: ${ResourceGroupName:-'Not set'}"
+              echo "  Function App: ${FunctionAppName:-'Not set'}"
+              echo "  Static Web App: ${StaticWebAppName:-'Not set'}"
+              echo "  Storage Account: ${StorageAccountName:-'Not set'}"
+              echo "  Key Vault: ${KeyVaultName:-'Not set'}"
+              echo "  User Assigned Identity: ${UserAssignedIdentityName:-'Not set'}"
 
-            echo "##vso[task.setvariable variable=FunctionAppName]$FunctionAppName"
-            echo "##vso[task.setvariable variable=ResourceGroupName]$ResourceGroupName"
-            echo "##vso[task.setvariable variable=StorageAccountName]$StorageAccountName"
-            echo "##vso[task.setvariable variable=KeyVaultName]$KeyVaultName"
-            echo "##vso[task.setvariable variable=StaticWebAppName]$StaticWebAppName"
-            echo "##vso[task.setvariable variable=UserAssignedIdentityName]$UserAssignedIdentityName"
-            echo "Loaded infra outputs."
-          displayName: "Load infra outputs"
+              echo "##vso[task.setvariable variable=FunctionAppName]$FunctionAppName"
+              echo "##vso[task.setvariable variable=ResourceGroupName]$ResourceGroupName"
+              echo "##vso[task.setvariable variable=StorageAccountName]$StorageAccountName"
+              echo "##vso[task.setvariable variable=KeyVaultName]$KeyVaultName"
+              echo "##vso[task.setvariable variable=StaticWebAppName]$StaticWebAppName"
+              echo "##vso[task.setvariable variable=UserAssignedIdentityName]$UserAssignedIdentityName"
+              echo "Loaded infra outputs."
+            displayName: "Load infra outputs"
           - script: |
               git fetch origin --prune || true
               if [ "$BUILD_REASON" = "ResourceTrigger" ]; then
