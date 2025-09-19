@@ -200,3 +200,5 @@ stages:
                 echo "🔑 Key Vault Secrets to Add:"
                 echo "  az keyvault secret set --vault-name kv-portfolio-$(Suffix) --name GROQ-API-KEY --value '<your-groq-key>'"
                 echo "  az keyvault secret set --vault-name kv-portfolio-$(Suffix) --name GITHUB-TOKEN --value '<your-github-token>'"
+
+
