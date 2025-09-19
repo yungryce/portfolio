@@ -93,9 +93,9 @@ stages:
               echo "Azure CLI (preinstalled) version:"
               az version --output table || az --version
             displayName: "Show Azure CLI Version"
-          # Deploy infrastructure with static RG and existence check
+
           - task: AzureCLI@2
-            name: deployInfra            # <-- NAME REQUIRED FOR OUTPUTS
+            name: deployInfra
             displayName: "Deploy Bicep Template"
             inputs:
               azureSubscription: '$(AzureServiceConnection)'
@@ -114,7 +114,7 @@ stages:
                 fi
 
                 echo "Starting deployment..."
-                # Run deployment (no redirection to avoid double stream consumption)
+                # Deploy without trying to capture output inline (this causes the "content consumed" error)
                 if ! az deployment group create \
                   --name "infra-$(Build.SourceBranchName)-$(Build.BuildId)" \
                   --resource-group "$(ResourceGroupName)" \
@@ -125,42 +125,56 @@ stages:
                     devOpsRepoUrl='$(DevOpsRepoUrl)' \
                     devOpsBranch='$(Build.SourceBranchName)' \
                   --mode Incremental \
-                  --output none; then
+                  --output json; then
                   echo "❌❌❌ Deployment failed"
                   exit 1
                 fi
 
-                echo "✅ Deployment finished. Fetching outputs..."
+                echo "✅ Deployment completed. Fetching outputs..."
+                
+                # Fetch outputs separately to avoid stream consumption issues
                 OUTPUTS_JSON=$(az deployment group show \
                   --resource-group "$(ResourceGroupName)" \
                   --name "infra-$(Build.SourceBranchName)-$(Build.BuildId)" \
-                  --query "properties.outputs" -o json 2>/dev/null || echo "{}")
-
+                  --query "properties.outputs" \
+                  --output json 2>/dev/null || echo "{}")
+                
+                # Save outputs to file for debugging
                 echo "$OUTPUTS_JSON" > /tmp/deploy_outputs.json
-
-                get_output() {
+                
+                # Helper function to safely extract output values
+                get_output_value() {
+                  local key="$1"
                   if command -v jq >/dev/null 2>&1; then
-                    echo "$OUTPUTS_JSON" | jq -r --arg k "$1" '(.[$k].value // empty)' 2>/dev/null || true
+                    echo "$OUTPUTS_JSON" | jq -r --arg k "$key" '(.[$k].value // empty)' 2>/dev/null || echo ""
                   else
-                    # fallback: try grep/parsing (less robust)
                     echo ""
                   fi
                 }
 
-                # extract outputs (names must match Bicep outputs keys)
-                FUNCTION_APP_NAME=$(get_output functionAppName)
-                STORAGE_ACCOUNT_NAME=$(get_output storageAccountName)
-                KEY_VAULT_NAME=$(get_output keyVaultName)
-                STATIC_WEB_APP_NAME=$(get_output staticWebAppName)
-                UAMI_NAME=$(get_output userAssignedIdentityName)
+                # Extract actual output values from deployment
+                FUNCTION_APP_NAME=$(get_output_value "functionAppName")
+                STORAGE_ACCOUNT_NAME=$(get_output_value "storageAccountName")
+                KEY_VAULT_NAME=$(get_output_value "keyVaultName")
+                STATIC_WEB_APP_NAME=$(get_output_value "staticWebAppName")
+                UAMI_NAME=$(get_output_value "userAssignedIdentityName")
 
-                # fallbacks using naming convention if outputs missing
+                # Fallback to predictable naming convention if outputs are missing
                 : "${FUNCTION_APP_NAME:=fa-portfolio-$(Suffix)}"
                 : "${STORAGE_ACCOUNT_NAME:=stgportfolio$(Suffix)}"
                 : "${KEY_VAULT_NAME:=kv-portfolio-$(Suffix)}"
                 : "${STATIC_WEB_APP_NAME:=swa-portfolio-$(Suffix)}"
                 : "${UAMI_NAME:=uami-portfolio-$(Suffix)}"
 
+                # Display retrieved outputs for debugging
+                echo "📊 Retrieved outputs:"
+                echo "  FunctionAppName: ${FUNCTION_APP_NAME}"
+                echo "  StorageAccountName: ${STORAGE_ACCOUNT_NAME}"
+                echo "  KeyVaultName: ${KEY_VAULT_NAME}"
+                echo "  StaticWebAppName: ${STATIC_WEB_APP_NAME}"
+                echo "  UserAssignedIdentityName: ${UAMI_NAME}"
+
+                # Set pipeline output variables for consumption by other pipelines
                 echo "Setting pipeline output variables..."
                 echo "##vso[task.setvariable variable=FunctionAppName;isOutput=true]${FUNCTION_APP_NAME}"
                 echo "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$(ResourceGroupName)"
