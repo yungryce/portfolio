@@ -125,7 +125,7 @@ stages:
                     devOpsRepoUrl='$(DevOpsRepoUrl)' \
                     devOpsBranch='$(Build.SourceBranchName)' \
                   --mode Incremental \
-                  --output none; then
+                  --output json; then
                   echo "❌❌❌ Deployment failed"
                   exit 1
                 fi
