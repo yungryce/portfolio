@@ -30,7 +30,7 @@ variables:
   - name: Location
     value: 'westeurope'
   - name: ResourceGroupName
-    value: 'RGportfolioWestEU'
+    value: 'portfolioWestEURG'
   - name: Suffix
     value: 'dev000'  # Stable environment suffix (keep constant for this environment)
   - name: DevOpsRepoUrl
