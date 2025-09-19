@@ -65,6 +65,55 @@ pr:
 stages:
 
   # -----------------------------
+  # Infrastructure Info & Change Detection
+  # -----------------------------
+  - stage: Infrastructure_Info
+    displayName: "Infrastructure Info & Change Detection"
+    jobs:
+      - job: log_infrastructure_info
+        displayName: "Log Infrastructure Resources"
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+            fetchDepth: "0"
+          
+          # Load and display infrastructure outputs
+          - script: |
+              set -e
+              echo "=== Infrastructure Resource Names ==="
+              
+              file="infra/outputs.env"
+              if [ -f "$file" ]; then
+                echo "📋 Loading from $file:"
+                cat "$file"
+                echo ""
+                
+                # Source the file to get variables
+                . "$file"
+                
+                echo "🔍 Resolved Infrastructure Resources:"
+                echo "  Resource Group: ${ResourceGroupName:-'Not set'}"
+                echo "  Function App: ${FunctionAppName:-'Not set'}"
+                echo "  Static Web App: ${StaticWebAppName:-'Not set'}"
+                echo "  Storage Account: ${StorageAccountName:-'Not set'}"
+                echo "  Key Vault: ${KeyVaultName:-'Not set'}"
+                echo "  User Assigned Identity: ${UserAssignedIdentityName:-'Not set'}"
+                
+                # Set pipeline variables for other stages to use
+                echo "##vso[task.setvariable variable=FunctionAppName;isOutput=true]$FunctionAppName"
+                echo "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$ResourceGroupName"
+                echo "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]$StaticWebAppName"
+                echo "##vso[task.setvariable variable=StorageAccountName;isOutput=true]$StorageAccountName"
+                echo "##vso[task.setvariable variable=KeyVaultName;isOutput=true]$KeyVaultName"
+                echo "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]$UserAssignedIdentityName"
+              else
+                echo "❌ Missing $file. Run infra-run.sh locally and commit it."
+                echo "Using fallback values..."
+            name: infraInfo
+            displayName: "Load and log infrastructure info"
+            
+  # -----------------------------
   # Backend: Build & Package
   # -----------------------------
   - stage: Backend_Build_Package
