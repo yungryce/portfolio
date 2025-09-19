@@ -6,7 +6,7 @@
 # - Path-based conditions: only runs stages when relevant files change
 # - Infrastructure deployment is handled by azure-pipelines-infra.yml
 # Notes:
-# - Deploys on branch 'staging' and 'feature/artifact' temporaily (builds on PRs too)
+# - Deploys on branch 'main' temporaily (builds on PRs too)
 # - Uses a stable Angular output path: 'dist/'
 # - Requires infrastructure to be deployed first via azure-pipelines-infra.yml
 # - Requires:
@@ -154,7 +154,7 @@ stages:
     jobs:
       - deployment: deploy_backend
         displayName: "Deploy Functions"
-        environment: "staging"
+        environment: "portfolio-dev"
         strategy:
           runOnce:
             deploy:
