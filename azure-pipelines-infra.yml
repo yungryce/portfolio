@@ -116,7 +116,7 @@ stages:
                 echo "Starting deployment..."
                 # Run deployment (no redirection to avoid double stream consumption)
                 if ! az deployment group create \
-                  --name main \
+                  --name "infra-$(Build.SourceBranchName)-$(Build.BuildId)" \
                   --resource-group "$(ResourceGroupName)" \
                   --template-file infra/main.bicep \
                   --parameters \
@@ -125,7 +125,7 @@ stages:
                     devOpsRepoUrl='$(DevOpsRepoUrl)' \
                     devOpsBranch='$(Build.SourceBranchName)' \
                   --mode Incremental \
-                  --output json; then
+                  --output none; then
                   echo "❌❌❌ Deployment failed"
                   exit 1
                 fi
@@ -133,7 +133,7 @@ stages:
                 echo "✅ Deployment finished. Fetching outputs..."
                 OUTPUTS_JSON=$(az deployment group show \
                   --resource-group "$(ResourceGroupName)" \
-                  --name main \
+                  --name "infra-$(Build.SourceBranchName)-$(Build.BuildId)" \
                   --query "properties.outputs" -o json 2>/dev/null || echo "{}")
 
                 echo "$OUTPUTS_JSON" > /tmp/deploy_outputs.json
@@ -185,7 +185,7 @@ stages:
                 # Get deployment outputs
                 OUTPUTS=$(az deployment group show \
                   --resource-group "$(ResourceGroupName)" \
-                  --name main \
+                  --name "infra-$(Build.SourceBranchName)-$(Build.BuildId)" \
                   --query "properties.outputs" \
                   --output json 2>/dev/null || echo "{}")
 
