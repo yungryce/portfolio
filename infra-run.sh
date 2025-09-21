@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Defaults (override by exporting before running)
-ResourceGroupName="${ResourceGroupName:-portfolioWestEURG}"
+ResourceGroupName="${ResourceGroupName:-RGportfolioWestEU}"
 Location="${Location:-westeurope}"
 Suffix="${Suffix:-dev000}"
 
@@ -78,5 +78,3 @@ echo "Preview:"
 cat "$ENV_FILE"
 
 echo ""
-echo "Next:"
-echo "  git add $ENV_FILE && git commit -m 'chore(infra): update outputs' && git push"
