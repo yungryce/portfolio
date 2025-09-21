@@ -74,3 +74,4 @@ __blobstorage__/
 __queuestorage__/
 resume/
 azure-pipelines-infra.yml
+!infra/outputs.env
