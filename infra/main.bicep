@@ -9,7 +9,7 @@ param suffix string
 param devOpsRepoUrl string = 'https://dev.azure.com/chxgbx/portfolio/_git/portfolio'
 
 @description('Branch to build/deploy from')
-param devOpsBranch string = 'feature/infra'
+param devOpsBranch string = 'main'
 
 @description('Application Insights Authentication String (Authorization=AAD)')
 param appInsightsAuthString string = 'Authorization=AAD'
