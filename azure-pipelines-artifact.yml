@@ -66,18 +66,18 @@ pr:
 stages:
 
   # -----------------------------
-  # Backend: Build & Package
+  # Infrastructure Outputs
   # -----------------------------
-  - stage: Backend_Build_Package
-    displayName: "Backend (Functions) — Build & Package"
+  - stage: Load_Infrastructure_Outputs
+    displayName: "Load Infrastructure Outputs"
     jobs:
-      - job: check_backend_changes
-        displayName: "Check Backend Changes"
+      - job: load_infra_outputs
+        displayName: "Load Infrastructure Outputs"
         pool:
           vmImage: 'ubuntu-latest'
         steps:
           - checkout: self
-            fetchDepth: "0"
+            fetchDepth: "1"
           - script: |
               set -e
               file="infra/outputs.env"
@@ -95,25 +95,55 @@ stages:
               echo "  Key Vault: ${KeyVaultName:-'Not set'}"
               echo "  User Assigned Identity: ${UserAssignedIdentityName:-'Not set'}"
 
-              echo "##vso[task.setvariable variable=FunctionAppName]$FunctionAppName"
-              echo "##vso[task.setvariable variable=ResourceGroupName]$ResourceGroupName"
-              echo "##vso[task.setvariable variable=StorageAccountName]$StorageAccountName"
-              echo "##vso[task.setvariable variable=KeyVaultName]$KeyVaultName"
-              echo "##vso[task.setvariable variable=StaticWebAppName]$StaticWebAppName"
-              echo "##vso[task.setvariable variable=UserAssignedIdentityName]$UserAssignedIdentityName"
+              # Set pipeline-level variables for all subsequent stages
+              echo "##vso[task.setvariable variable=FunctionAppName;isOutput=true]$FunctionAppName"
+              echo "##vso[task.setvariable variable=ResourceGroupName;isOutput=true]$ResourceGroupName"
+              echo "##vso[task.setvariable variable=StorageAccountName;isOutput=true]$StorageAccountName"
+              echo "##vso[task.setvariable variable=KeyVaultName;isOutput=true]$KeyVaultName"
+              echo "##vso[task.setvariable variable=StaticWebAppName;isOutput=true]$StaticWebAppName"
+              echo "##vso[task.setvariable variable=UserAssignedIdentityName;isOutput=true]$UserAssignedIdentityName"
               echo "Loaded infra outputs."
+            name: loadOutputs
             displayName: "Load infra outputs"
+
+  # -----------------------------
+  # Backend: Build & Package
+  # -----------------------------
+  - stage: Backend_Build_Package
+    displayName: "Backend (Functions) — Build & Package"
+    dependsOn: Load_Infrastructure_Outputs
+    jobs:
+      - job: check_backend_changes
+        displayName: "Check Backend Changes"
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+            fetchDepth: "0"
           - script: |
               git fetch origin --prune || true
               if [ "$BUILD_REASON" = "ResourceTrigger" ]; then
                 echo "Triggered by infra pipeline; forcing backend deploy"
                 echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
-              elif git diff --name-only origin/main...HEAD | grep -E "^api/"; then
-                echo "Backend changes detected"
-                echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
               else
-                echo "No backend changes detected"
-                echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]false"
+                # Check if origin/main exists and if we can compare
+                if git rev-parse --verify origin/main >/dev/null 2>&1; then
+                  # Check for differences with origin/main
+                  changed_files=$(git diff --name-only origin/main...HEAD || echo "")
+                  if [ -z "$changed_files" ]; then
+                    echo "No diff with origin/main found - treating as first-time deployment"
+                    echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
+                  elif echo "$changed_files" | grep -E "^api/"; then
+                    echo "Backend changes detected: $(echo "$changed_files" | grep -E "^api/" | tr '\n' ' ')"
+                    echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
+                  else
+                    echo "No backend changes detected"
+                    echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]false"
+                  fi
+                else
+                  echo "origin/main not found - treating as first-time deployment"
+                  echo "##vso[task.setvariable variable=BackendChanged;isOutput=true]true"
+                fi
               fi
             name: checkChanges
             displayName: "Check for backend changes"
@@ -167,7 +197,16 @@ stages:
   # -----------------------------
   - stage: Backend_Deploy
     displayName: "Backend (Functions)"
-    dependsOn: Backend_Build_Package
+    dependsOn: 
+      - Load_Infrastructure_Outputs
+      - Backend_Build_Package
+    variables:
+      FunctionAppName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.FunctionAppName']]
+      ResourceGroupName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.ResourceGroupName']]
+      StorageAccountName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.StorageAccountName']]
+      KeyVaultName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.KeyVaultName']]
+      StaticWebAppName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.StaticWebAppName']]
+      UserAssignedIdentityName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.UserAssignedIdentityName']]
     condition: >-
       and(
         succeeded(),
@@ -187,24 +226,6 @@ stages:
               steps:
                 - checkout: self
                   fetchDepth: "1"
-
-                # Load infra outputs from repo and set pipeline variables
-                - script: |
-                    set -e
-                    file="infra/outputs.env"
-                    if [ ! -f "$file" ]; then
-                      echo "Missing $file. Run infra-run.sh locally and commit it."
-                      exit 1
-                    fi
-                    . "$file"
-                    echo "##vso[task.setvariable variable=FunctionAppName]$FunctionAppName"
-                    echo "##vso[task.setvariable variable=ResourceGroupName]$ResourceGroupName"
-                    echo "##vso[task.setvariable variable=StorageAccountName]$StorageAccountName"
-                    echo "##vso[task.setvariable variable=KeyVaultName]$KeyVaultName"
-                    echo "##vso[task.setvariable variable=StaticWebAppName]$StaticWebAppName"
-                    echo "##vso[task.setvariable variable=UserAssignedIdentityName]$UserAssignedIdentityName"
-                    echo "Loaded infra outputs."
-                  displayName: "Load infra outputs"
 
                 - script: |
                     echo "FunctionAppName=$(FunctionAppName)"
@@ -242,7 +263,14 @@ stages:
   # -----------------------------
   - stage: Frontend_Deploy_SWA
     displayName: "Frontend (Angular) — Deploy to Azure Static Web Apps"
-    dependsOn: []
+    dependsOn: Load_Infrastructure_Outputs
+    variables:
+      FunctionAppName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.FunctionAppName']]
+      ResourceGroupName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.ResourceGroupName']]
+      StorageAccountName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.StorageAccountName']]
+      KeyVaultName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.KeyVaultName']]
+      StaticWebAppName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.StaticWebAppName']]
+      UserAssignedIdentityName: $[stageDependencies.Load_Infrastructure_Outputs.load_infra_outputs.outputs['loadOutputs.UserAssignedIdentityName']]
     condition: >-
       and(
         succeeded(),
@@ -264,13 +292,25 @@ stages:
               if [ "$BUILD_REASON" = "ResourceTrigger" ]; then
                 echo "Triggered by infra pipeline; forcing frontend deploy"
                 echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
-              elif git diff --name-only origin/main...HEAD | \
-                  grep -E "^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)"; then
-                echo "Frontend changes detected"
-                echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
               else
-                echo "No frontend changes detected"
-                echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]false"
+                # Check if origin/main exists and if we can compare
+                if git rev-parse --verify origin/main >/dev/null 2>&1; then
+                  # Check for differences with origin/main
+                  changed_files=$(git diff --name-only origin/main...HEAD || echo "")
+                  if [ -z "$changed_files" ]; then
+                    echo "No diff with origin/main found - treating as first-time deployment"
+                    echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
+                  elif echo "$changed_files" | grep -E "^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)"; then
+                    echo "Frontend changes detected: $(echo "$changed_files" | grep -E "^(src/|angular\.json|package\.json|package-lock\.json|tsconfig\.json|staticwebapp\.config\.json)" | tr '\n' ' ')"
+                    echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
+                  else
+                    echo "No frontend changes detected"
+                    echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]false"
+                  fi
+                else
+                  echo "origin/main not found - treating as first-time deployment"
+                  echo "##vso[task.setvariable variable=FrontendChanged;isOutput=true]true"
+                fi
               fi
             name: checkChanges
             displayName: "Check for frontend changes"
