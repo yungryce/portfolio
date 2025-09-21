@@ -214,7 +214,7 @@ stages:
           eq(variables['Build.SourceBranch'], 'refs/heads/main'),
           eq(variables['Build.Reason'], 'ResourceTrigger')
         ),
-        eq(stageDependencies.Backend_Build_Package.check_backend_changes.outputs['checkChanges.BackendChanged'], 'true')
+        eq(dependencies.Backend_Build_Package.outputs['check_backend_changes.checkChanges.BackendChanged'], 'true')
       )
     jobs:
       - deployment: deploy_backend
@@ -352,7 +352,7 @@ stages:
                 - task: AzureStaticWebApp@0
                   displayName: "Deploy to Azure Static Web Apps"
                   inputs:
-                    azure_static_web_apps_api_token: '$(SWA_TOKEN)'
+                    azure_static_web_apps_api_token: '$(SWA _TOKEN)'
                     workingDirectory: '$(Build.SourcesDirectory)'
                     action: 'upload'
                     app_location: 'dist/browser'
