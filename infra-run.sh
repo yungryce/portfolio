@@ -78,3 +78,5 @@ echo "Preview:"
 cat "$ENV_FILE"
 
 echo ""
+echo "Next:"
+echo "  git add $ENV_FILE && git commit -m 'chore(infra): update outputs' && git push"
