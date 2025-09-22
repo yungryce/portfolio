@@ -352,7 +352,7 @@ stages:
                 - task: AzureStaticWebApp@0
                   displayName: "Deploy to Azure Static Web Apps"
                   inputs:
-                    azure_static_web_apps_api_token: '$(SWA _TOKEN)'
+                    azure_static_web_apps_api_token: '$(SWA_TOKEN)'
                     workingDirectory: '$(Build.SourcesDirectory)'
                     action: 'upload'
                     app_location: 'dist/browser'
