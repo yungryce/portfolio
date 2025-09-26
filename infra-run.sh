@@ -4,7 +4,7 @@ set -euo pipefail
 # Defaults (override by exporting before running)
 ResourceGroupName="${ResourceGroupName:-RGportfolioWestEU}"
 Location="${Location:-westeurope}"
-Suffix="${Suffix:-dev000}"
+Suffix="${Suffix:-dev01}"
 
 echo "RG=$ResourceGroupName | Location=$Location | Suffix=$Suffix"
 

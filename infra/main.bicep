@@ -167,13 +167,11 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-07-01' = {
 }
 
 // ---------- Private DNS Zones & Links ----------
-// Normalize key vault DNS suffix because some environments may return a leading '.' in keyvaultDns
-var keyVaultDnsSuffix = startsWith(environment().suffixes.keyvaultDns, '.') ? substring(environment().suffixes.keyvaultDns, 1) : environment().suffixes.keyvaultDns
+// Normalize key vault DNS suffix because some environments may return a leading '.' in keyvaultDns or 'vault.'
 var privateDnsZoneNames = [
   'privatelink.blob.${environment().suffixes.storage}'
   'privatelink.queue.${environment().suffixes.storage}'
   'privatelink.table.${environment().suffixes.storage}'
-  'privatelink.vaultcore.${keyVaultDnsSuffix}'
 ]
 
 resource privateDnsZones 'Microsoft.Network/privateDnsZones@2024-06-01' = [for zoneName in privateDnsZoneNames: {
@@ -182,19 +180,40 @@ resource privateDnsZones 'Microsoft.Network/privateDnsZones@2024-06-01' = [for z
   tags: tags
 }]
 
+// --- Key Vault Private DNS zone (explicit) ---
+var keyVaultDnsSuffix = replace(toLower(environment().suffixes.keyvaultDns), 'vault.', '')
+var keyVaultPrivateZoneName = 'privatelink.vaultcore.${startsWith(keyVaultDnsSuffix, '.') ? substring(keyVaultDnsSuffix, 1) : keyVaultDnsSuffix}'
+
+
+resource kvPrivateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = {
+  name: keyVaultPrivateZoneName
+  location: 'global'
+  tags: tags
+}
+ 
+
 resource privateDnsZoneLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = [for (zoneName, i) in privateDnsZoneNames: {
   name: '${zoneName}/${vnetName}-link'
   location: 'global'
   properties: {
-    virtualNetwork: {
-      id: vnet.id
-    }
+    virtualNetwork: { id: vnet.id }
     registrationEnabled: false
   }
   dependsOn: [
     privateDnsZones[i]
   ]
 }]
+
+// Explicit KV zone link
+resource kvPrivateDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
+  parent: kvPrivateDnsZone
+  name: '${vnetName}-link'
+  location: 'global'
+  properties: {
+    virtualNetwork: { id: vnet.id }
+    registrationEnabled: false
+  }
+}
 
 // ---------- Key Vault ----------
 resource keyVault 'Microsoft.KeyVault/vaults@2024-12-01-preview' = {
@@ -245,12 +264,12 @@ resource functionApp 'Microsoft.Web/sites@2024-11-01' = {
   }
   properties: {
     serverFarmId: appServicePlan.id
+    keyVaultReferenceIdentity: uami.id
     httpsOnly: true
     siteConfig: {
       alwaysOn: false
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
-      keyVaultReferenceIdentity: uami.id
       cors: {
         allowedOrigins: [ 'https://${staticWebAppName}.azurestaticapps.net' ]
         supportCredentials: false
@@ -277,9 +296,6 @@ resource functionApp 'Microsoft.Web/sites@2024-11-01' = {
       }
     }
   }
-  dependsOn: [
-    keyVault
-  ]
 }
 
 // ---------- Function App VNet Integration ----------
@@ -293,24 +309,6 @@ resource functionAppVnetIntegration 'Microsoft.Web/sites/networkConfig@2024-11-0
   dependsOn: [
     vnet
   ]
-}
-
-resource functionAppAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
-  parent: functionApp
-  name: 'appsettings'
-  properties: {
-    WEBSITE_VNET_ROUTE_ALL: '1'
-    // WEBSITE_CONTENTOVERVNET: '1'
-    APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.properties.ConnectionString
-    APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
-    AzureWebJobsStorage__credential: 'managedidentity'
-    AzureWebJobsStorage__blobServiceUri: 'https://${storageAccountName}.blob.${environment().suffixes.storage}'
-    AzureWebJobsStorage__queueServiceUri: 'https://${storageAccountName}.queue.${environment().suffixes.storage}'
-    AzureWebJobsStorage__tableServiceUri: 'https://${storageAccountName}.table.${environment().suffixes.storage}'
-    AzureWebJobsStorage__ClientId: uami.properties.clientId
-    GROQ_API_KEY: '@Microsoft.KeyVault(VaultName=${kvName};SecretName=GROQ-API-KEY)'
-    GITHUB_TOKEN: '@Microsoft.KeyVault(VaultName=${kvName};SecretName=GITHUB-TOKEN)'
-  }
 }
 
 // ---------- Private Endpoints ----------
@@ -407,13 +405,14 @@ resource peKeyVault 'Microsoft.Network/privateEndpoints@2024-07-01' = {
     } ]
   }
 }
+
 resource peKeyVaultDns 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-07-01' = {
   parent: peKeyVault
   name: 'default'
   properties: {
     privateDnsZoneConfigs: [ {
       name: 'vault'
-      properties: { privateDnsZoneId: privateDnsZones[3].id }
+      properties: { privateDnsZoneId: kvPrivateDnsZone.id }
     } ]
   }
 }
@@ -523,6 +522,32 @@ resource raKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.kvSecretsUser)
     principalType: 'ServicePrincipal'
   }
+}
+
+// ---------- Function App Application Settings ----------
+// Note: Key Vault references require the Function App to have a managed identity with 'Key Vault
+resource functionAppAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
+  parent: functionApp
+  name: 'appsettings'
+  properties: {
+    WEBSITE_VNET_ROUTE_ALL: '1'
+    // WEBSITE_CONTENTOVERVNET: '1'
+    APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.properties.ConnectionString
+    APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
+    AzureWebJobsStorage__credential: 'managedidentity'
+    AzureWebJobsStorage__blobServiceUri: 'https://${storageAccountName}.blob.${environment().suffixes.storage}'
+    AzureWebJobsStorage__queueServiceUri: 'https://${storageAccountName}.queue.${environment().suffixes.storage}'
+    AzureWebJobsStorage__tableServiceUri: 'https://${storageAccountName}.table.${environment().suffixes.storage}'
+    AzureWebJobsStorage__ClientId: uami.properties.clientId
+    GROQ_API_KEY: '@Microsoft.KeyVault(VaultName=${kvName};SecretName=GROQ-API-KEY)'
+    GITHUB_TOKEN: '@Microsoft.KeyVault(VaultName=${kvName};SecretName=GITHUB-TOKEN)'
+  }
+  dependsOn: [
+    raKvSecretsUser
+    peKeyVault
+    peKeyVaultDns
+    kvPrivateDnsZoneLink
+  ]
 }
 
 // ---------- Outputs ----------
