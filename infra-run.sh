@@ -4,7 +4,7 @@ set -euo pipefail
 # Defaults (override by exporting before running)
 ResourceGroupName="${ResourceGroupName:-RGportfolioWestEU}"
 Location="${Location:-westeurope}"
-Suffix="${Suffix:-dev000}"
+Suffix="${Suffix:-dev01}"
 
 echo "RG=$ResourceGroupName | Location=$Location | Suffix=$Suffix"
 
@@ -77,6 +77,52 @@ echo "Wrote $ENV_FILE"
 echo "Preview:"
 cat "$ENV_FILE"
 
+# Generate new SWA deployment token using the correct variable
+echo ""
+echo "Fetching SWA deployment token..."
+SWA_TOKEN=$(az staticwebapp secrets list \
+  --name "$StaticWebAppName" \
+  --resource-group "$ResourceGroupName" \
+  --query properties.apiKey \
+  -o tsv)
+
+echo "SWA deployment token: $SWA_TOKEN"
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📋 AZURE DEVOPS PIPELINE SETUP REMINDERS"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "1️⃣  UPDATE VARIABLE GROUP:"
+echo "   • Go to Azure DevOps → Pipelines → Library → portfolio-secrets"
+echo "   • Update SWA_TOKEN with: $SWA_TOKEN"
+echo "   • Save the variable group"
+echo ""
+echo "2️⃣  GRANT SERVICE PRINCIPAL PERMISSIONS (ONE-TIME SETUP):"
+echo "   If your pipeline fails with 403 errors like 'publishxml/action' or 'config/list/action',"
+echo "   the Azure DevOps service principal needs Contributor access to this resource group."
+echo ""
+echo "   Run this command ONCE (manually, not in automation):"
+echo "   ┌────────────────────────────────────────────────────────────────────────────────────┐"
+echo "   │ az role assignment create \\                                                         │"
+echo "   │   --assignee-object-id \"04cf7782-5697-4f07-b888-8887edbfeae6\" \\                    │"
+echo "   │   --assignee-principal-type ServicePrincipal \\                                      │"
+echo "   │   --role \"Contributor\" \\                                                            │"
+echo "   │   --scope \"/subscriptions/105a58e6-5ddb-4fca-a952-fc0f81314fdc/resourceGroups/$ResourceGroupName\" │"
+echo "   └────────────────────────────────────────────────────────────────────────────────────┘"
+echo ""
+echo "   To verify the assignment:"
+echo "   ┌────────────────────────────────────────────────────────────────────────────────────┐"
+echo "   │ az role assignment list \\                                                           │"
+echo "   │   --assignee-object-id \"04cf7782-5697-4f07-b888-8887edbfeae6\" \\                    │"
+echo "   │   --scope \"/subscriptions/105a58e6-5ddb-4fca-a952-fc0f81314fdc/resourceGroups/$ResourceGroupName\" \\  │"
+echo "   │   -o table                                                                           │"
+echo "   └────────────────────────────────────────────────────────────────────────────────────┘"
+echo ""
+echo "   Note: The Object ID '04cf7782-5697-4f07-b888-8887edbfeae6' is from your pipeline error logs."
+echo "        This is your Azure DevOps service connection's service principal, not your personal account."
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "Next:"
 echo "  git add $ENV_FILE && git commit -m 'chore(infra): update outputs' && git push"

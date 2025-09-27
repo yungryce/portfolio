@@ -249,11 +249,12 @@ stages:
                         exit 1
                       fi
 
-                - task: AzureFunctionApp@1
-                  displayName: "Deploy Azure Function App"
+                - task: AzureFunctionApp@2
+                  displayName: "Deploy Azure Function App (Flex)"
                   inputs:
                     azureSubscription: '$(AzureServiceConnection)'
                     appType: 'functionAppLinux'
+                    isFlexConsumption: true
                     appName: '$(FunctionAppName)'
                     package: '$(Pipeline.Workspace)/api/api.zip'
                     resourceGroupName: '$(ResourceGroupName)'
