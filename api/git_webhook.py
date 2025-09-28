@@ -4,11 +4,12 @@ import os
 import json
 
 USERNAME = "yungryce"
+WEBHOOK_URL = "https://yellow-water-06e121803.1.azurestaticapps.net"
+
 try:
     with open('./local.settings.json') as f:
         settings = json.load(f)
         GITHUB_TOKEN = settings['Values'].get('GITHUB_TOKEN')
-        WEBHOOK_URL = settings['Values'].get('WEBHOOK_URL') # Needs repo + admin:repo_hook scopes
 except Exception:
     pass
 
