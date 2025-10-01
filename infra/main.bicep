@@ -539,6 +539,7 @@ resource functionAppAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
     AzureWebJobsStorage__queueServiceUri: 'https://${storageAccountName}.queue.${environment().suffixes.storage}'
     AzureWebJobsStorage__tableServiceUri: 'https://${storageAccountName}.table.${environment().suffixes.storage}'
     AzureWebJobsStorage__ClientId: uami.properties.clientId
+    AZURE_CLIENT_ID: uami.properties.clientId
     GROQ_API_KEY: '@Microsoft.KeyVault(VaultName=${kvName};SecretName=GROQ-API-KEY)'
     GITHUB_TOKEN: '@Microsoft.KeyVault(VaultName=${kvName};SecretName=GITHUB-TOKEN)'
   }
