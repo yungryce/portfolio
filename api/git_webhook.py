@@ -4,7 +4,7 @@ import os
 import json
 
 USERNAME = "yungryce"
-WEBHOOK_URL = "https://yellow-water-06e121803.1.azurestaticapps.net"
+WEBHOOK_URL = "https://blue-field-058d36703.2.azurestaticapps.net"
 
 try:
     with open('./local.settings.json') as f:
