@@ -11,9 +11,6 @@ param devOpsRepoUrl string = 'https://dev.azure.com/chxgbx/portfolio/_git/portfo
 @description('Branch to build/deploy from')
 param devOpsBranch string = 'main'
 
-@description('Application Insights Authentication String (Authorization=AAD)')
-param appInsightsAuthString string = 'Authorization=AAD'
-
 @description('Function App runtime: python | dotnet-isolated | node | java | powerShell')
 @allowed(['python','dotnet-isolated','node','java','powerShell'])
 param functionAppRuntime string = 'python'
@@ -75,12 +72,6 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2025-02-01' = {
   tags: tags
   properties: {
     retentionInDays: 30
-    features: {
-      enableLogAccessUsingOnlyResourcePermissions: true
-      searchVersion: 1
-    }
-    publicNetworkAccessForIngestion: 'Disabled'
-    publicNetworkAccessForQuery: 'Disabled'
     sku: { name: 'PerGB2018' }
   }
 }
@@ -533,7 +524,7 @@ resource functionAppAppSettings 'Microsoft.Web/sites/config@2024-11-01' = {
     WEBSITE_VNET_ROUTE_ALL: '1'
     // WEBSITE_CONTENTOVERVNET: '1'
     APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsights.properties.ConnectionString
-    APPLICATIONINSIGHTS_AUTHENTICATION_STRING: appInsightsAuthString
+    APPLICATIONINSIGHTS_AUTHENTICATION_STRING: 'ClientId=${uami.properties.clientId};Authorization=AAD'
     AzureWebJobsStorage__credential: 'managedidentity'
     AzureWebJobsStorage__blobServiceUri: 'https://${storageAccountName}.blob.${environment().suffixes.storage}'
     AzureWebJobsStorage__queueServiceUri: 'https://${storageAccountName}.queue.${environment().suffixes.storage}'
