@@ -4,7 +4,7 @@
     "logLevel": {
       "default": "Warning",
       "Function": "Information",
-      "worker": "Warning",
+      "Worker": "Warning",
       "Host": "Warning",
       "Host.Aggregator": "Information",
       "Host.Results": "Information"
