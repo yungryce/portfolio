@@ -19,13 +19,7 @@ Avoid generic advice ("write tests", "handle errors") - focus on THIS project's 
 Document only discoverable patterns, not aspirational practices
 Reference key files/directories that exemplify important patterns
 
-Refactoring Guide:
-- `api` returns repo bundles (per repo or all repos) with which fields are dynamically mapped for `src/app/projects`
-- `src/app/projects`: This displays repositories as cards with structured data fields for all returned repository in bundles. This consumes `api/function-app.get_repo_bundle`. Depracating `src/projects-old`
-- `src/app/projects/project`: This displays a single repository bundle content. This cnsumes `api/function-app.get_single_repo_bundle. Depracating `src/projects-old/project-about`
-- `src/assistant`: This displays returned ai response. This consumes `api/function-app.portfolio_query`. Depracating `src/portfolio-assistant`
 
-Update .github/copilot-instructions.md for the user, then ask for feedback on any unclear or incomplete sections to iterate.
 
 
 
