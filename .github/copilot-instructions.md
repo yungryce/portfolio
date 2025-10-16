@@ -86,6 +86,36 @@ Concise, codebase-specific guidance.
 - **repoContext**: Can be missing or partial. Use safe defaults for `type`, `description`, and `tech_stack`.
 - **CORS**: Ensure proper settings in `api/local.settings.json` when running locally.
 
+## Architecture Evolution (October 2025)
+⚠️ **Migration in Progress**: Moving from Durable Functions to queue-based microservices.
+
+### Current State (Temporary)
+- **Orchestration**: Azure Durable Functions (synchronous, blocks on training)
+- **Workers**: Embedded activities in `function_app.py`
+- **Known Issues**: 60-120s latency, Azure lock-in, monolithic scaling
+
+### Target State (See `.github/plans/`)
+- **Gateway**: FastAPI (async, returns immediately)
+- **Workers**: Independent Docker containers (sync, merge, training)
+- **Queues**: Redis/Service Bus (cloud-agnostic messaging)
+- **Benefits**: Sub-5s latency, independent scaling, portable
+
+### Migration Reference
+- **Architecture Plan**: `.github/plans/QUEUE-ARCHITECTURE-PLAN.md`
+- **Implementation Backlog**: `.github/plans/QUEUE-MIGRATION-BACKLOG.md` (29 issues, 6 weeks)
+- **Rollback Procedures**: `.github/plans/ROLLBACK-PLAYBOOK.md`
+- **Concern Validation**: `.github/plans/CONCERN-VALIDATION.md`
+
+### Development Guidelines During Migration
+- **Feature Flags**: Check `ENABLE_QUEUE_MODE`, `QUEUE_TRAFFIC_PCT` before routing
+- **Dual Support**: Both Durable Functions and queue-based paths must work (Weeks 1-5)
+- **Cache Contract**: Single source of truth, unchanged across architectures
+- **Testing**: Always test both code paths until Durable Functions removed (Week 6)
+
+### Archived Documentation
+- **Phase 1 Plans**: `.github/archive/project-phase1/` (historical reference only)
+- **Status**: Superseded by queue-based design (October 12, 2025)
+
 ## Open Questions / Feedback Needed
 - Confirm if Markdown rendering should standardize on `marked` + `DOMPurify` or another library.
 - Verify if all build/test commands are accurate and up-to-date.
