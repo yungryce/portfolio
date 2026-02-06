@@ -1,0 +1,26 @@
+<header class="navbar">
+  <div class="container flex justify-between items-center py-4">
+    <div class="brand-link">
+      <span class="brand-text">Chigbu Joshua</span>
+    </div>
+    <nav class="flex items-center gap-4">
+      <ul class="flex gap-6">
+        <li><a href="https://foliohive.com/ai?username=yungryce" target="_blank" rel="noopener noreferrer">AI Overview</a></li>
+        <li><a href="https://foliohive.com/projects?username=yungryce" target="_blank" rel="noopener noreferrer">Repositories</a></li>
+        <li><a href="https://foliohive.com/profile?username=yungryce" target="_blank" rel="noopener noreferrer">Profile</a></li>
+      </ul>
+      <button
+        type="button"
+        class="theme-toggle"
+        (click)="toggleTheme()"
+        [attr.aria-pressed]="theme === 'dark'"
+        [attr.aria-label]="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+        <i [class]="theme === 'dark' ? 'fa-solid fa-moon' : 'fa-solid fa-sun'"></i>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<div class="container bg-[var(--bg)] text-[var(--fg)]">
+  <router-outlet />
+</div>
