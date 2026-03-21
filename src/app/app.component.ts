@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { environment } from '../environments/environment';
 
 @Component({
   selector: 'app-root',
@@ -10,9 +11,11 @@ import { RouterOutlet } from '@angular/router';
 export class App implements OnInit {
   title = 'Portfolio';
   theme: 'light' | 'dark' = 'light';
+  foliohiveUrl: string = '';
 
   ngOnInit(): void {
     this.initTheme();
+    this.foliohiveUrl = `${environment.foliohiveUrl}/?username=${environment.foliohiveUsername}`;
   }
 
   private initTheme(): void {
