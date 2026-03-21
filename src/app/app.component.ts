@@ -13,6 +13,7 @@ export class App implements OnInit {
   theme: 'light' | 'dark' = 'light';
   foliohiveUrl: string = '';
 
+  
   ngOnInit(): void {
     this.initTheme();
     this.foliohiveUrl = `${environment.foliohiveUrl}/?username=${environment.foliohiveUsername}`;
